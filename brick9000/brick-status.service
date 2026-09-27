@@ -1,0 +1,16 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# A user service (not system) so wlopm can reach the labwc session.
+[Unit]
+Description=brick-status board daemon
+After=graphical-session.target
+
+[Service]
+WorkingDirectory=%h/brick-cicd-config/brick-status
+ExecStart=/usr/bin/python3 -m brick_status
+EnvironmentFile=-%h/.config/brick-status/env
+Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

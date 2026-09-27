@@ -1,0 +1,5 @@
+# ~/.config/labwc/autostart: runs alongside /etc/xdg/labwc/autostart
+# (labwc-pi starts labwc with -m, which merges both).
+chromium --kiosk --noerrdialogs --disable-infobars --no-first-run \
+  --disable-session-crashed-bubble --password-store=basic \
+  --ozone-platform=wayland http://127.0.0.1:8765 &

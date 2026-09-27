@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brick-status</title>
+<link rel="stylesheet" href="/static/vendor/xterm.css">
+<style>
+  @font-face { font-family: "Barlow Condensed"; font-weight: 500; src: url(/static/vendor/fonts/barlow-condensed-500.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow Condensed"; font-weight: 600; src: url(/static/vendor/fonts/barlow-condensed-600.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow Condensed"; font-weight: 800; src: url(/static/vendor/fonts/barlow-condensed-800.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url(/static/vendor/fonts/ibm-plex-mono-400.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 500; src: url(/static/vendor/fonts/ibm-plex-mono-500.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 700; src: url(/static/vendor/fonts/ibm-plex-mono-700.woff2) format("woff2"); }
+
+  :root {
+    /* Industrial phosphor terminal: matte, no glow. */
+    --bunker: #0e1411;
+    --panel: #161e19;
+    --panel-edge: #232e27;
+    --crt: #07100b;
+    --bone: #d9d3bf;
+    --dim: #7a857c;
+    --phosphor: #74b979;
+    --orange: #d9822b;
+    --rust: #c4442c;
+    --slate: #8a9189;
+    --notch: 1.1em;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bunker); color: var(--bone); overflow: hidden; cursor: none; }
+  body {
+    font-family: "Barlow Condensed", "DejaVu Sans Condensed", sans-serif;
+    display: grid; grid-template-rows: auto 1fr auto; font-size: 2.3vw;
+  }
+  .mono { font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; }
+
+  .ok { --s: var(--phosphor); } .warn { --s: var(--orange); } .fail { --s: var(--rust); }
+  .active { --s: var(--phosphor); } .unknown { --s: var(--slate); }
+
+  /* Header: wordmark, current view, freshness, clock */
+  header { display: flex; align-items: center; gap: 0.6em; padding: 0.4em 1em 0.35em; border-bottom: 2px solid var(--panel-edge); }
+  /* Wordmark: screen-printed cabinet art, the rust pass printed slightly off register. */
+  /* Wordmark: two off-register print passes, rust down-right and phosphor up-left,
+     squeezed horizontally like condensed terminal type. */
+  header h1 { font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 2.1em; font-weight: 700;
+              line-height: 1.1; letter-spacing: -0.07em; transform: scaleX(0.82); transform-origin: left center;
+              margin-right: -1.1em; /* give back the width the squeeze frees */
+              text-shadow: 0.05em 0.045em 0 var(--rust), -0.035em -0.03em 0 rgba(116, 185, 121, 0.75); }
+  header h1 .cur { color: var(--phosphor); }
+  header .view { font-size: 1.6em; font-weight: 500; color: var(--dim); }
+  header .spacer { flex: 1; }
+  header .fresh { font-size: 0.72em; color: var(--dim); }
+  header .fresh.stale { color: var(--orange); }
+  header .clock { font-size: 1.25em; font-weight: 500; }
+  header .svc { display: flex; align-items: center; gap: 0.4em; font-size: 0.8em; font-weight: 600; color: var(--s);
+                padding-right: 0.9em; border-right: 2px solid var(--panel-edge); }
+  header .svc::before { content: ""; width: 0.6em; height: 0.6em; border-radius: 0.1em; background: var(--s); }
+
+  main { padding: 0.9em 1em; min-height: 0; display: grid; grid-template-rows: 1fr; gap: 0.8em; }
+
+  /* Panels share one shape: a notched top-right corner, like a cut equipment plate. */
+  .plate {
+    background: var(--panel);
+    clip-path: polygon(0 0, calc(100% - var(--notch)) 0, 100% var(--notch), 100% 100%, 0 100%);
+  }
+
+  /* Overview tiles: one row of three */
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8em; }
+  .tile {
+    position: relative; display: grid; grid-template-rows: auto 1fr auto; row-gap: 0.3em;
+    padding: 1em 0.9em 1em 1.4em; --notch: 0.8em; min-width: 0;
+  }
+  .tile::before { /* state edge; hazard tape when failing */
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0.55em; background: var(--s);
+  }
+  .tile.fail::before { width: 0.7em; background: repeating-linear-gradient(-45deg, var(--rust) 0 0.45em, #1d0f0b 0.45em 0.9em); }
+  .tile h2 { font-size: 1.05em; font-weight: 600; line-height: 1; }
+  .tile .why { font-size: 0.6em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .word { font-size: 1.9em; font-weight: 800; color: var(--s); line-height: 1; letter-spacing: -0.01em; }
+  .tile.fail .word { animation: blink 1.2s steps(2, jump-none) infinite; }
+  @keyframes blink { 50% { opacity: 0.45; } }
+
+  #content { min-height: 0; }
+
+  /* Node vitals, overview only */
+  .vitals { display: none; padding: 0.7em 1.4em 0.8em 1.1em; }
+  body.overview .vitals { display: grid; grid-template-columns: 6em repeat(4, 1fr); gap: 0.45em 1.4em; align-items: center; animation: settle 300ms ease-out both; }
+  .vitals .head { font-size: 0.72em; color: var(--dim); }
+  .vitals .node { font-size: 1.05em; font-weight: 600; }
+  .meter { display: grid; grid-template-columns: 1fr auto; gap: 0.6em; align-items: center; }
+  .meter .bar { height: 0.4em; background: var(--bunker); }
+  .meter .bar i { display: block; height: 100%; background: var(--s); }
+  .meter .val { font-size: 0.72em; min-width: 3.3em; text-align: right; color: var(--s); }
+
+  /* Detail views */
+  .rows { display: flex; flex-direction: column; gap: 0.35em; }
+  .row { display: grid; grid-template-columns: 0.75em 1fr auto; gap: 0.85em; align-items: center; padding: 0.5em 1.4em 0.5em 0.9em; --notch: 0.6em; }
+  .row .led { width: 0.75em; height: 0.75em; border-radius: 0.12em; background: var(--s); box-shadow: inset 0 0 0 0.12em rgba(0,0,0,0.35); }
+  .row .name { font-size: 1.2em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .detail { font-size: 0.75em; color: var(--s); }
+  .row.fail .led { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .more { color: var(--dim); font-size: 0.75em; padding: 0.3em 0.9em; }
+
+  /* Overview: a CRT window running cmatrix, the three tiles, then node vitals */
+  .crt { display: none; position: relative; min-height: 0; padding: 0.5em 0.5em 1.7em; --notch: 1.6em; background: var(--panel-edge); }
+  .crt .glass { position: relative; height: 100%; background: var(--crt); overflow: hidden;
+                clip-path: polygon(0 0, calc(100% - 1.3em) 0, 100% 1.3em, 100% 100%, 0 100%); }
+  .crt .glass::after { /* faint raster and tube falloff, inside the window only */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0.18) 0 1px, transparent 1px 3px),
+                radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+  .crt #term { position: absolute; inset: 0.5em 0.6em; }
+  .crt .xterm-viewport { background: transparent !important; overflow: hidden !important; }
+  .crt .label {
+    position: absolute; left: 0.7em; bottom: 0.2em;
+    font-size: 0.8em; font-weight: 600; color: var(--s);
+  }
+
+  body.overview main { grid-template-rows: 1fr auto auto; }
+  body.overview .crt { display: block; animation: power-on 700ms cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes power-on { /* a tube warming up: a line, then the picture opens */
+    0% { transform: scale(0.4, 0.004); filter: brightness(3); }
+    45% { transform: scale(1, 0.004); filter: brightness(2.5); }
+    100% { transform: none; filter: none; }
+  }
+  @keyframes settle { from { opacity: 0; transform: translateY(0.8em); } }
+
+  /* Footer: a map of the physical buttons */
+  footer { display: flex; align-items: center; gap: 1.2em; padding: 0.45em 1em 0.55em; border-top: 2px solid var(--panel-edge); font-size: 0.72em; }
+  .pad { display: grid; grid-template-columns: repeat(3, 7.5em); gap: 0.25em 0.4em; }
+  .pad span { display: flex; align-items: center; gap: 0.45em; color: var(--dim); white-space: nowrap; }
+  .pad span::before { content: ""; width: 0.8em; height: 0.8em; border-radius: 50%; border: 2px solid var(--panel-edge); flex: none; }
+  .pad span.on { color: var(--bone); }
+  .pad span.on::before { background: var(--bone); border-color: var(--bone); }
+  .pad span.free { visibility: hidden; }
+  footer .hint { color: var(--dim); margin-left: auto; text-align: right; line-height: 1.35; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>brick<span class="cur">_</span>9000</h1><span class="view" id="view"></span>
+  <span class="spacer"></span>
+  <span class="svc unknown" id="sshd">SSHD</span>
+  <span class="fresh mono" id="fresh"></span>
+  <span class="clock mono" id="clock"></span>
+</header>
+<main>
+  <div class="crt plate" id="crt"><div class="glass"><div id="term"></div></div><div class="label" id="crt-label"></div></div>
+  <div id="content"></div>
+  <div class="vitals plate" id="vitals"></div>
+</main>
+<footer>
+  <div class="pad" id="pad"></div>
+  <div class="hint">Joystick left and right<br>steps through the views</div>
+</footer>
+
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/addon-fit.js"></script>
+<script src="/static/vendor/addon-webgl.js"></script>
+<script>
+const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync" };
+const WORDS = {
+  builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Building", unknown: "No data" },
+  cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },
+  wigle: { ok: "Synced", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
+};
+const SEVERITY = ["fail", "warn", "unknown", "active", "ok"];
+const MAX_ROWS = 9;
+// Physical buttons: two rows of three. The board's views take the first four.
+const PAD = ["overview", "builds", "cluster", "wigle", null, null];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const bySeverity = (a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state);
+
+function tile(name, group) {
+  const state = group ? group.state : "unknown";
+  const checks = group ? [...group.checks].sort(bySeverity) : [];
+  const why = checks.filter(c => c.state === state || state === "ok").slice(0, 2)
+    .map(c => `${c.name} ${c.detail}`).join(", ");
+  return `<div class="tile plate ${state}"><div><h2>${LABELS[name]}</h2><div class="why mono">${esc(why)}</div></div>
+          <div class="word">${WORDS[name][state]}</div></div>`;
+}
+
+function rows(group) {
+  if (!group) return `<div class="more mono">No data yet.</div>`;
+  const checks = [...group.checks].sort(bySeverity);
+  const shown = checks.slice(0, MAX_ROWS).map(c =>
+    `<div class="row plate ${c.state}"><span class="led"></span><span class="name">${esc(c.name)}</span>
+     <span class="detail mono">${esc(c.detail)}</span></div>`).join("");
+  const more = checks.length > MAX_ROWS ? `<div class="more mono">${checks.length - MAX_ROWS} more not shown</div>` : "";
+  return `<div class="rows">${shown}${more}</div>`;
+}
+
+// Node vitals: [key, label, unit, warn at, fail at]
+const METERS = [["cpu", "CPU", "%", 85, 101], ["mem", "Memory", "%", 85, 95],
+                ["temp", "Temp", "°C", 70, 80], ["disk", "Disk", "%", 85, 95]];
+
+function vitals(nodes) {
+  const head = `<span></span>` + METERS.map(([, label]) => `<span class="head mono">${label}</span>`).join("");
+  const rowsHtml = (nodes || []).map(n => `<span class="node">${esc(n.node)}</span>` + METERS.map(([k, , unit, warn, fail]) => {
+    const v = n[k];
+    if (v === undefined) return `<span class="meter unknown"><span class="bar"></span><span class="val mono">n/a</span></span>`;
+    const state = v >= fail ? "fail" : v >= warn ? "warn" : "ok";
+    const pct = k === "temp" ? Math.min(100, v / 85 * 100) : Math.min(100, v);
+    return `<span class="meter ${state}"><span class="bar"><i style="width:${pct.toFixed(0)}%"></i></span><span class="val mono">${Math.round(v)}${unit}</span></span>`;
+  }).join("")).join("");
+  return head + rowsHtml;
+}
+
+// What the matrix rain's colour means, in words, for the label on the CRT bezel.
+function crtLabel(s) {
+  const all = Object.values(s.groups || {}).flatMap(g => g.checks);
+  const failing = all.filter(c => c.state === "fail");
+  const warning = all.filter(c => c.state === "warn");
+  if (failing.length) return `${failing.length} failing: ${failing[0].name}`;
+  if (s.groups?.builds?.state === "active") return "Build running";
+  if (warning.length) return `${warning.length} degraded: ${warning[0].name}`;
+  if (s.overall === "unknown") return "No data from Prometheus";
+  if (s.groups?.wigle?.state === "active") return "wigle-sync uploading";
+  return "All systems nominal";
+}
+
+function matrixColour(s) {
+  if (s.overall === "fail") return "red";
+  if (s.overall === "warn" || s.groups?.builds?.state === "active") return "yellow";
+  if (s.overall === "unknown") return "white";
+  return "green";
+}
+
+// cmatrix, streamed from brick-status and drawn by xterm.js.
+const matrix = {
+  term: null, fit: null, source: null, colour: null,
+  start(colour) {
+    if (this.source && this.colour === colour) return;
+    this.stop();
+    if (!this.term) {
+      this.term = new Terminal({
+        fontFamily: '"IBM Plex Mono", monospace', fontSize: 15, lineHeight: 1.0,
+        cursorBlink: false, disableStdin: true, scrollback: 0, allowTransparency: true,
+        theme: {
+          background: "rgba(0,0,0,0)", foreground: "#74b979",
+          black: "#07100b", green: "#5f9e64", brightGreen: "#9fd69b",
+          yellow: "#c7731f", brightYellow: "#eba04f",   /* cmatrix has no orange */
+          red: "#b23a24", brightRed: "#dd5d3c",
+          white: "#8a9189", brightWhite: "#ece6d2",
+        },
+      });
+      this.fit = new FitAddon.FitAddon();
+      this.term.loadAddon(this.fit);
+      this.term.open(document.getElementById("term"));
+      // Draw on the GPU; the default DOM renderer kept Chromium's renderer
+      // process above one full core on the Pi 4.
+      try {
+        const webgl = new WebglAddon.WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        this.term.loadAddon(webgl);
+      } catch (e) { console.warn("WebGL renderer unavailable, using DOM renderer", e); }
+    }
+    this.fit.fit();
+    this.term.reset();
+    this.colour = colour;
+    const url = `/api/matrix?cols=${this.term.cols}&rows=${this.term.rows}&colour=${colour}`;
+    this.source = new EventSource(url);
+    this.source.onmessage = e => this.term.write(Uint8Array.from(atob(e.data), c => c.charCodeAt(0)));
+  },
+  stop() {
+    if (this.source) { this.source.close(); this.source = null; }
+  },
+};
+
+// Only touch the DOM when the markup changes, so animations don't restart every poll.
+function setHTML(id, html) {
+  const el = document.getElementById(id);
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
+function render(s) {
+  const g = s.groups || {};
+  const overview = s.view === "overview";
+  document.body.classList.toggle("overview", overview);
+  document.getElementById("view").textContent = s.view === "overview" ? "" : LABELS[s.view];
+  setHTML("content", s.view === "overview"
+    ? `<div class="tiles">${["builds", "cluster", "wigle"].map(n => tile(n, g[n])).join("")}</div>`
+    : rows(g[s.view]));
+
+  if (overview) setHTML("vitals", vitals(s.vitals));
+
+  const crt = document.getElementById("crt");
+  crt.className = `crt plate ${s.overall || "unknown"}`;
+  document.getElementById("crt-label").textContent = crtLabel(s);
+  // cmatrix runs only while the overview is on screen; not overnight with the screen off.
+  if (overview && s.mode !== "quiet") matrix.start(matrixColour(s));
+  else matrix.stop();
+
+  const sshd = s.host?.sshd;
+  const sshdEl = document.getElementById("sshd");
+  sshdEl.className = `svc ${sshd === true ? "ok" : sshd === false ? "fail" : "unknown"}`;
+  sshdEl.textContent = sshd === true ? "SSHD Up" : sshd === false ? "SSHD Down" : "SSHD";
+
+  const age = s.updated ? Math.round(s.now - s.updated) : null;
+  const fresh = document.getElementById("fresh");
+  fresh.textContent = age === null ? "waiting for data" : `updated ${age}s ago`;
+  fresh.classList.toggle("stale", age === null || age > 60);
+
+  setHTML("pad", PAD.map(v => v
+    ? `<span class="${v === s.view && s.mode === "active" ? "on" : ""}">${LABELS[v]}</span>`
+    : `<span class="free">free</span>`).join(""));
+}
+
+function tick() {
+  document.getElementById("clock").textContent =
+    new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    render(await r.json());
+  } catch (e) {
+    document.getElementById("fresh").textContent = "brick-status unreachable";
+    document.getElementById("fresh").classList.add("stale");
+  }
+}
+
+document.fonts.load('15px "IBM Plex Mono"').finally(() => {
+  tick(); poll();
+  setInterval(tick, 1000);
+  setInterval(poll, 1000);
+});
+</script>
+</body>
+</html>
