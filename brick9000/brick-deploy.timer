@@ -1,10 +1,10 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 [Unit]
-Description=Check GitHub for brick-status changes every 2 minutes
+Description=Check GitHub for brick-status changes every 2 hours
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=2min
+OnUnitActiveSec=2h
 
 [Install]
 WantedBy=timers.target

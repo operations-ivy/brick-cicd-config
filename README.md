@@ -152,17 +152,24 @@ Settings live in `~/.config/brick-status/env` on brick9000 (created from
 
 ### Updates deploy from GitHub
 
-Nothing is copied to brick9000 by hand. Every 2 minutes `brick-deploy.timer`
-runs `brick9000/deploy`, which fetches from GitHub and, if the followed
-branch has moved, runs the tests on the new commit in a scratch worktree. Only
-if they pass does it switch the clone to that commit and restart
-brick-status. A commit that fails is left alone until the branch moves again.
-Changes under `brick9000/` itself (units, autostart) still need
+Nothing is copied to brick9000 by hand. Every 2 hours (and 2 minutes after
+boot) `brick-deploy.timer` runs `brick9000/deploy`, which fetches from GitHub
+and, if the followed branch has moved, runs the tests on the new commit in a
+scratch worktree. Only if they pass does it switch the clone to that commit
+and restart brick-status. A commit that fails is left alone until the branch
+moves again. Changes under `brick9000/` itself (units, autostart) still need
 `install.sh` rerun; the deploy log says so.
 
 brick9000 follows `main`. To try a branch on the real board before merging,
-set `BRICK_DEPLOY_BRANCH=<branch>` in the env file; it deploys on the next
-check. Set it back to `main` after merging. Deploy logs:
+set `BRICK_DEPLOY_BRANCH=<branch>` in the env file, then check now instead of
+waiting for the timer:
+
+```bash
+systemctl --user start brick-deploy.service
+```
+
+Run that again after each push to the branch. Set it back to `main` after
+merging (and run it once more). Deploy logs:
 `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service`.
 
 Tests (standard library `unittest`, no hardware needed):

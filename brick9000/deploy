@@ -1,5 +1,6 @@
 #!/bin/sh
-# Deploy brick-status from GitHub. Run every few minutes by brick-deploy.timer.
+# Deploy brick-status from GitHub. Run every 2 hours by brick-deploy.timer,
+# or now with: systemctl --user start brick-deploy.service
 #
 # If the branch brick9000 follows (BRICK_DEPLOY_BRANCH in the env file, main
 # by default) has moved, test the new commit in a scratch worktree and switch
