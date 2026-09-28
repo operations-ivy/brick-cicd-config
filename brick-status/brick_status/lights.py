@@ -78,11 +78,13 @@ class Plasma:
 def active_frames(group_states: dict[str, str], views: list[str], slots: list[int],
                   selected_view: int) -> list:
     """Frames lighting each view's button in its group's health colour."""
-    colours = {}
+    colours, busy = {}, set()
     for i, view in enumerate(views):
         if i >= len(slots):
             break
         state = group_states.get(view, OK if view == "overview" else UNKNOWN)
         colours[slots[i]] = patterns.STATE_COLOURS[state]
+        if state == ACTIVE:
+            busy.add(slots[i])
     selected = slots[selected_view] if selected_view < len(slots) else None
-    return patterns.buttons(colours, selected)
+    return patterns.buttons(colours, selected, busy)

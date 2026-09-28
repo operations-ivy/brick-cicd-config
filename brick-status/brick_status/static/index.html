@@ -21,7 +21,7 @@
     --crt: #07100b;
     --bone: #d9d3bf;
     --dim: #7a857c;
-    --phosphor: #74b979;
+    --phosphor: #2ee84a;
     --orange: #d9822b;
     --rust: #c4442c;
     --slate: #8a9189;
@@ -46,7 +46,7 @@
   header h1 { font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 2.1em; font-weight: 700;
               line-height: 1.1; letter-spacing: -0.07em; transform: scaleX(0.82); transform-origin: left center;
               margin-right: -1.1em; /* give back the width the squeeze frees */
-              text-shadow: 0.05em 0.045em 0 var(--rust), -0.035em -0.03em 0 rgba(116, 185, 121, 0.75); }
+              text-shadow: 0.05em 0.045em 0 var(--rust), -0.035em -0.03em 0 rgba(46, 232, 74, 0.75); }
   header h1 .cur { color: var(--phosphor); }
   header .view { font-size: 1.6em; font-weight: 500; color: var(--dim); }
   header .spacer { flex: 1; }
@@ -55,6 +55,7 @@
   header .clock { font-size: 1.25em; font-weight: 500; }
   header .svc { display: flex; align-items: center; gap: 0.4em; font-size: 0.8em; font-weight: 600; color: var(--s);
                 padding-right: 0.9em; border-right: 2px solid var(--panel-edge); }
+  header .svc[hidden] { display: none; }
   header .svc::before { content: ""; width: 0.6em; height: 0.6em; border-radius: 0.1em; background: var(--s); }
 
   main { padding: 0.9em 1em; min-height: 0; display: grid; grid-template-rows: 1fr; gap: 0.8em; }
@@ -80,6 +81,8 @@
   .tile .word { font-size: 1.9em; font-weight: 800; color: var(--s); line-height: 1; letter-spacing: -0.01em; }
   .tile.fail .word { animation: blink 1.2s steps(2, jump-none) infinite; }
   @keyframes blink { 50% { opacity: 0.45; } }
+  .tile.active .word, .tile.active::before, .row.active .led { animation: throb 2s ease-in-out infinite; }
+  @keyframes throb { 50% { opacity: 0.25; } }
 
   #content { min-height: 0; }
 
@@ -144,7 +147,7 @@
 <header>
   <h1>brick<span class="cur">_</span>9000</h1><span class="view" id="view"></span>
   <span class="spacer"></span>
-  <span class="svc unknown" id="sshd">SSHD</span>
+  <span class="svc fail" id="sshd" hidden>SSHD Down</span>
   <span class="fresh mono" id="fresh"></span>
   <span class="clock mono" id="clock"></span>
 </header>
@@ -166,7 +169,7 @@ const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wig
 const WORDS = {
   builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Building", unknown: "No data" },
   cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },
-  wigle: { ok: "Synced", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
+  wigle: { ok: "OK", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
 };
 const SEVERITY = ["fail", "warn", "unknown", "active", "ok"];
 const MAX_ROWS = 9;
@@ -241,8 +244,8 @@ const matrix = {
         fontFamily: '"IBM Plex Mono", monospace', fontSize: 15, lineHeight: 1.0,
         cursorBlink: false, disableStdin: true, scrollback: 0, allowTransparency: true,
         theme: {
-          background: "rgba(0,0,0,0)", foreground: "#74b979",
-          black: "#07100b", green: "#5f9e64", brightGreen: "#9fd69b",
+          background: "rgba(0,0,0,0)", foreground: "#2ee84a",
+          black: "#07100b", green: "#1fc23a", brightGreen: "#8cff98",
           yellow: "#c7731f", brightYellow: "#eba04f",   /* cmatrix has no orange */
           red: "#b23a24", brightRed: "#dd5d3c",
           white: "#8a9189", brightWhite: "#ece6d2",
@@ -295,10 +298,8 @@ function render(s) {
   if (overview && s.mode !== "quiet") matrix.start(matrixColour(s));
   else matrix.stop();
 
-  const sshd = s.host?.sshd;
-  const sshdEl = document.getElementById("sshd");
-  sshdEl.className = `svc ${sshd === true ? "ok" : sshd === false ? "fail" : "unknown"}`;
-  sshdEl.textContent = sshd === true ? "SSHD Up" : sshd === false ? "SSHD Down" : "SSHD";
+  // Nothing on the board needs sshd, so it only earns header space when it's down.
+  document.getElementById("sshd").hidden = s.host?.sshd !== false;
 
   const age = s.updated ? Math.round(s.now - s.updated) : null;
   const fresh = document.getElementById("fresh");
