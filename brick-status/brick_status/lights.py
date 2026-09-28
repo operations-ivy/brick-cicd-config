@@ -33,9 +33,9 @@ class Plasma:
         self.prefix = prefix
         self.current = None
 
-    def install_idle_patterns(self) -> None:
+    def install_patterns(self) -> None:
         os.makedirs(self.pattern_dir, exist_ok=True)
-        for name, make in patterns.IDLE.items():
+        for name, make in {**patterns.IDLE, **patterns.BUILD}.items():
             self._write(name, make())
 
     def show(self, name: str, frames: list | None = None) -> None:

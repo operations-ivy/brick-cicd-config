@@ -43,6 +43,11 @@ class Settings:
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
     # row, then left to right along the bottom.
     button_slots: list[int] = field(default_factory=lambda: [2, 1, 0, 3, 4, 5])
+    # Written by brick9000/build-image; drives the build lights.
+    build_status: str = os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/status.json")
+    # How long the lights show a finished build's result.
+    build_result_seconds: float = 60.0
     input_device_name: str = "gpio_keys"
     wlopm: str = "wlopm"
 
@@ -57,6 +62,8 @@ class Settings:
         s.plasma_fifo = env("BRICK_STATUS_PLASMA_FIFO", s.plasma_fifo)
         s.pattern_dir = env("BRICK_STATUS_PATTERN_DIR", s.pattern_dir)
         s.active_seconds = float(env("BRICK_STATUS_ACTIVE_SECONDS", s.active_seconds))
+        s.build_status = env("BRICK_STATUS_BUILD_STATUS", s.build_status)
+        s.build_result_seconds = float(env("BRICK_STATUS_BUILD_RESULT_SECONDS", s.build_result_seconds))
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)

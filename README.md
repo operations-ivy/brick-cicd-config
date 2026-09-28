@@ -130,6 +130,11 @@ Idle light patterns, highest priority first:
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |
 | `calm` | slow green (0 255 0) breathing: all good |
 
+An image build on brick9000 itself (below) takes over the lights in idle and
+active mode: `image-building` flashes rainbow while it runs, then
+`image-pushed` flashes bright green or `image-failed` pulses red for a minute
+(`BRICK_STATUS_BUILD_RESULT_SECONDS`).
+
 The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
 60fps), so changing one needs only a restart, not a reinstall.
@@ -171,6 +176,24 @@ systemctl --user start brick-deploy.service
 Run that again after each push to the branch. Set it back to `main` after
 merging (and run it once more). Deploy logs:
 `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service`.
+
+### Image builds on brick9000
+
+brick9000 is an arm64 Pi 4 with Docker, so it can build the cluster's (arm64)
+images natively. `brick9000/build-image` checks out a ref of a repo, builds
+it and pushes the image, and records its progress in
+`~/.local/state/brick-build/status.json` for the lights. Run it detached, so
+an SSH drop doesn't kill the build and its log lands in the journal:
+
+```bash
+systemd-run --user --collect --unit=brick-build ~/brick-cicd-config/brick9000/build-image \
+    https://github.com/operations-ivy/wigle-sync <ref> whitepatrick/wigle-console:<tag> Dockerfile.web
+journalctl _SYSTEMD_USER_UNIT=brick-build.service -f
+```
+
+Pushing needs a one-time `docker login -u whitepatrick` on brick9000 with a
+Docker Hub access token (Read & Write), which Docker keeps in
+`~/.docker/config.json`, outside the repo.
 
 Tests (standard library `unittest`, no hardware needed):
 
