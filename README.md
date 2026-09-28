@@ -88,9 +88,12 @@ reads green/red build state from.
 - It serves the board page on `127.0.0.1:8765`, which Chromium shows in
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second.
 - The overview is a CRT window running the real `cmatrix -bs`, the three area
-  tiles, and a vitals panel (CPU, memory, temperature, root disk) for brick420
-  and brick2000 (from node_exporter) and brick9000 itself (read from `/proc`
-  and `/sys`, since it runs no node_exporter). The header shows a red
+  tiles, and a compact vitals strip for brick420 and brick2000 (from
+  node_exporter) and brick9000 itself (read from `/proc` and `/sys`, since it
+  runs no node_exporter). It shows no numbers: each host gets a pie for root
+  disk and LED segment bars for CPU, memory and temperature, green, yellow or
+  red by level (CPU and memory turn yellow at 85% and red at 95%, temperature
+  at 70°C and 80°C, disk at 85% and 95%). The header shows a red
   "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
 - cmatrix runs in a pseudo-terminal sized to the window; its output streams to
   the page as server-sent events and xterm.js draws it with its WebGL renderer
