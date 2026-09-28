@@ -347,10 +347,16 @@ function tick() {
     new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+let boot = null;
+
 async function poll() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
-    render(await r.json());
+    const s = await r.json();
+    // brick-status restarted (a deploy, most likely): load the page it serves now.
+    if (boot && s.boot !== boot) { location.reload(); return; }
+    boot = s.boot;
+    render(s);
   } catch (e) {
     document.getElementById("fresh").textContent = "brick-status unreachable";
     document.getElementById("fresh").classList.add("stale");
