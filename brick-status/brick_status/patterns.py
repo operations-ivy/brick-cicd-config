@@ -13,14 +13,14 @@ LEDS_PER_SLOT = 4
 WIDTH = SLOTS * LEDS_PER_SLOT
 FPS = 60
 
-GREEN = (0, 255, 60)
+GREEN = (0, 255, 0)
 AMBER = (255, 140, 0)
 RED = (255, 0, 0)
 TEAL = (0, 180, 140)
 GREY = (90, 90, 110)
 OFF = (0, 0, 0)
 
-STATE_COLOURS = {"ok": GREEN, "warn": AMBER, "fail": RED, "active": TEAL, "unknown": GREY}
+STATE_COLOURS = {"ok": GREEN, "warn": AMBER, "fail": RED, "active": GREEN, "unknown": GREY}
 
 Rgb = tuple[int, int, int]
 Frame = list[Rgb]
@@ -59,14 +59,21 @@ def chase(colour: Rgb, seconds: float, tail: int = 3, base: float = 0.05) -> lis
     return frames
 
 
-def buttons(slot_colours: dict[int, Rgb], selected: int | None, seconds: float = 2.0) -> list[Frame]:
-    """Active mode: each view button lit in its colour, the selected one pulsing."""
+def buttons(slot_colours: dict[int, Rgb], selected: int | None, busy: set[int] = frozenset(),
+            seconds: float = 2.0) -> list[Frame]:
+    """Active mode: each view button lit in its colour, the selected one pulsing.
+
+    Busy slots (a build or upload in progress) pulse fully whether selected or not.
+    """
     n = int(seconds * FPS)
     frames = []
     for f in range(n):
         row = [OFF] * SLOTS
         for slot, colour in slot_colours.items():
-            k = _breathe(f / n, 0.5, 1.0) if slot == selected else 0.2
+            if slot in busy:
+                k = _breathe(f / n, 0.1, 1.0)
+            else:
+                k = _breathe(f / n, 0.5, 1.0) if slot == selected else 0.2
             row[slot] = _scale(colour, k)
         frames.append(_slots(row))
     return frames
@@ -76,7 +83,7 @@ def buttons(slot_colours: dict[int, Rgb], selected: int | None, seconds: float =
 IDLE = {
     "alert": lambda: pulse(RED, 1.0, 0.15),
     "building": lambda: chase(AMBER, 1.5),
-    "uploading": lambda: chase(GREEN, 2.0, tail=4),
+    "uploading": lambda: pulse(GREEN, 2.0, 0.1),
     "warn": lambda: pulse(AMBER, 3.0, 0.05, 0.6),
     "unknown": lambda: pulse(GREY, 4.0, 0.05, 0.4),
     "calm": lambda: pulse(TEAL, 6.0, 0.03, 0.25),

@@ -18,8 +18,9 @@ SEVERITY = [FAIL, WARN, UNKNOWN, ACTIVE, OK]
 JENKINS_RESULTS = {0: (OK, "success"), 1: (WARN, "unstable"), 2: (FAIL, "failure"),
                    3: (UNKNOWN, "not built"), 4: (WARN, "aborted")}
 
-# wigle-sync runs hourly; two missed runs is worth flagging.
-WIGLE_STALE_SECONDS = 2 * 3600 + 600
+# wigle-sync runs hourly and does nothing while the Pi is away, which is fine.
+# Only errors that every run has hit for this long are worth flagging.
+WIGLE_ERROR_WINDOW = "2h"
 
 
 @dataclass
@@ -104,23 +105,23 @@ def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
     if running and running[0][1] > 0:
         checks.append(Check("wigle", "sync", ACTIVE, "uploading"))
 
+    # files_failed is 0 on runs where the Pi is offline, so this only fires on real errors.
+    stuck = prom.query(f"min_over_time(wigle_sync_files_failed[{WIGLE_ERROR_WINDOW}])")
+    if stuck and stuck[0][1] > 0:
+        checks.append(Check("wigle", "errors", FAIL, f"failing for {WIGLE_ERROR_WINDOW}+"))
+
     last_ok = prom.query("wigle_sync_last_success_timestamp_seconds")
-    if not last_ok:
-        checks.append(Check("wigle", "last success", UNKNOWN, "no runs recorded"))
-    else:
-        age = now - last_ok[0][1]
-        state = WARN if age > WIGLE_STALE_SECONDS else OK
-        checks.append(Check("wigle", "last success", state, f"{_ago(age)} ago"))
+    checks.append(Check("wigle", "last success", OK,
+                        f"{_ago(now - last_ok[0][1])} ago" if last_ok else "no runs recorded"))
 
     online = prom.query("wigle_sync_pi_online")
     if online:
-        checks.append(Check("wigle", "pwnagotchi", OK if online[0][1] == 1 else WARN,
-                            "online" if online[0][1] == 1 else "offline"))
+        checks.append(Check("wigle", "pwnagotchi", OK, "online" if online[0][1] == 1 else "offline"))
 
     failed = prom.query("wigle_sync_files_failed")
     uploaded = prom.query("wigle_sync_files_uploaded")
     if failed and failed[0][1] > 0:
-        checks.append(Check("wigle", "last run", WARN, f"{int(failed[0][1])} files failed"))
+        checks.append(Check("wigle", "last run", OK, f"{int(failed[0][1])} files failed"))
     elif uploaded:
         checks.append(Check("wigle", "last run", OK, f"{int(uploaded[0][1])} files uploaded"))
     return checks

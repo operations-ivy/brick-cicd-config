@@ -83,14 +83,15 @@ reads green/red build state from.
   in `brick-k8s-config`) about builds (Jenkins), the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
   targets) and wigle-sync (Pushgateway metrics, plus a running CronJob pod
-  meaning "uploading").
+  meaning "uploading"). wigle-sync only alerts when every run for 2 hours has
+  had errors; the pwnagotchi being away and syncs pausing are normal.
 - It serves the board page on `127.0.0.1:8765`, which Chromium shows in
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second.
 - The overview is a CRT window running the real `cmatrix -bs`, the three area
   tiles, and a vitals panel (CPU, memory, temperature, root disk) for brick420
   and brick2000 (from node_exporter) and brick9000 itself (read from `/proc`
-  and `/sys`, since it runs no node_exporter). The header shows whether sshd
-  is up on brick9000.
+  and `/sys`, since it runs no node_exporter). The header shows a red
+  "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
 - cmatrix runs in a pseudo-terminal sized to the window; its output streams to
   the page as server-sent events and xterm.js draws it with its WebGL renderer
   (the default DOM renderer kept Chromium above a full core on the Pi 4; WebGL
@@ -107,7 +108,7 @@ The board has three modes:
 | Mode | When | Screen | Button lights |
 | --- | --- | --- | --- |
 | idle | no press in the last 2 minutes | overview | the most important event (below) |
-| active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses |
+| active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
 | quiet | 00:00-06:00 | off | off; any cabinet key wakes the board into active mode |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
@@ -124,7 +125,7 @@ Idle light patterns, highest priority first:
 | --- | --- |
 | `alert` | red pulse: anything failing |
 | `building` | amber chase: a Jenkins build is running |
-| `uploading` | green chase: wigle-sync is uploading |
+| `uploading` | green pulse: wigle-sync is uploading |
 | `warn` | slow amber pulse: something degraded |
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |
 | `calm` | dim teal breathing: all good |

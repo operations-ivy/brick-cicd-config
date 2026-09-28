@@ -95,6 +95,13 @@ class PatternTest(unittest.TestCase):
         r, g, b = first[4 * 1]
         self.assertTrue(r > 0 and g == 0)  # builds failing: red
 
+    def test_busy_button_pulses_green(self):
+        frames = lights.active_frames({"wigle": "active"}, VIEWS, [0, 1, 2, 3], selected_view=0)
+        greens = {frame[4 * 3] for frame in frames}
+        self.assertIn(patterns.GREEN, greens)
+        self.assertTrue(all(r == 0 and b == 0 for r, _, b in greens))
+        self.assertLess(min(g for _, g, _ in greens), 50)
+
 
 class DebouncerTest(unittest.TestCase):
     def run_events(self, events):
@@ -169,15 +176,25 @@ class ChecksTest(unittest.TestCase):
     def test_jenkins_down(self):
         self.assertEqual(checks.build_checks(FakeProm({}))[0].state, "fail")
 
-    def test_wigle_uploading_and_stale(self):
+    def test_wigle_uploading_and_pi_away_is_not_an_alert(self):
         now = 1_000_000.0
         prom = FakeProm({
             "kube_job_status_active": [({}, 1)],
             "last_success": [({}, now - 4 * 3600)],
+            "pi_online": [({}, 0)],
         })
         got = {c.name: c.state for c in checks.wigle_checks(prom, now)}
-        self.assertEqual(got["sync"], "active")
-        self.assertEqual(got["last success"], "warn")
+        self.assertEqual(got, {"sync": "active", "last success": "ok", "pwnagotchi": "ok"})
+
+    def test_wigle_fails_only_on_errors_persisting_2h(self):
+        prom = FakeProm({"min_over_time(wigle_sync_files_failed[2h])": [({}, 1)],
+                         "wigle_sync_files_failed": [({}, 3)]})
+        got = {c.name: c.state for c in checks.wigle_checks(prom, 0)}
+        self.assertEqual(got["errors"], "fail")
+        self.assertEqual(got["last run"], "ok")
+
+        brief = FakeProm({"min_over_time": [({}, 0)], "wigle_sync_files_failed": [({}, 3)]})
+        self.assertNotIn("fail", {c.state for c in checks.wigle_checks(brief, 0)})
 
     def test_vitals_join_names_and_sort_by_number(self):
         prom = FakeProm({
