@@ -1,0 +1,46 @@
+#!/bin/sh
+# Test the current branch, push it, open a PR against main (or reuse the open
+# one), and comment the test results on it. Run again after new commits to
+# push them and post a fresh result for the new head.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+branch=$(git symbolic-ref --short HEAD)
+if [ "$branch" = main ]; then
+    echo "open-pr: on main; make a branch for the change first" >&2
+    exit 1
+fi
+# The tests run against the working tree, so it has to match what gets pushed.
+if [ -n "$(git status --porcelain)" ]; then
+    echo "open-pr: uncommitted changes; commit or stash them first" >&2
+    exit 1
+fi
+
+results=$(mktemp)
+trap 'rm -f "$results"' EXIT
+if ! scripts/test >"$results" 2>&1; then
+    cat "$results"
+    echo "open-pr: tests failed, not pushing" >&2
+    exit 1
+fi
+
+git push -u origin "$branch"
+url=$(gh pr view "$branch" --json state,url -q 'select(.state == "OPEN") | .url' 2>/dev/null || true)
+if [ -z "$url" ]; then
+    url=$(gh pr create --base main --head "$branch" --fill)
+fi
+
+gh pr comment "$url" --body-file - <<BODY
+### Tests passed
+
+Commit \`$(git rev-parse --short HEAD)\`, $(python3 --version), run locally before push.
+
+<details><summary>Test output</summary>
+
+\`\`\`
+$(cat "$results")
+\`\`\`
+
+</details>
+BODY
+echo "$url"

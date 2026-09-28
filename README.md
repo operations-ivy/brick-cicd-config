@@ -153,8 +153,27 @@ journal (`journalctl --user` finds nothing on this Pi):
 Tests (standard library `unittest`, no hardware needed):
 
 ```bash
-cd brick-status && python3 -m unittest discover -s tests -t .
+scripts/test
 ```
+
+## Making changes
+
+Tests run on the laptop before anything reaches GitHub. Enable the pre-push
+hook once per clone; it refuses any push whose tests fail:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Work on a branch, commit, then:
+
+```bash
+scripts/open-pr
+```
+
+It runs the tests, and only if they pass pushes the branch, opens a PR
+against `main` (titled from the commits) and comments the test output on it.
+Run it again after more commits to push them and post a fresh result.
 
 The page's fonts (Barlow Condensed, IBM Plex Mono) and xterm.js are vendored
 under `brick-status/brick_status/static/vendor/` with their licenses, so the
