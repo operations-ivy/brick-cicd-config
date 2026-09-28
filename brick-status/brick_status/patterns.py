@@ -16,7 +16,6 @@ FPS = 60
 GREEN = (0, 255, 0)
 AMBER = (255, 140, 0)
 RED = (255, 0, 0)
-TEAL = (0, 180, 140)
 GREY = (90, 90, 110)
 OFF = (0, 0, 0)
 
@@ -86,7 +85,7 @@ IDLE = {
     "uploading": lambda: pulse(GREEN, 2.0, 0.1),
     "warn": lambda: pulse(AMBER, 3.0, 0.05, 0.6),
     "unknown": lambda: pulse(GREY, 4.0, 0.05, 0.4),
-    "calm": lambda: pulse(TEAL, 6.0, 0.03, 0.25),
+    "calm": lambda: pulse(GREEN, 6.0, 0.03),
 }
 
 

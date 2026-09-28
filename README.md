@@ -128,7 +128,7 @@ Idle light patterns, highest priority first:
 | `uploading` | green pulse: wigle-sync is uploading |
 | `warn` | slow amber pulse: something degraded |
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |
-| `calm` | dim teal breathing: all good |
+| `calm` | slow green (0 255 0) breathing: all good |
 
 The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
