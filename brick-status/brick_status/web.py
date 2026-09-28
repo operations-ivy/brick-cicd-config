@@ -12,6 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 from . import matrix
 
 STATIC = (Path(__file__).parent / "static").resolve()
+# Changes every time brick-status starts, e.g. after a deploy; the page
+# reloads itself when it sees a new one, so it always runs the latest code.
+BOOT = str(time.time())
 mimetypes.add_type("font/woff2", ".woff2")
 
 
@@ -22,6 +25,7 @@ def serve(settings, board, status) -> None:
             if url.path == "/api/state":
                 now = time.time()
                 body = json.dumps({
+                    "boot": BOOT,
                     "mode": board.mode(now),
                     "view": board.views[board.view(now)],
                     "views": board.views,

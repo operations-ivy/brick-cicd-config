@@ -25,6 +25,7 @@
     --orange: #d9822b;
     --rust: #c4442c;
     --slate: #8a9189;
+    --yellow: #e3c23a;
     --notch: 1.1em;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -86,15 +87,36 @@
 
   #content { min-height: 0; }
 
-  /* Node vitals, overview only */
-  .vitals { display: none; padding: 0.7em 1.4em 0.8em 1.1em; }
-  body.overview .vitals { display: grid; grid-template-columns: 6em repeat(4, 1fr); gap: 0.45em 1.4em; align-items: center; animation: settle 300ms ease-out both; }
-  .vitals .head { font-size: 0.72em; color: var(--dim); }
-  .vitals .node { font-size: 1.05em; font-weight: 600; }
-  .meter { display: grid; grid-template-columns: 1fr auto; gap: 0.6em; align-items: center; }
-  .meter .bar { height: 0.4em; background: var(--bunker); }
-  .meter .bar i { display: block; height: 100%; background: var(--s); }
-  .meter .val { font-size: 0.72em; min-width: 3.3em; text-align: right; color: var(--s); }
+  /* Host vitals, overview only: one compact readout per host, side by side.
+     No numbers: colour carries the level (green / yellow / red). */
+  .vitals { display: none; padding: 0.45em 1.4em 0.5em 0.8em; --notch: 0.7em; }
+  body.overview .vitals { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 1.1em;
+                          animation: settle 300ms ease-out both; }
+  .vitals .warn { --s: var(--yellow); }
+  .host { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; gap: 0.25em 0.55em;
+          align-items: center; min-width: 0; }
+  /* Host name: a shell prompt, printed off-register like the wordmark. */
+  .host .name { grid-column: 1 / -1; font-size: 0.72em; font-weight: 700; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; text-shadow: 0.06em 0.05em 0 var(--rust), -0.04em -0.03em 0 rgba(46, 232, 74, 0.6); }
+  .host .name::before { content: "> "; color: var(--s); text-shadow: none; }
+  .host.fail .name::before { animation: blink 1.2s steps(2, jump-none) infinite; }
+  /* Disk: a pie with a ring of 12 ticks around its rim, like a radar scope. */
+  .pie { display: grid; justify-items: center; gap: 0.15em; }
+  .pie i { width: 2.1em; height: 2.1em; border-radius: 50%; position: relative;
+           background: conic-gradient(var(--s) calc(var(--p) * 1%), var(--bunker) 0);
+           box-shadow: 0 0 0 0.12em var(--panel), 0 0 0 0.2em var(--panel-edge); }
+  .pie i::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
+                  background: repeating-conic-gradient(var(--panel) 0 2deg, transparent 2deg 30deg);
+                  -webkit-mask: radial-gradient(circle, transparent 62%, #000 63%); mask: radial-gradient(circle, transparent 62%, #000 63%); }
+  .pie.fail i { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .host .lbl { font-size: 0.42em; color: var(--dim); letter-spacing: 0.08em; }
+  /* CPU, memory, temperature: skewed LED segments, lit in the level's colour. */
+  .gauges { display: grid; grid-template-columns: auto 1fr; gap: 0.22em 0.4em; align-items: center; min-width: 0; }
+  .segs { display: grid; grid-template-columns: repeat(10, 1fr); gap: 0.12em; height: 0.42em; padding-left: 0.15em; }
+  .segs i { background: var(--panel-edge); transform: skewX(-24deg); }
+  .segs i.on { background: var(--s); }
+  .segs.fail i.on { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .unknown .segs i, .pie.unknown i { opacity: 0.5; }
 
   /* Detail views */
   .rows { display: flex; flex-direction: column; gap: 0.35em; }
@@ -197,20 +219,29 @@ function rows(group) {
   return `<div class="rows">${shown}${more}</div>`;
 }
 
-// Node vitals: [key, label, unit, warn at, fail at]
-const METERS = [["cpu", "CPU", "%", 85, 101], ["mem", "Memory", "%", 85, 95],
-                ["temp", "Temp", "°C", 70, 80], ["disk", "Disk", "%", 85, 95]];
+// Host vitals: key -> [label, warn at, fail at, full scale]
+const LEVELS = { cpu: ["CPU", 85, 95, 100], mem: ["MEM", 85, 95, 100], temp: ["TMP", 70, 80, 85], disk: ["DSK", 85, 95, 100] };
+const SEGMENTS = 10;
+
+function level(k, v) {
+  if (v === undefined || v === null) return { state: "unknown", pct: 0 };
+  const [, warn, fail, full] = LEVELS[k];
+  return { state: v >= fail ? "fail" : v >= warn ? "warn" : "ok", pct: Math.max(0, Math.min(100, v / full * 100)) };
+}
 
 function vitals(nodes) {
-  const head = `<span></span>` + METERS.map(([, label]) => `<span class="head mono">${label}</span>`).join("");
-  const rowsHtml = (nodes || []).map(n => `<span class="node">${esc(n.node)}</span>` + METERS.map(([k, , unit, warn, fail]) => {
-    const v = n[k];
-    if (v === undefined) return `<span class="meter unknown"><span class="bar"></span><span class="val mono">n/a</span></span>`;
-    const state = v >= fail ? "fail" : v >= warn ? "warn" : "ok";
-    const pct = k === "temp" ? Math.min(100, v / 85 * 100) : Math.min(100, v);
-    return `<span class="meter ${state}"><span class="bar"><i style="width:${pct.toFixed(0)}%"></i></span><span class="val mono">${Math.round(v)}${unit}</span></span>`;
-  }).join("")).join("");
-  return head + rowsHtml;
+  return (nodes || []).map(n => {
+    const lv = Object.fromEntries(Object.keys(LEVELS).map(k => [k, level(k, n[k])]));
+    const worst = SEVERITY.find(st => Object.values(lv).some(l => l.state === st)) || "ok";
+    const gauges = ["cpu", "mem", "temp"].map(k => {
+      const lit = lv[k].state === "unknown" ? 0 : Math.max(1, Math.ceil(lv[k].pct / (100 / SEGMENTS)));
+      const segs = Array.from({ length: SEGMENTS }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("");
+      return `<span class="lbl mono">${LEVELS[k][0]}</span><span class="segs ${lv[k].state}">${segs}</span>`;
+    }).join("");
+    return `<div class="host ${worst}"><div class="name mono">${esc(n.node)}</div>
+      <div class="pie ${lv.disk.state}"><i style="--p:${lv.disk.pct.toFixed(0)}"></i><span class="lbl mono">DSK</span></div>
+      <div class="gauges ${worst}">${gauges}</div></div>`;
+  }).join("");
 }
 
 // What the matrix rain's colour means, in words, for the label on the CRT bezel.
@@ -316,10 +347,16 @@ function tick() {
     new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+let boot = null;
+
 async function poll() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
-    render(await r.json());
+    const s = await r.json();
+    // brick-status restarted (a deploy, most likely): load the page it serves now.
+    if (boot && s.boot !== boot) { location.reload(); return; }
+    boot = s.boot;
+    render(s);
   } catch (e) {
     document.getElementById("fresh").textContent = "brick-status unreachable";
     document.getElementById("fresh").classList.add("stale");
