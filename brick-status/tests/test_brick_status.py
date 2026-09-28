@@ -3,7 +3,7 @@ import unittest
 import zlib
 from datetime import datetime, time
 
-from brick_status import checks, lights, patterns
+from brick_status import build, checks, lights, patterns
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, in_quiet_hours
 from brick_status.config import VIEWS
 
@@ -101,6 +101,47 @@ class PatternTest(unittest.TestCase):
         self.assertIn(patterns.GREEN, greens)
         self.assertTrue(all(r == 0 and b == 0 for r, _, b in greens))
         self.assertLess(min(g for _, g, _ in greens), 50)
+
+
+class BuildLightsTest(unittest.TestCase):
+    def pattern(self, status, now=1000.0, alive=True):
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "status.json")
+            if status is not None:
+                with open(path, "w") as f:
+                    json.dump(status, f)
+            return build.light_pattern(path, now, result_seconds=60, alive=lambda pid: alive)
+
+    def test_building_shows_rainbow_while_the_build_runs(self):
+        status = {"state": "building", "pid": 123, "started": 900}
+        self.assertEqual(self.pattern(status), "image-building")
+        self.assertIsNone(self.pattern(status, alive=False))  # killed without a result
+
+    def test_result_shows_for_a_while_then_stops(self):
+        ok = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
+        self.assertEqual(self.pattern(ok), "image-pushed")
+        self.assertIsNone(self.pattern(ok, now=1051))
+        failed = {**ok, "state": "failed"}
+        self.assertEqual(self.pattern(failed), "image-failed")
+
+    def test_no_or_bad_status_file(self):
+        self.assertIsNone(self.pattern(None))
+        self.assertIsNone(self.pattern({"state": "unknown"}))
+
+    def test_every_build_pattern_exists(self):
+        for name in ("image-building", "image-pushed", "image-failed"):
+            self.assertIn(name, patterns.BUILD)
+
+    def test_rainbow_and_flash_colours(self):
+        hues = {px for frame in patterns.BUILD["image-building"]() for px in frame}
+        self.assertTrue(any(r > 200 for r, _, _ in hues) and any(g > 200 for _, g, _ in hues)
+                        and any(b > 200 for _, _, b in hues))
+        flashes = {px for frame in patterns.BUILD["image-pushed"]() for px in frame}
+        self.assertEqual(flashes, {patterns.GREEN, patterns.OFF})
 
 
 class DebouncerTest(unittest.TestCase):

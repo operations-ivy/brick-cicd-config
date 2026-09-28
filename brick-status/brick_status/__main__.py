@@ -9,7 +9,7 @@ import socket
 import threading
 import time
 
-from . import checks, host, lights, web
+from . import build, checks, host, lights, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, VIEWS, Settings
 from .hardware import Screen, watch_buttons
@@ -67,7 +67,7 @@ def main() -> None:
     screen = Screen(settings.wlopm)
     wake = threading.Event()  # set when anything changed, so lights react at once
 
-    plasma.install_idle_patterns()
+    plasma.install_patterns()
 
     def on_key(code: int) -> None:
         now = time.time()
@@ -96,8 +96,13 @@ def main() -> None:
         summary = status.get()
         screen.set(mode != QUIET)
 
+        building = build.light_pattern(settings.build_status, now, settings.build_result_seconds)
+
         if mode == QUIET:
             plasma.off()
+            last_active = None
+        elif building:  # a build on brick9000 takes over the lights
+            plasma.show(building)
             last_active = None
         elif mode == ACTIVE:
             states = {g: v["state"] for g, v in summary["groups"].items()}

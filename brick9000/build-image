@@ -1,0 +1,50 @@
+#!/bin/sh
+# Build a container image on brick9000 (native arm64) and push it.
+#
+#   build-image <git-url> <ref> <image:tag> [dockerfile]
+#
+# Checks out <ref> (branch, tag or commit) of <git-url> into a scratch
+# directory, builds [dockerfile] (default Dockerfile) and pushes <image:tag>,
+# which needs `docker login` done once on brick9000. While it runs, the
+# buttons flash rainbow; brick-status then flashes green for a pushed image or
+# pulses red for a failed build. It reads the state from
+# $XDG_STATE_HOME/brick-build/status.json, which this script writes.
+#
+# Run it detached so an SSH drop doesn't kill the build, and the log lands in
+# the journal:
+#   systemd-run --user --collect --unit=brick-build ~/brick-cicd-config/brick9000/build-image ...
+set -eu
+[ $# -ge 3 ] || { echo "usage: $0 <git-url> <ref> <image:tag> [dockerfile]" >&2; exit 2; }
+url=$1 ref=$2 image=$3 dockerfile=${4:-Dockerfile}
+
+state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-build
+mkdir -p "$state"
+started=$(date +%s)
+
+# One JSON line per state change, replaced atomically so brick-status never
+# reads half a file.
+write_status() {  # <state> [finished]
+    printf '{"state": "%s", "image": "%s", "ref": "%s", "pid": %d, "started": %d%s}\n' \
+        "$1" "$image" "$ref" $$ "$started" "${2:+, \"finished\": $2}" >"$state/status.json.tmp"
+    mv "$state/status.json.tmp" "$state/status.json"
+}
+
+scratch=$(mktemp -d)
+result=failed
+finish() {
+    rm -rf "$scratch"
+    write_status "$result" "$(date +%s)"
+    echo "build-image: $image $result"
+}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
+write_status building
+
+echo "build-image: $image from $url @ $ref ($dockerfile)"
+git -C "$scratch" init --quiet src
+git -C "$scratch/src" fetch --quiet --depth 1 "$url" "$ref"
+git -C "$scratch/src" checkout --quiet FETCH_HEAD
+echo "build-image: commit $(git -C "$scratch/src" rev-parse --short HEAD)"
+
+docker buildx build --platform linux/arm64 -f "$scratch/src/$dockerfile" -t "$image" --push "$scratch/src"
+result=succeeded

@@ -4,6 +4,7 @@ Each PNG is 40 pixels wide (10 button slots x 4 LEDs) and one row per frame;
 the daemon plays rows at 60 frames per second and loops.
 """
 
+import colorsys
 import math
 import struct
 import zlib
@@ -78,6 +79,25 @@ def buttons(slot_colours: dict[int, Rgb], selected: int | None, busy: set[int] =
     return frames
 
 
+def rainbow(seconds: float) -> list[Frame]:
+    """Every hue at once across the slots, rotating along them."""
+    n = int(seconds * FPS)
+    frames = []
+    for f in range(n):
+        row = []
+        for s in range(SLOTS):
+            r, g, b = colorsys.hsv_to_rgb((s / SLOTS + f / n) % 1.0, 1.0, 1.0)
+            row.append((round(r * 255), round(g * 255), round(b * 255)))
+        frames.append(_slots(row))
+    return frames
+
+
+def flash(colour: Rgb, seconds: float) -> list[Frame]:
+    """Hard on/off blink: on for the first half of each period, off for the second."""
+    n = int(seconds * FPS)
+    return [_slots([colour if f < n // 2 else OFF] * SLOTS) for f in range(n)]
+
+
 # Idle patterns, one per board event, highest priority first.
 IDLE = {
     "alert": lambda: pulse(RED, 1.0, 0.15),
@@ -86,6 +106,14 @@ IDLE = {
     "warn": lambda: pulse(AMBER, 3.0, 0.05, 0.6),
     "unknown": lambda: pulse(GREY, 4.0, 0.05, 0.4),
     "calm": lambda: pulse(GREEN, 6.0, 0.03),
+}
+
+# Image builds on brick9000 (see build.py). These take over the lights in
+# idle and active mode alike.
+BUILD = {
+    "image-building": lambda: rainbow(1.5),
+    "image-pushed": lambda: flash(GREEN, 0.5),
+    "image-failed": lambda: pulse(RED, 0.8, 0.0),
 }
 
 
