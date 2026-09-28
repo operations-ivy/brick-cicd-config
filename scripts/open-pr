@@ -16,10 +16,9 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-results=$(mktemp)
-trap 'rm -f "$results"' EXIT
-if ! scripts/test >"$results" 2>&1; then
-    cat "$results"
+comment=$(mktemp)
+trap 'rm -f "$comment"' EXIT
+if ! scripts/test-report >"$comment"; then
     echo "open-pr: tests failed, not pushing" >&2
     exit 1
 fi
@@ -30,17 +29,5 @@ if [ -z "$url" ]; then
     url=$(gh pr create --base main --head "$branch" --fill)
 fi
 
-gh pr comment "$url" --body-file - <<BODY
-### Tests passed
-
-Commit \`$(git rev-parse --short HEAD)\`, $(python3 --version), run locally before push.
-
-<details><summary>Test output</summary>
-
-\`\`\`
-$(cat "$results")
-\`\`\`
-
-</details>
-BODY
+gh pr comment "$url" --body-file "$comment"
 echo "$url"

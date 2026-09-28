@@ -172,7 +172,8 @@ scripts/open-pr
 ```
 
 It runs the tests, and only if they pass pushes the branch, opens a PR
-against `main` (titled from the commits) and comments the test output on it.
+against `main` (titled from the commits) and comments a test summary on it
+(`scripts/test-report`: one lit square per test, details folded away).
 Run it again after more commits to push them and post a fresh result.
 
 The page's fonts (Barlow Condensed, IBM Plex Mono) and xterm.js are vendored

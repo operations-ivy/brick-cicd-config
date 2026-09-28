@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Run the brick-status tests and print the results as a Markdown PR comment.
+
+One lit square per test, like the cabinet's buttons. Exits nonzero, with the
+usual unittest output on stderr, if anything fails; open-pr then stops.
+"""
+
+import os
+import platform
+import re
+import subprocess
+import sys
+import time
+import unittest
+
+PASS, SKIP = "🟩", "🟨"
+
+
+class TimedResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.outcomes = []  # (suite, test, mark, seconds)
+
+    def startTest(self, test):
+        self._started = time.perf_counter()
+        super().startTest(test)
+
+    def _record(self, test, mark):
+        suite = re.sub(r"(?<!^)(?=[A-Z])", " ", type(test).__name__.removesuffix("Test")).capitalize()
+        name = test._testMethodName.removeprefix("test_").replace("_", " ")
+        self.outcomes.append((suite, name, mark, time.perf_counter() - self._started))
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        self._record(test, PASS)
+
+    def addSkip(self, test, reason):
+        super().addSkip(test, reason)
+        self._record(test, SKIP)
+
+
+def ms(seconds: float) -> str:
+    return f"{seconds * 1000:.1f} ms"
+
+
+def main() -> int:
+    root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+    os.chdir(os.path.join(root, "brick-status"))
+    sys.path.insert(0, os.getcwd())
+    commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+
+    tests = unittest.defaultTestLoader.discover("tests", top_level_dir=".")
+    started = time.perf_counter()
+    result = unittest.TextTestRunner(stream=sys.stderr, verbosity=0, resultclass=TimedResult).run(tests)
+    elapsed = time.perf_counter() - started
+    if not result.wasSuccessful():
+        return 1
+
+    suites: dict[str, list] = {}
+    for suite, name, mark, seconds in result.outcomes:
+        suites.setdefault(suite, []).append((name, mark, seconds))
+    passed = sum(mark == PASS for _, _, mark, _ in result.outcomes)
+    total = len(result.outcomes)
+    slowest = max(result.outcomes, key=lambda o: o[3])
+
+    # Headline, one row of lights (a gap between suites), then the per-suite
+    # breakdown folded away so the comment stays short.
+    lights = " ".join("".join(mark for _, mark, _ in cases) for cases in suites.values())
+    skipped = f" · {len(result.skipped)} skipped" if result.skipped else ""
+    out = [
+        f"## 🟩 All systems nominal · {passed}/{total} passed",
+        "",
+        lights,
+        "",
+        f"<sub>`{commit}` · {ms(elapsed)} · Python {platform.python_version()} · "
+        f"tested locally before push{skipped}</sub>",
+        "",
+        "<details><summary>By suite</summary>",
+        "",
+        "| Suite | Passed | Time |",
+        "| :-- | --: | --: |",
+    ]
+    for suite, cases in suites.items():
+        ok = sum(mark == PASS for _, mark, _ in cases)
+        out.append(f"| {suite} | {ok}/{len(cases)} | {ms(sum(s for _, _, s in cases))} |")
+    out += ["", f"Slowest: {slowest[1]} ({slowest[0]}), {ms(slowest[3])}", "", "</details>"]
+    print("\n".join(out))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
