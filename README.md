@@ -134,21 +134,36 @@ The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
 60fps), so changing one needs only a restart, not a reinstall.
 
-### Install / update on brick9000
+### Install on brick9000
 
-From the laptop, sync the repo, then run the installer on brick9000 (it uses
-`sudo` for the apt package and the pattern directory):
+brick9000 runs a git clone of this repo (public, so no credentials). Once, on
+brick9000 (the installer uses `sudo` for the apt package and the pattern
+directory):
 
 ```bash
-rsync -a --delete --exclude .git --exclude __pycache__ ./ zaphod@brick9000.local:brick-cicd-config/
-ssh -t zaphod@brick9000.local brick-cicd-config/brick9000/install.sh
+git clone https://github.com/operations-ivy/brick-cicd-config.git ~/brick-cicd-config
+~/brick-cicd-config/brick9000/install.sh
 ```
 
 Settings live in `~/.config/brick-status/env` on brick9000 (created from
-`brick9000/brick-status.env.example`). After a later code-only change,
-`systemctl --user restart brick-status` is enough. Logs are in the system
-journal (`journalctl --user` finds nothing on this Pi):
+`brick9000/brick-status.env.example`). Logs are in the system journal
+(`journalctl --user` finds nothing on this Pi):
 `journalctl _SYSTEMD_USER_UNIT=brick-status.service -f`.
+
+### Updates deploy from GitHub
+
+Nothing is copied to brick9000 by hand. Every 2 minutes `brick-deploy.timer`
+runs `brick9000/deploy`, which fetches from GitHub and, if the followed
+branch has moved, runs the tests on the new commit in a scratch worktree. Only
+if they pass does it switch the clone to that commit and restart
+brick-status. A commit that fails is left alone until the branch moves again.
+Changes under `brick9000/` itself (units, autostart) still need
+`install.sh` rerun; the deploy log says so.
+
+brick9000 follows `main`. To try a branch on the real board before merging,
+set `BRICK_DEPLOY_BRANCH=<branch>` in the env file; it deploys on the next
+check. Set it back to `main` after merging. Deploy logs:
+`journalctl _SYSTEMD_USER_UNIT=brick-deploy.service`.
 
 Tests (standard library `unittest`, no hardware needed):
 
@@ -172,7 +187,8 @@ scripts/open-pr
 ```
 
 It runs the tests, and only if they pass pushes the branch, opens a PR
-against `main` (titled from the commits) and comments the test output on it.
+against `main` (titled from the commits) and comments a test summary on it
+(`scripts/test-report`: one lit square per test, details folded away).
 Run it again after more commits to push them and post a fresh result.
 
 The page's fonts (Barlow Condensed, IBM Plex Mono) and xterm.js are vendored

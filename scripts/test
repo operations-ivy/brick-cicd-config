@@ -1,5 +1,5 @@
 #!/bin/sh
 # Run the brick-status unit tests. Used by the pre-push hook and open-pr.
 set -eu
-cd "$(git rev-parse --show-toplevel)/brick-status"
+cd "$(dirname "$0")/../brick-status"
 exec python3 -m unittest discover -s tests -t . -v

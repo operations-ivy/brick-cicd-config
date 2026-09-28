@@ -1,0 +1,43 @@
+#!/bin/sh
+# Deploy brick-status from GitHub. Run every few minutes by brick-deploy.timer.
+#
+# If the branch brick9000 follows (BRICK_DEPLOY_BRANCH in the env file, main
+# by default) has moved, test the new commit in a scratch worktree and switch
+# to it only if the tests pass, then restart brick-status. A commit that fails
+# is remembered and not retried until the branch moves again.
+set -eu
+repo=$(cd "$(dirname "$0")/.." && pwd)
+env_file=$HOME/.config/brick-status/env
+state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-deploy
+mkdir -p "$state"
+
+branch=$(sed -n 's/^BRICK_DEPLOY_BRANCH=//p' "$env_file" 2>/dev/null | tail -n 1)
+branch=${branch:-main}
+
+cd "$repo"
+git fetch --quiet --prune origin
+if ! target=$(git rev-parse --verify --quiet "origin/$branch^{commit}"); then
+    echo "deploy: no branch '$branch' on GitHub; staying on $(git rev-parse --short HEAD)" >&2
+    exit 1
+fi
+current=$(git rev-parse HEAD)
+[ "$target" != "$current" ] || exit 0
+[ "$target" != "$(cat "$state/failed" 2>/dev/null)" ] || exit 0
+
+scratch=$(mktemp -d)
+trap 'git worktree remove --force "$scratch/tree" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+git worktree add --quiet --detach "$scratch/tree" "$target"
+if ! "$scratch/tree/scripts/test" >"$scratch/log" 2>&1; then
+    cat "$scratch/log" >&2
+    echo "$target" >"$state/failed"
+    echo "deploy: tests failed on $branch @ $(git rev-parse --short "$target"); staying on $(git rev-parse --short "$current")" >&2
+    exit 1
+fi
+
+git checkout --quiet --force --detach "$target"
+rm -f "$state/failed"
+if ! git diff --quiet "$current" "$target" -- brick9000/; then
+    echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
+fi
+systemctl --user restart brick-status
+echo "deploy: $branch @ $(git rev-parse --short HEAD) (was $(git rev-parse --short "$current"))"
