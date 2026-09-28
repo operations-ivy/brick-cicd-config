@@ -1,0 +1,9 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Started by brick-deploy.timer; see brick9000/deploy.
+[Unit]
+Description=Deploy brick-status from GitHub
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/brick-cicd-config/brick9000/deploy

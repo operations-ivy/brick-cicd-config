@@ -1,6 +1,7 @@
 #!/bin/sh
-# Set up brick-status on brick9000. Run on brick9000 itself, from the repo
-# checkout at ~/brick-cicd-config (see the README for syncing it there).
+# Set up brick-status on brick9000. Run on brick9000 itself, from the git
+# clone at ~/brick-cicd-config (see the README). After this, brick-deploy.timer
+# keeps it up to date from GitHub.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
@@ -12,10 +13,12 @@ sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status
 
 mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 [ -f ~/.config/brick-status/env ] || cp "$here/brick-status.env.example" ~/.config/brick-status/env
-cp "$here/brick-status.service" ~/.config/systemd/user/brick-status.service
+cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
+    ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
 
 systemctl --user daemon-reload
 systemctl --user enable brick-status
 systemctl --user restart brick-status
+systemctl --user enable --now brick-deploy.timer
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."
