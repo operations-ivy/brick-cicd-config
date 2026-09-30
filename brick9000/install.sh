@@ -5,8 +5,9 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
-# Button input; the plasma daemon itself is already installed.
-sudo apt-get install -y python3-evdev
+# Button input (the plasma daemon itself is already installed), and
+# avahi-publish to announce jenkins.local.
+sudo apt-get install -y python3-evdev avahi-utils
 # The plasma daemon (root) only loads patterns from /etc/plasma/; brick-status
 # (zaphod) writes its own into this subdirectory.
 sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status
@@ -14,10 +15,16 @@ sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status
 mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 [ -f ~/.config/brick-status/env ] || cp "$here/brick-status.env.example" ~/.config/brick-status/env
 cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
-    ~/.config/systemd/user/
+    "$here/jenkins-mdns.service" ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
 
+# Jenkins: secrets on first run, then build and start the container (Docker
+# restarts it on boot). Before brick-status starts, so its login is in the env file.
+"$here/jenkins/setup"
+"$here/jenkins/up"
+
 systemctl --user daemon-reload
+systemctl --user enable --now jenkins-mdns
 systemctl --user enable brick-status
 systemctl --user restart brick-status
 systemctl --user enable --now brick-deploy.timer

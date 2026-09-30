@@ -1,0 +1,9 @@
+#!/bin/sh
+# Run wigle-sync now, from its CronJob's template, instead of waiting for the
+# top of the hour.
+set -eu
+. "$(dirname "$0")/lib.sh"
+use_cluster
+job=wigle-sync-jenkins-$(date +%s)
+kubectl -n wigle create job --from=cronjob/wigle-sync "$job"
+wait_for_job wigle "$job"

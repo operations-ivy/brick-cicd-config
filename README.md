@@ -12,8 +12,8 @@ shows how that's going.
 
 | Where | What | Why there |
 | --- | --- | --- |
-| `brick2000` (in-cluster) | Jenkins | Needs RAM and disk; the NVMe worker has both |
 | `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
+| `brick9000` (Docker) | Jenkins: bootstrap and maintenance jobs | Has to work when the cluster doesn't, and be able to rebuild it |
 
 ### brick9000 is not a cluster node
 
@@ -30,65 +30,84 @@ Picade. It deliberately does **not** join k3s:
 
 The cost: the cluster's node_exporter and Promtail DaemonSets don't cover it.
 brick-status reads brick9000's own vitals directly, and its logs stay in its
-own journal. Any secrets it needs would live in a gitignored `.env` on the
-host instead of a SealedSecret.
+own journal. The secrets it needs live in files on the host
+(`~/.config/brick-jenkins/secrets/`), never in git or a SealedSecret.
 
-## Jenkins
+## Jenkins (on brick9000)
 
-`jenkins/`: the [Jenkins Helm chart](https://github.com/jenkinsci/helm-charts),
-with the controller and build agents pinned to `brick2000`
-(`chuck.io/storage-node=true`, same as Loki/Tempo/Prometheus) and
-`JENKINS_HOME` on a 20Gi `local-path` PVC on its NVMe. The controller runs no
-builds itself (`numExecutors: 0`); each build gets an agent pod through the
-Kubernetes plugin. Install:
+brick9000 should be able to rebuild the whole brick homelab in an emergency,
+so the Jenkins that runs maintenance and bootstrap jobs can't live in the
+cluster it rebuilds. It runs on brick9000 in Docker (`brick9000/jenkins/`),
+at `http://jenkins.local`, and jobs run on brick9000 itself (no agents).
+
+- **Nothing at start-up needs the internet.** The image
+  (`brick9000/jenkins/Dockerfile`) has the plugins (`plugins.txt`), `kubectl`,
+  `helm`, the Docker CLI, `ssh` and Python baked in; change one by rebuilding.
+- **Configuration is code.** `casc.yaml` (users, permissions) and
+  `seed.groovy` (the jobs) are read from brick9000's git clone, mounted
+  read-only into the container. deploy rebuilds the image when the
+  Dockerfile, plugins or compose file change, and otherwise reloads the
+  configuration when `casc.yaml`, `seed.groovy` or `jobs/` change. The job
+  scripts in `bin/` are read live. Changes made in the UI are overwritten.
+- **One file per job.** `jobs/<name>.groovy` is a declarative pipeline whose
+  header comments give its description, parameters and schedule (see
+  `seed.groovy`); the pipeline calls a script in `bin/`, where the logic lives.
+- **Webhooks from the LAN.** Every job can be started with
+  `curl -X POST 'http://jenkins.local/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
+  parameters in the query string (`&APPLY=true`). The secret is
+  `~/.config/brick-jenkins/secrets/webhook_secret` on brick9000.
+- **Cluster access per run.** Jobs reach the hosts with Jenkins' own SSH key
+  (authorized for `zaphod` on each host) and fetch a kubeconfig from brick420
+  over SSH for each run, so no cluster credentials are stored on brick9000.
+- **Offline copies of the repos.** `mirror-repos` keeps clones of
+  brick-k8s-config, wigle-sync and chucks-wisdom every 2 hours; the other jobs
+  read manifests and scripts from those, so they work without GitHub.
+
+| Job | Does | Webhook parameters |
+| --- | --- | --- |
+| `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
+| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 | `APPLY=true` to delete (dry run otherwise) |
+| `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
+| `chuck-importer` | Re-runs the chucks-wisdom joke importer | |
+
+### Set up
+
+`brick9000/install.sh` runs `brick9000/jenkins/setup` (generates the secrets:
+admin and brick-status passwords, the webhook secret, a config reload token
+and Jenkins' SSH key; reruns never replace one) and `brick9000/jenkins/up`
+(builds the image and starts the container; Docker restarts it on boot). Then,
+once, authorize Jenkins' key on each host, from a machine that can already
+reach them:
 
 ```bash
-kubectl apply -f jenkins/jenkins-namespace.yaml
-helm repo add jenkins https://charts.jenkins.io
-helm repo update
-helm upgrade --install jenkins jenkins/jenkins --version 5.9.64 \
-  --namespace jenkins -f jenkins/jenkins-values.yaml
-kubectl apply -f jenkins/jenkins-ingress.yaml
+key=$(ssh zaphod@brick9000.local cat .config/brick-jenkins/secrets/ssh_key.pub)
+for h in 192.168.1.183 192.168.1.170 192.168.1.221; do
+    ssh zaphod@$h "grep -qxF '$key' ~/.ssh/authorized_keys || echo '$key' >>~/.ssh/authorized_keys"
+done
 ```
 
-Exposed on the LAN at `http://jenkins.local`. Announce the name over mDNS
-from brick420 (see "LAN names for ingresses" in `brick-k8s-config`):
+When reimaging a host, preload that key for `zaphod` (Raspberry Pi Imager can)
+so Jenkins can reach it again. Sign in as `admin` with the password in
+`~/.config/brick-jenkins/secrets/admin_password` (save it in KeePass). Logs:
+`journalctl CONTAINER_NAME=brick-jenkins`; `JENKINS_HOME` is
+`~/.local/share/brick-jenkins`.
 
-```bash
-ssh zaphod@192.168.1.183 'sudo systemctl enable --now mdns-alias@jenkins'
-```
-
-The chart generates the `admin` password into the `jenkins` Secret, so no
-password lives in git. Read it back with:
-
-```bash
-kubectl -n jenkins get secret jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d; echo
-```
-
-Save it in KeePass; a `helm upgrade` keeps the existing Secret.
-
-The Prometheus plugin (`controller.additionalPlugins`) serves metrics at
-`/prometheus`, and a `ServiceMonitor` (`controller.prometheus`) has the
-cluster's Prometheus scrape them. Both are needed: enabling
-`controller.prometheus` alone creates the `ServiceMonitor` but not the plugin.
-Metric names are prefixed `default_jenkins_`. This is where `brick-status`
-reads green/red build state from.
-
-The controller starts without the internet: its image is pulled only if
-missing (`IfNotPresent`, the tag is pinned) and plugins are installed on the
-first start only (`initializeOnce`; they live on the PVC). The chart's
-defaults re-pull and re-download on every restart, so a restart during an ISP
-outage kept Jenkins down until the internet came back. To add or change a
-plugin, install it from the UI, or run the `helm upgrade` once with
-`--set controller.initializeOnce=false`.
+The in-cluster Jenkins (`jenkins/`, the Helm chart on brick2000) is being
+retired in favour of this one.
 
 ## brick-status (the status board on brick9000)
 
 `brick-status/` is a small Python daemon (standard library plus
 `python3-evdev`) that runs as a systemd user service on brick9000:
 
-- Every 15s it asks Prometheus (`http://prometheus.local`, an Ingress defined
-  in `brick-k8s-config`) about builds (Jenkins), the cluster (node
+- Every 15s it asks Jenkins, on brick9000 itself, for each job's state (as the
+  read-only `brick-status` user), so the Jenkins view keeps working while the
+  cluster is down, which is when the bootstrap jobs run. The Jenkins tile shows
+  the pixel-art Jenkins, or the horned one in flames when a job has failed
+  (artwork from [jenkins.io](https://jenkins.io/), CC BY-SA 3.0, credited on the
+  Jenkins view; see `static/vendor/jenkins/`).
+- It asks Prometheus (`http://prometheus.local`, an Ingress defined
+  in `brick-k8s-config`) about the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
   targets) and wigle-sync (Pushgateway metrics, plus a running CronJob pod
   meaning "uploading"). The wigle-sync view has three rows: how the last sync
@@ -133,7 +152,7 @@ The board has three modes:
 | active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
 | quiet | 00:00-06:00 | off | off; any cabinet key wakes the board into active mode |
 
-The six buttons are two rows of three. The top row picks Overview, Builds and
+The six buttons are two rows of three. The top row picks Overview, Jenkins and
 Cluster; bottom-left picks wigle-sync; the other two are free for now. The
 joystick left/right steps through the views. The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
@@ -146,7 +165,7 @@ Idle light patterns, highest priority first:
 | Pattern | Event |
 | --- | --- |
 | `alert` | red pulse: anything failing |
-| `building` | amber chase: a Jenkins build is running |
+| `building` | amber chase: a Jenkins job is running |
 | `uploading` | green pulse: wigle-sync is uploading |
 | `warn` | slow amber pulse: something degraded |
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |

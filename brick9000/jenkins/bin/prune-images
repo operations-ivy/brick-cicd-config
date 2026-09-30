@@ -1,0 +1,10 @@
+#!/bin/sh
+# Keep the newest two versions of each app image on Docker Hub, on both nodes
+# and on brick9000 (brick-k8s-config's prune_images.py). Dry run unless APPLY=true.
+set -eu
+. "$(dirname "$0")/lib.sh"
+script=$(mirror brick-k8s-config)/scripts/prune_images.py
+if [ "${APPLY:-false}" = true ]; then
+    exec python3 "$script" --apply
+fi
+exec python3 "$script"

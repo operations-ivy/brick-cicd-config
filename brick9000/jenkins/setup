@@ -1,0 +1,27 @@
+#!/bin/sh
+# One-time setup for Jenkins on brick9000 (install.sh runs it; safe to rerun:
+# nothing that exists is replaced). Creates the secrets compose.yaml mounts,
+# Jenkins' home with its ssh config, and brick-status' read-only login.
+# Secrets are never printed; they live only in ~/.config/brick-jenkins/secrets.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+secrets=$HOME/.config/brick-jenkins/secrets
+home=$HOME/.local/share/brick-jenkins
+
+umask 077
+mkdir -p "$secrets" "$home/.ssh"
+for name in admin_password brick_status_password webhook_secret casc_reload_token; do
+    [ -s "$secrets/$name" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=\n' >"$secrets/$name"
+done
+[ -s "$secrets/ssh_key" ] || ssh-keygen -q -t ed25519 -N '' -C "jenkins@brick9000" -f "$secrets/ssh_key"
+cp "$here/ssh_config" "$home/.ssh/config"
+
+# brick-status reads job state as the read-only brick-status user.
+env_file=$HOME/.config/brick-status/env
+if [ -f "$env_file" ] && ! grep -q '^BRICK_STATUS_JENKINS_PASSWORD=' "$env_file"; then
+    printf 'BRICK_STATUS_JENKINS_PASSWORD=%s\n' "$(cat "$secrets/brick_status_password")" >>"$env_file"
+fi
+
+echo "Jenkins secrets are in $secrets."
+echo "Authorize Jenkins' key for zaphod on brick420, brick2000 and brick9000 (see the README):"
+cat "$secrets/ssh_key.pub"

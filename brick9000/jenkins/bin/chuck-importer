@@ -1,0 +1,10 @@
+#!/bin/sh
+# Re-run the chucks-wisdom joke importer. A Job can't be re-run in place, so
+# delete it and apply it again from the chucks-wisdom mirror.
+set -eu
+. "$(dirname "$0")/lib.sh"
+use_cluster
+manifest=$(mirror chucks-wisdom)/k8s_config/importer/importer-job.yaml
+kubectl -n chuck delete job importer --ignore-not-found --wait
+kubectl apply -f "$manifest"
+wait_for_job chuck importer
