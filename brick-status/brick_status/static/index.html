@@ -169,6 +169,7 @@
 <header>
   <h1>brick<span class="cur">_</span>9000</h1><span class="view" id="view"></span>
   <span class="spacer"></span>
+  <span class="svc ok" id="awake" hidden></span>
   <span class="svc warn" id="internet" hidden>Internet Down</span>
   <span class="svc fail" id="sshd" hidden>SSHD Down</span>
   <span class="fresh mono" id="fresh"></span>
@@ -335,6 +336,11 @@ function render(s) {
   // Outside our control, so it's a heads-up, not a failure: the checks it explains
   // (image pulls, WiGLE uploads) are downgraded while it's down.
   document.getElementById("internet").hidden = s.host?.internet !== false;
+  // Woken by the side button during the quiet schedule: say when it turns off again.
+  const awake = document.getElementById("awake");
+  awake.hidden = !s.awake_until;
+  if (s.awake_until) awake.textContent = "Awake until " +
+    new Date(s.awake_until * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
   const age = s.updated ? Math.round(s.now - s.updated) : null;
   const fresh = document.getElementById("fresh");

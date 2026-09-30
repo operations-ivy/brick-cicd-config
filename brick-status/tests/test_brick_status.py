@@ -5,7 +5,7 @@ import zlib
 from datetime import datetime, time
 
 from brick_status import build, checks, host, lights, patterns
-from brick_status.board import ACTIVE, IDLE, QUIET, Board, in_quiet_hours
+from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS
 
 
@@ -28,9 +28,43 @@ class QuietHoursTest(unittest.TestCase):
         self.assertFalse(in_quiet_hours(time(3), time(0), time(0)))
 
 
+class QuietScheduleTest(unittest.TestCase):
+    WORK = QuietSchedule.parse("00:00-06:00; 2026-10-09: Mon 00:00-Fri 16:00")
+
+    def quiet(self, when):
+        return self.WORK.is_quiet(datetime.fromisoformat(when))
+
+    def test_daily_until_the_change(self):
+        self.assertTrue(self.quiet("2026-10-01 03:00"))
+        self.assertFalse(self.quiet("2026-10-01 12:00"))
+        self.assertFalse(self.quiet("2026-10-08 23:59"))
+
+    def test_work_week_from_october_9(self):
+        self.assertTrue(self.quiet("2026-10-09 00:00"))   # Friday, the change: off until 16:00
+        self.assertTrue(self.quiet("2026-10-09 15:59"))
+        self.assertFalse(self.quiet("2026-10-09 16:00"))  # on all weekend, overnight too
+        self.assertFalse(self.quiet("2026-10-10 03:00"))
+        self.assertFalse(self.quiet("2026-10-11 23:59"))  # through the end of Sunday
+        self.assertTrue(self.quiet("2026-10-12 00:00"))   # off from Monday 00:00
+        self.assertTrue(self.quiet("2026-10-14 12:00"))
+        self.assertFalse(self.quiet("2026-10-16 17:00"))
+
+    def test_window_across_the_end_of_the_week(self):
+        weekend = QuietSchedule.parse("Sat 00:00-Mon 06:00")
+        self.assertTrue(weekend.is_quiet(datetime(2026, 10, 11, 12)))  # Sunday
+        self.assertTrue(weekend.is_quiet(datetime(2026, 10, 12, 5)))   # Monday 05:00
+        self.assertFalse(weekend.is_quiet(datetime(2026, 10, 12, 6)))
+
+    def test_none_and_bad_input(self):
+        self.assertFalse(QuietSchedule.parse("none").is_quiet(datetime(2026, 10, 1, 3)))
+        for bad in ("Mon 00:00-16:00", "Xyz 00:00-Fri 16:00", "midnight-6am", "2026-13-01: 00:00-06:00"):
+            with self.assertRaises(ValueError, msg=bad):
+                QuietSchedule.parse(bad)
+
+
 class BoardTest(unittest.TestCase):
     def setUp(self):
-        self.board = Board(VIEWS, active_seconds=120, quiet_start=time(0), quiet_end=time(6))
+        self.board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("00:00-06:00"), wake_seconds=1800)
 
     def test_idle_shows_overview(self):
         self.assertEqual(self.board.mode(ts(12)), IDLE)
@@ -43,17 +77,35 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.board.mode(ts(12, 3)), IDLE)
         self.assertEqual(self.board.view(ts(12, 3)), 0)
 
-    def test_quiet_hours_and_wake(self):
+    def test_keys_do_nothing_while_quiet(self):
         self.assertEqual(self.board.mode(ts(3)), QUIET)
         self.board.press_view(1, ts(3))
-        self.assertEqual(self.board.mode(ts(3, 1)), ACTIVE)
-        self.assertEqual(self.board.mode(ts(3, 5)), QUIET)
+        self.board.step_view(1, ts(3))
+        self.board.wake(ts(3))
+        self.assertEqual(self.board.mode(ts(3, 1)), QUIET)
+
+    def test_side_button_wakes_for_30_minutes(self):
+        self.assertTrue(self.board.wake_button(ts(3)))
+        self.assertEqual(self.board.mode(ts(3, 1)), IDLE)
+        self.assertEqual(self.board.awake_until(ts(3, 1)), ts(3, 30))
+        self.board.press_view(2, ts(3, 10))  # the other buttons work while it's awake
+        self.assertEqual(self.board.view(ts(3, 11)), 2)
+        self.assertEqual(self.board.mode(ts(3, 29)), IDLE)
+        self.assertEqual(self.board.mode(ts(3, 30)), QUIET)
+        self.assertIsNone(self.board.awake_until(ts(3, 30)))
+
+    def test_side_button_does_nothing_while_on(self):
+        self.assertFalse(self.board.wake_button(ts(12)))  # already on: daytime
+        self.assertIsNone(self.board.awake_until(ts(12)))
+        self.assertTrue(self.board.wake_button(ts(3)))
+        self.assertFalse(self.board.wake_button(ts(3, 20)))  # already awake: no extension
+        self.assertEqual(self.board.mode(ts(3, 30)), QUIET)
 
     def test_other_key_wakes_without_changing_view(self):
-        self.board.press_view(2, ts(2, 50))
-        self.board.wake(ts(3))
-        self.assertEqual(self.board.mode(ts(3, 1)), ACTIVE)
-        self.assertEqual(self.board.view(ts(3, 1)), 2)
+        self.board.press_view(2, ts(11, 50))
+        self.board.wake(ts(12))
+        self.assertEqual(self.board.mode(ts(12, 1)), ACTIVE)
+        self.assertEqual(self.board.view(ts(12, 1)), 2)
 
     def test_step_wraps(self):
         self.board.step_view(-1, ts(12))

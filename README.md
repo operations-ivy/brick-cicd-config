@@ -131,15 +131,26 @@ The board has three modes:
 | --- | --- | --- | --- |
 | idle | no press in the last 2 minutes | overview | the most important event (below) |
 | active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
-| quiet | 00:00-06:00 | off | off; any cabinet key wakes the board into active mode |
+| quiet | the quiet schedule (below) | off | off; only the side button does anything: it turns everything on for 30 minutes |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
 Cluster; bottom-left picks wigle-sync; the other two are free for now. The
 joystick left/right steps through the views. The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,
-Coin, joystick up/down) don't change the view but still count as input: they
-wake the board overnight.
+Coin, joystick up/down) don't change the view but count as input.
+
+The quiet schedule is `BRICK_STATUS_QUIET` in the env file: daily windows
+(`00:00-06:00`) or weekly ones (`Mon 00:00-Fri 16:00`), `;`-separated entries
+each optionally starting on a date (`2026-10-09: ...`, from midnight). The
+latest entry that has started applies, so a schedule change can be set up
+ahead of time. brick9000's is off overnight (00:00-06:00) until 2026-10-09,
+then off through the work week, Monday 00:00 to Friday 16:00, and on all
+weekend. While it's quiet the cabinet keys do nothing except the side button
+(`KEY_ESC`): it turns everything on for 30 minutes
+(`BRICK_STATUS_WAKE_SECONDS`), and the header shows "Awake until ..." until
+then. Pressed while the board is already on, including during those 30
+minutes, it does nothing.
 
 Idle light patterns, highest priority first:
 
