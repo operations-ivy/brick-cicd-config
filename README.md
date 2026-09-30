@@ -83,8 +83,17 @@ reads green/red build state from.
   in `brick-k8s-config`) about builds (Jenkins), the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
   targets) and wigle-sync (Pushgateway metrics, plus a running CronJob pod
-  meaning "uploading"). wigle-sync only alerts when every run for 2 hours has
-  had errors; the pwnagotchi being away and syncs pausing are normal.
+  meaning "uploading"). The wigle-sync view has three rows: how the last sync
+  with the Pi went (OK, failed, or waiting for internet), how many files it
+  uploaded, and when the next one runs. It only alerts when every run for 2
+  hours has had errors; the pwnagotchi being away and syncs pausing are normal.
+- It also checks the internet itself, by opening a TCP connection to three
+  public DNS anycast addresses (1.1.1.1, 8.8.8.8, 9.9.9.9); any one answering
+  means it's up. An ISP outage is outside our control, so it isn't a failure:
+  the header shows an orange "Internet Down", pods stuck in
+  `ImagePullBackOff`/`ErrImagePull` (and the workloads they belong to) count
+  as degraded rather than down, and wigle-sync counts uploads it couldn't make
+  as deferred, not failed.
 - It serves the board page on `127.0.0.1:8765`, which Chromium shows in
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second,
   and reloads itself when brick-status restarts, so a deploy updates the

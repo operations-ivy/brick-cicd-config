@@ -1,9 +1,10 @@
+import socket
 import struct
 import unittest
 import zlib
 from datetime import datetime, time
 
-from brick_status import build, checks, lights, patterns
+from brick_status import build, checks, host, lights, patterns
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, in_quiet_hours
 from brick_status.config import VIEWS
 
@@ -217,25 +218,75 @@ class ChecksTest(unittest.TestCase):
     def test_jenkins_down(self):
         self.assertEqual(checks.build_checks(FakeProm({}))[0].state, "fail")
 
-    def test_wigle_uploading_and_pi_away_is_not_an_alert(self):
-        now = 1_000_000.0
-        prom = FakeProm({
-            "kube_job_status_active": [({}, 1)],
-            "last_success": [({}, now - 4 * 3600)],
-            "pi_online": [({}, 0)],
+    @staticmethod
+    def wigle_prom(metrics: dict, **extra) -> "FakeProm":
+        return FakeProm({
+            "kube_job_status_active": extra.get("running", []),
+            "min_over_time": extra.get("stuck", []),
+            "next_schedule_time": extra.get("next", []),
+            "wigle_sync_.+": [({"__name__": f"wigle_sync_{k}"}, v) for k, v in metrics.items()],
         })
-        got = {c.name: c.state for c in checks.wigle_checks(prom, now)}
-        self.assertEqual(got, {"sync": "active", "last success": "ok", "pwnagotchi": "ok"})
+
+    def test_wigle_shows_last_sync_uploads_and_next_sync(self):
+        now = datetime(2026, 9, 30, 17, 10).timestamp()
+        prom = self.wigle_prom({"last_pi_online_timestamp_seconds": now - 2 * 3600,
+                                "last_sync_files_uploaded": 4, "last_sync_files_failed": 0,
+                                "files_uploaded": 0, "pi_online": 0},
+                               next=[({}, datetime(2026, 9, 30, 18, 0).timestamp())])
+        got = [(c.name, c.state, c.detail) for c in checks.wigle_checks(prom, now)]
+        self.assertEqual(got, [("last sync", "ok", "OK, 2h ago"),
+                               ("files uploaded", "ok", "4"),
+                               ("next sync", "ok", "6:00 PM")])
+
+        tomorrow = self.wigle_prom({}, next=[({}, datetime(2026, 10, 1, 0, 0).timestamp())])
+        self.assertEqual(checks.wigle_checks(tomorrow, now)[-1].detail, "Thu 12:00 AM")
+
+    def test_wigle_waiting_for_internet_is_not_a_fault(self):
+        prom = self.wigle_prom({"last_pi_online_timestamp_seconds": 100, "last_sync_files_uploaded": 0,
+                                "last_sync_files_failed": 0, "last_sync_files_deferred": 4})
+        last = checks.wigle_checks(prom, 200)[0]
+        self.assertEqual((last.state, last.detail), ("ok", "waiting for internet, 4 held"))
+
+    def test_wigle_uploading_shows_active(self):
+        prom = self.wigle_prom({"last_pi_online_timestamp_seconds": 100}, running=[({}, 1)])
+        self.assertEqual(checks.wigle_checks(prom, 200)[0].state, "active")
 
     def test_wigle_fails_only_on_errors_persisting_2h(self):
-        prom = FakeProm({"min_over_time(wigle_sync_files_failed[2h])": [({}, 1)],
-                         "wigle_sync_files_failed": [({}, 3)]})
-        got = {c.name: c.state for c in checks.wigle_checks(prom, 0)}
-        self.assertEqual(got["errors"], "fail")
-        self.assertEqual(got["last run"], "ok")
+        metrics = {"last_pi_online_timestamp_seconds": 100, "last_sync_files_failed": 3}
+        stuck = self.wigle_prom(metrics, stuck=[({}, 1)])
+        self.assertEqual(checks.wigle_checks(stuck, 200)[0].state, "fail")
 
-        brief = FakeProm({"min_over_time": [({}, 0)], "wigle_sync_files_failed": [({}, 3)]})
-        self.assertNotIn("fail", {c.state for c in checks.wigle_checks(brief, 0)})
+        brief = self.wigle_prom(metrics, stuck=[({}, 0)])
+        self.assertEqual([c.state for c in checks.wigle_checks(brief, 200)], ["warn", "ok"])
+
+    def test_image_pulls_while_internet_down_are_degraded_not_down(self):
+        prom = FakeProm({
+            "waiting_reason": [({"namespace": "kubernetes-dashboard", "pod": "kubernetes-dashboard-566cd-ph8cq",
+                                 "reason": "ImagePullBackOff"}, 1),
+                               ({"namespace": "chuck", "pod": "reader-68-wrd2h", "reason": "CrashLoopBackOff"}, 1)],
+            "replicas_unavailable": [({"namespace": "kubernetes-dashboard", "deployment": "kubernetes-dashboard"}, 1),
+                                     ({"namespace": "chuck", "deployment": "reader"}, 1)],
+        })
+        online = {c.name: c.state for c in checks.cluster_checks(prom, internet=True)}
+        self.assertEqual(set(online.values()), {"fail"})
+
+        offline = {c.name: c.state for c in checks.cluster_checks(prom, internet=False)}
+        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard"], "warn")
+        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard-566cd-ph8cq"], "warn")
+        # A crash loop is the cluster's problem whatever the internet is doing.
+        self.assertEqual(offline["chuck/reader"], "fail")
+        self.assertEqual(offline["chuck/reader-68-wrd2h"], "fail")
+
+    def test_internet_up_if_any_probe_answers(self):
+        with socket.socket() as server:
+            server.bind(("127.0.0.1", 0))
+            server.listen()
+            live = server.getsockname()
+            with socket.socket() as closed:
+                closed.bind(("127.0.0.1", 0))
+                dead = closed.getsockname()
+            self.assertTrue(host.internet_up([dead, live], timeout=1))
+            self.assertFalse(host.internet_up([dead], timeout=1))
 
     def test_vitals_join_names_and_sort_by_number(self):
         prom = FakeProm({

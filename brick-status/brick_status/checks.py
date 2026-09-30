@@ -9,6 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
+from datetime import datetime
 
 OK, WARN, FAIL, ACTIVE, UNKNOWN = "ok", "warn", "fail", "active", "unknown"
 # Worst first, for rolling a group up into one state.
@@ -21,6 +22,10 @@ JENKINS_RESULTS = {0: (OK, "success"), 1: (WARN, "unstable"), 2: (FAIL, "failure
 # wigle-sync runs hourly and does nothing while the Pi is away, which is fine.
 # Only errors that every run has hit for this long are worth flagging.
 WIGLE_ERROR_WINDOW = "2h"
+
+# Waiting reasons that only mean "couldn't reach the registry". While the
+# internet is down that's the ISP, not the cluster, so they're degraded, not down.
+IMAGE_PULL_REASONS = {"ImagePullBackOff", "ErrImagePull"}
 
 
 @dataclass
@@ -51,25 +56,37 @@ class Prometheus:
         return [(r["metric"], float(r["value"][1])) for r in body["data"]["result"]]
 
 
-def cluster_checks(prom: Prometheus) -> list[Check]:
+def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
     checks = []
     for m, v in prom.query('kube_node_status_condition{condition="Ready",status="true"}'):
         checks.append(Check("cluster", m["node"], OK if v == 1 else FAIL,
                             "Ready" if v == 1 else "NotReady"))
+
+    stuck = prom.query('sum by (namespace, pod, reason) (kube_pod_container_status_waiting_reason'
+                       '{reason=~"CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError"}) > 0')
+    # Pods that can't start only because the registry is out of reach.
+    offline = [] if internet else [(m["namespace"], m["pod"]) for m, _ in stuck
+                                   if m["reason"] in IMAGE_PULL_REASONS]
 
     unavailable = prom.query("kube_deployment_status_replicas_unavailable > 0")
     unready_sts = prom.query(
         "kube_statefulset_replicas - kube_statefulset_status_replicas_ready > 0")
     for m, v in unavailable + unready_sts:
         name = m.get("deployment") or m.get("statefulset")
-        checks.append(Check("cluster", f"{m['namespace']}/{name}", FAIL, f"{int(v)} not ready"))
+        # A workload's pods are named <workload>-<suffix>.
+        if any(ns == m["namespace"] and pod.startswith(f"{name}-") for ns, pod in offline):
+            checks.append(Check("cluster", f"{m['namespace']}/{name}", WARN,
+                                f"{int(v)} not ready, internet down"))
+        else:
+            checks.append(Check("cluster", f"{m['namespace']}/{name}", FAIL, f"{int(v)} not ready"))
     if not unavailable and not unready_sts:
         checks.append(Check("cluster", "workloads", OK, "all replicas ready"))
 
-    stuck = prom.query('sum by (namespace, pod, reason) (kube_pod_container_status_waiting_reason'
-                       '{reason=~"CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError"}) > 0')
     for m, _ in stuck:
-        checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", FAIL, m["reason"]))
+        if (m["namespace"], m["pod"]) in offline:
+            checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", WARN, f"{m['reason']}, internet down"))
+        else:
+            checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", FAIL, m["reason"]))
 
     for m, _ in prom.query("up == 0"):
         checks.append(Check("cluster", f"scrape {m.get('job', '?')}", WARN,
@@ -98,39 +115,49 @@ def build_checks(prom: Prometheus) -> list[Check]:
 
 
 def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
+    """Three rows: how the last sync with the Pi went, what it uploaded, and when the next one runs."""
     now = time.time() if now is None else now
-    checks = []
+    v = {m["__name__"].removeprefix("wigle_sync_"): val
+         for m, val in prom.query('{__name__=~"wigle_sync_.+"}')}
+    # Runs while the Pi is away don't touch last_sync_*; before wigle-sync 0.1.4
+    # pushed them, the last run's own counts are the closest there is.
+    uploaded = v.get("last_sync_files_uploaded", v.get("files_uploaded"))
+    failed = v.get("last_sync_files_failed", v.get("files_failed", 0))
+    deferred = v.get("last_sync_files_deferred", 0)
+    last_at = v.get("last_pi_online_timestamp_seconds")
+    when = f"{_ago(now - last_at)} ago" if last_at else ""
 
     running = prom.query('sum(kube_job_status_active{namespace="wigle"})')
-    if running and running[0][1] > 0:
-        checks.append(Check("wigle", "sync", ACTIVE, "uploading"))
-
-    # files_failed is 0 on runs where the Pi is offline, so this only fires on real errors.
+    # files_failed is 0 on runs where the Pi is away or the internet is down, so
+    # this only fires on real errors that every run for the window has hit.
     stuck = prom.query(f"min_over_time(wigle_sync_files_failed[{WIGLE_ERROR_WINDOW}])")
-    if stuck and stuck[0][1] > 0:
-        checks.append(Check("wigle", "errors", FAIL, f"failing for {WIGLE_ERROR_WINDOW}+"))
+    if running and running[0][1] > 0:
+        last = Check("wigle", "last sync", ACTIVE, "uploading now")
+    elif stuck and stuck[0][1] > 0:
+        last = Check("wigle", "last sync", FAIL, f"failing for {WIGLE_ERROR_WINDOW}+")
+    elif not last_at:
+        last = Check("wigle", "last sync", OK, "none yet")
+    elif failed:
+        last = Check("wigle", "last sync", WARN, f"{int(failed)} failed, {when}")
+    elif deferred:
+        # The internet was down; the files wait on the Pi for the next run. Not a fault.
+        last = Check("wigle", "last sync", OK, f"waiting for internet, {int(deferred)} held")
+    else:
+        last = Check("wigle", "last sync", OK, f"OK, {when}")
 
-    last_ok = prom.query("wigle_sync_last_success_timestamp_seconds")
-    checks.append(Check("wigle", "last success", OK,
-                        f"{_ago(now - last_ok[0][1])} ago" if last_ok else "no runs recorded"))
-
-    online = prom.query("wigle_sync_pi_online")
-    if online:
-        checks.append(Check("wigle", "pwnagotchi", OK, "online" if online[0][1] == 1 else "offline"))
-
-    failed = prom.query("wigle_sync_files_failed")
-    uploaded = prom.query("wigle_sync_files_uploaded")
-    if failed and failed[0][1] > 0:
-        checks.append(Check("wigle", "last run", OK, f"{int(failed[0][1])} files failed"))
-    elif uploaded:
-        checks.append(Check("wigle", "last run", OK, f"{int(uploaded[0][1])} files uploaded"))
+    checks = [last, Check("wigle", "files uploaded", OK, "—" if uploaded is None else str(int(uploaded)))]
+    nxt = prom.query('kube_cronjob_next_schedule_time{namespace="wigle",cronjob="wigle-sync"}')
+    if nxt:
+        checks.append(Check("wigle", "next sync", OK, _clock(nxt[0][1], now)))
     return checks
 
 
-def collect(prom: Prometheus) -> list[Check]:
+def collect(prom: Prometheus, internet: bool = True) -> list[Check]:
     """Run every check. A group whose queries fail becomes one unknown check."""
     checks = []
-    for group, fn in [("builds", build_checks), ("cluster", cluster_checks), ("wigle", wigle_checks)]:
+    for group, fn in [("builds", build_checks),
+                      ("cluster", lambda p: cluster_checks(p, internet)),
+                      ("wigle", wigle_checks)]:
         try:
             checks.extend(fn(prom))
         except Exception as e:  # network errors, bad responses: show them, keep going
@@ -158,6 +185,13 @@ def _ago(seconds: float) -> str:
     if seconds < 172800:
         return f"{seconds // 3600}h"
     return f"{seconds // 86400}d"
+
+
+def _clock(ts: float, now: float) -> str:
+    """6:00 PM today, or Thu 6:00 PM on another day, in brick9000's local time."""
+    at, today = datetime.fromtimestamp(ts), datetime.fromtimestamp(now)
+    hm = at.strftime("%I:%M %p").lstrip("0")
+    return hm if at.date() == today.date() else f"{at:%a} {hm}"
 
 
 VITALS_QUERIES = {
