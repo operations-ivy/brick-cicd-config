@@ -1,5 +1,6 @@
-# Jenkins on brick9000, at http://jenkins.local (port 80). Started by
-# install.sh and kept current by deploy; Docker restarts it on boot.
+# Jenkins on brick9000, at http://jenkins.local through the proxy on port 80
+# (brick9000/proxy); it listens only on localhost itself. Started by install.sh
+# and kept current by deploy; Docker restarts it on boot.
 #   docker compose -f ~/brick-cicd-config/brick9000/jenkins/compose.yaml up -d --build
 # Logs: journalctl CONTAINER_NAME=brick-jenkins
 name: brick-jenkins
@@ -10,7 +11,7 @@ services:
     container_name: brick-jenkins
     restart: unless-stopped
     ports:
-      - "80:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # Lets deploy reload the configuration (and so the jobs) after a git pull.
       CASC_RELOAD_TOKEN: ${CASC_RELOAD_TOKEN:?run brick9000/jenkins/setup first}

@@ -29,7 +29,7 @@ class Settings:
     prometheus_url: str = "http://prometheus.local"
     # Jenkins runs on brick9000 itself (brick9000/jenkins); read as its
     # read-only brick-status user, whose password setup puts in the env file.
-    jenkins_url: str = "http://127.0.0.1"
+    jenkins_url: str = "http://127.0.0.1:8080"
     jenkins_user: str = "brick-status"
     jenkins_password: str = ""
     poll_seconds: float = 15.0

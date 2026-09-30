@@ -1,0 +1,19 @@
+# Caddy on brick9000's port 80, routing by name (see Caddyfile). Host
+# networking, so it reaches Jenkins and brick-status on localhost.
+#   ~/brick-cicd-config/brick9000/proxy/up
+name: brick-proxy
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    container_name: brick-proxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    logging:
+      driver: journald
+      options:
+        tag: brick-proxy
+volumes:
+  caddy-data:

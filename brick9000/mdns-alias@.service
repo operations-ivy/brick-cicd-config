@@ -1,10 +1,10 @@
 [Unit]
-Description=Announce jenkins.local (Jenkins on brick9000) over mDNS
+Description=Announce %i.local (a name for brick9000) over mDNS
 After=network-online.target
 
 [Service]
 # -R: no reverse record; the address already reverse-resolves to brick9000.local.
-ExecStart=/bin/sh -c 'exec avahi-publish -a -R jenkins.local "$(hostname -I | cut -d" " -f1)"'
+ExecStart=/bin/sh -c 'exec avahi-publish -a -R %i.local "$(hostname -I | cut -d" " -f1)"'
 Restart=always
 RestartSec=10
 
