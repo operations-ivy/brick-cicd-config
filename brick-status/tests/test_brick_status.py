@@ -1,8 +1,12 @@
+import itertools
+import re
 import socket
+import subprocess
 import struct
 import unittest
 import zlib
 from datetime import datetime, time
+from pathlib import Path
 
 from brick_status import build, checks, host, lights, patterns
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, in_quiet_hours
@@ -205,18 +209,39 @@ class FakeProm:
         return []
 
 
-class ChecksTest(unittest.TestCase):
-    def test_jenkins_results(self):
-        prom = FakeProm({
-            'up{job="jenkins"}': [({}, 1)],
-            "executors_busy": [({}, 1)],
-            "last_build_result_ordinal": [({"jenkins_job": "b"}, 2), ({"jenkins_job": "a"}, 0)],
-        })
-        got = [(c.name, c.state) for c in checks.build_checks(prom)]
-        self.assertEqual(got, [("running", "active"), ("a", "ok"), ("b", "fail")])
+class FakeJenkins:
+    def __init__(self, jobs):
+        self._jobs = jobs
 
-    def test_jenkins_down(self):
-        self.assertEqual(checks.build_checks(FakeProm({}))[0].state, "fail")
+    def jobs(self):
+        return self._jobs
+
+
+class ChecksTest(unittest.TestCase):
+    def test_jenkins_jobs_running_and_finished(self):
+        now = 10_000.0
+        jenkins = FakeJenkins([
+            {"name": "wigle-sync-now", "lastBuild": {"building": True, "timestamp": (now - 90) * 1000},
+             "lastCompletedBuild": {"result": "SUCCESS", "timestamp": 0}},
+            {"name": "prune-images", "lastBuild": {"building": False},
+             "lastCompletedBuild": {"result": "FAILURE", "timestamp": (now - 7200) * 1000}},
+            {"name": "mirror-repos", "lastBuild": None, "lastCompletedBuild": None},
+        ])
+        got = [(c.name, c.state, c.detail) for c in checks.build_checks(jenkins, now)]
+        self.assertEqual(got, [("mirror-repos", "ok", "not run yet"),
+                               ("prune-images", "fail", "failed 2h ago"),
+                               ("wigle-sync-now", "active", "running 90s")])
+
+    def test_jenkins_down_is_a_failure(self):
+        class Down:
+            def jobs(self):
+                raise OSError("connection refused")
+
+        [check] = checks.build_checks(Down())
+        self.assertEqual((check.name, check.state), ("jenkins", "fail"))
+
+    def test_jenkins_with_no_jobs(self):
+        self.assertEqual(checks.build_checks(FakeJenkins([]))[0].detail, "up, no jobs yet")
 
     @staticmethod
     def wigle_prom(metrics: dict, **extra) -> "FakeProm":
@@ -303,9 +328,44 @@ class ChecksTest(unittest.TestCase):
             def query(self, promql):
                 raise OSError("connection refused")
 
-        summary = checks.summarize(checks.collect(Broken()))
-        self.assertEqual(summary["overall"], "unknown")
+        summary = checks.summarize(checks.collect(Broken(), FakeJenkins([])))
+        self.assertEqual(summary["groups"]["cluster"]["state"], "unknown")
+        self.assertEqual(summary["groups"]["wigle"]["state"], "unknown")
         self.assertEqual(set(summary["groups"]), {"builds", "cluster", "wigle"})
+
+
+JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"
+
+
+class JenkinsJobsTest(unittest.TestCase):
+    """What seed.groovy expects of each job file, and scripts that at least parse.
+    deploy runs these before switching brick9000 to a new commit."""
+
+    def test_job_headers(self):
+        jobs = sorted((JENKINS / "jobs").glob("*.groovy"))
+        self.assertTrue(jobs)
+        for job in jobs:
+            header = list(itertools.takewhile(lambda l: l.startswith("//"), job.read_text().splitlines()))
+            lines = [l[2:].strip() for l in header]
+            about = [l for l in lines if not l.startswith(("param ", "cron "))]
+            self.assertTrue(about, f"{job.name}: no description comment")
+            for line in lines:
+                if line.startswith("param "):
+                    self.assertRegex(line, r"^param (\w+)=(\S*)\s*(.*)$", job.name)
+            self.assertIn("pipeline {", job.read_text(), job.name)
+            self.assertRegex(job.stem, r"^[a-z0-9-]+$")
+
+    def test_job_scripts_parse(self):
+        scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("setup", "up", "reload")]
+                   + [JENKINS.parent / n for n in ("build-image", "build-status.sh", "deploy", "install.sh")])
+        for script in scripts:
+            result = subprocess.run(["sh", "-n", str(script)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
+
+    def test_jobs_call_scripts_that_exist(self):
+        for job in (JENKINS / "jobs").glob("*.groovy"):
+            for path in re.findall(r"/brick-cicd-config/(brick9000/jenkins/bin/[\w-]+)", job.read_text()):
+                self.assertTrue((JENKINS.parents[1] / path).is_file(), f"{job.name}: {path} missing")
 
 
 if __name__ == "__main__":

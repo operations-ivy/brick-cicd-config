@@ -4,6 +4,7 @@ Each check has a state: ok, warn, fail, active (something in progress, like a
 build or a wigle-sync upload), or unknown (no data).
 """
 
+import base64
 import json
 import time
 import urllib.parse
@@ -15,9 +16,10 @@ OK, WARN, FAIL, ACTIVE, UNKNOWN = "ok", "warn", "fail", "active", "unknown"
 # Worst first, for rolling a group up into one state.
 SEVERITY = [FAIL, WARN, UNKNOWN, ACTIVE, OK]
 
-# Jenkins prometheus plugin's last_build_result_ordinal values.
-JENKINS_RESULTS = {0: (OK, "success"), 1: (WARN, "unstable"), 2: (FAIL, "failure"),
-                   3: (UNKNOWN, "not built"), 4: (WARN, "aborted")}
+# A finished Jenkins build's result, as the board shows it.
+JENKINS_RESULTS = {"SUCCESS": (OK, "passed"), "UNSTABLE": (WARN, "unstable"),
+                   "FAILURE": (FAIL, "failed"), "ABORTED": (WARN, "aborted"),
+                   "NOT_BUILT": (OK, "not built")}
 
 # wigle-sync runs hourly and does nothing while the Pi is away, which is fine.
 # Only errors that every run has hit for this long are worth flagging.
@@ -94,21 +96,46 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
     return checks
 
 
-def build_checks(prom: Prometheus) -> list[Check]:
-    up = prom.query('up{job="jenkins"}')
-    if not up or up[0][1] != 1:
-        return [Check("builds", "jenkins", FAIL, "controller not scraped")]
+class Jenkins:
+    """Jenkins on brick9000 itself, read directly rather than through the
+    cluster's Prometheus, so the board still shows jobs while the cluster is
+    down (exactly when the bootstrap jobs run)."""
+
+    TREE = "jobs[name,lastBuild[number,building,timestamp],lastCompletedBuild[result,timestamp]]"
+
+    def __init__(self, url: str, user: str, password: str, timeout: float = 5.0):
+        self.url = url
+        self.timeout = timeout
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        self.headers = {"Authorization": f"Basic {token}"}
+
+    def jobs(self) -> list[dict]:
+        qs = urllib.parse.urlencode({"tree": self.TREE})
+        req = urllib.request.Request(f"{self.url}/api/json?{qs}", headers=self.headers)
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.load(resp)["jobs"]
+
+
+def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
+    """One row per Jenkins job: running (with how long), or its last result and when."""
+    now = time.time() if now is None else now
+    try:
+        jobs = jenkins.jobs()
+    except Exception as e:  # it runs on this machine, so unreachable means it's down
+        return [Check("builds", "jenkins", FAIL, f"down: {e}")]
 
     checks = []
-    busy = prom.query("default_jenkins_executors_busy")
-    if busy and busy[0][1] > 0:
-        checks.append(Check("builds", "running", ACTIVE, f"{int(busy[0][1])} building"))
-
-    for m, v in sorted(prom.query("default_jenkins_builds_last_build_result_ordinal"),
-                       key=lambda r: r[0].get("jenkins_job", "")):
-        state, word = JENKINS_RESULTS.get(int(v), (UNKNOWN, f"result {int(v)}"))
-        checks.append(Check("builds", m.get("jenkins_job", "?"), state, word))
-
+    for job in sorted(jobs, key=lambda j: j["name"]):
+        last, done = job.get("lastBuild") or {}, job.get("lastCompletedBuild")
+        if last.get("building"):
+            checks.append(Check("builds", job["name"], ACTIVE,
+                                f"running {_ago(now - last['timestamp'] / 1000)}"))
+        elif not done:
+            checks.append(Check("builds", job["name"], OK, "not run yet"))
+        else:
+            state, word = JENKINS_RESULTS.get(done.get("result"), (UNKNOWN, str(done.get("result"))))
+            checks.append(Check("builds", job["name"], state,
+                                f"{word} {_ago(now - done['timestamp'] / 1000)} ago"))
     if not checks:
         checks.append(Check("builds", "jenkins", OK, "up, no jobs yet"))
     return checks
@@ -152,11 +179,10 @@ def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
     return checks
 
 
-def collect(prom: Prometheus, internet: bool = True) -> list[Check]:
-    """Run every check. A group whose queries fail becomes one unknown check."""
-    checks = []
-    for group, fn in [("builds", build_checks),
-                      ("cluster", lambda p: cluster_checks(p, internet)),
+def collect(prom: Prometheus, jenkins: Jenkins, internet: bool = True) -> list[Check]:
+    """Run every check. A group whose Prometheus queries fail becomes one unknown check."""
+    checks = build_checks(jenkins)
+    for group, fn in [("cluster", lambda p: cluster_checks(p, internet)),
                       ("wigle", wigle_checks)]:
         try:
             checks.extend(fn(prom))

@@ -87,6 +87,17 @@
 
   #content { min-height: 0; }
 
+  /* Jenkins' portrait: the pixel-art butler, or the horned one in flames when a
+     job has failed. Art from jenkins.io (CC BY-SA 3.0), credited on the Jenkins view. */
+  .tile .butler { position: absolute; right: 0.7em; bottom: 0.6em; height: 62%; image-rendering: pixelated; }
+  .tile.art { padding-right: 4.6em; }  /* keep the text clear of the portrait */
+  .tile.fail .butler { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .jenkins { display: grid; grid-template-columns: auto 1fr; gap: 0.8em; align-items: start; min-height: 0; }
+  .portrait { display: grid; justify-items: center; gap: 0.3em; padding: 0.8em 1.1em 0.6em; --notch: 0.8em; }
+  .portrait img { height: 8em; image-rendering: pixelated; }
+  .portrait.fail img { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .portrait .credit { font-size: 0.42em; color: var(--dim); text-align: center; line-height: 1.3; }
+
   /* Host vitals, overview only: one compact readout per host, side by side.
      No numbers: colour carries the level (green / yellow / red). */
   .vitals { display: none; padding: 0.45em 1.4em 0.5em 0.8em; --notch: 0.7em; }
@@ -188,9 +199,9 @@
 <script src="/static/vendor/addon-fit.js"></script>
 <script src="/static/vendor/addon-webgl.js"></script>
 <script>
-const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync" };
+const LABELS = { overview: "Overview", builds: "Jenkins", cluster: "Cluster", wigle: "wigle-sync" };
 const WORDS = {
-  builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Building", unknown: "No data" },
+  builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Running", unknown: "No data" },
   cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },
   wigle: { ok: "OK", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
 };
@@ -206,8 +217,18 @@ function tile(name, group) {
   const checks = group ? [...group.checks].sort(bySeverity) : [];
   const why = checks.filter(c => c.state === state || state === "ok").slice(0, 2)
     .map(c => `${c.name} ${c.detail}`).join(", ");
-  return `<div class="tile plate ${state}"><div><h2>${LABELS[name]}</h2><div class="why mono">${esc(why)}</div></div>
-          <div class="word">${WORDS[name][state]}</div></div>`;
+  const art = name === "builds" ? `<img class="butler" src="${butler(state)}" alt="">` : "";
+  return `<div class="tile plate ${state}${art ? " art" : ""}"><div><h2>${LABELS[name]}</h2><div class="why mono">${esc(why)}</div></div>
+          <div class="word">${WORDS[name][state]}</div>${art}</div>`;
+}
+
+// Jenkins' mood: in flames with horns when a job failed, the butler otherwise.
+const butler = state => `/static/vendor/jenkins/${state === "fail" ? "fire" : "pixelart"}.png`;
+
+function jenkinsView(group) {
+  const state = group ? group.state : "unknown";
+  return `<div class="jenkins"><div class="portrait plate ${state}"><img src="${butler(state)}" alt="">
+    <div class="credit mono">art: jenkins.io<br>CC BY-SA 3.0</div></div>${rows(group)}</div>`;
 }
 
 function rows(group) {
@@ -251,7 +272,8 @@ function crtLabel(s) {
   const failing = all.filter(c => c.state === "fail");
   const warning = all.filter(c => c.state === "warn");
   if (failing.length) return `${failing.length} failing: ${failing[0].name}`;
-  if (s.groups?.builds?.state === "active") return "Build running";
+  const running = (s.groups?.builds?.checks || []).find(c => c.state === "active");
+  if (running) return `Running: ${running.name}`;
   if (warning.length) return `${warning.length} degraded: ${warning[0].name}`;
   if (s.overall === "unknown") return "No data from Prometheus";
   if (s.groups?.wigle?.state === "active") return "wigle-sync uploading";
@@ -319,7 +341,7 @@ function render(s) {
   document.getElementById("view").textContent = s.view === "overview" ? "" : LABELS[s.view];
   setHTML("content", s.view === "overview"
     ? `<div class="tiles">${["builds", "cluster", "wigle"].map(n => tile(n, g[n])).join("")}</div>`
-    : rows(g[s.view]));
+    : s.view === "builds" ? jenkinsView(g.builds) : rows(g[s.view]));
 
   if (overview) setHTML("vitals", vitals(s.vitals));
 
