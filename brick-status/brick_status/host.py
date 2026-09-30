@@ -1,7 +1,12 @@
-"""Checks on brick9000 itself: sshd, and its own vitals."""
+"""Checks on brick9000 itself: sshd, the internet connection, and its own vitals."""
 
 import os
+import socket
 import subprocess
+
+# Public DNS anycast addresses on three separate networks, all answering on 443.
+# If none of them answers, it's the home internet that's down, not one far end.
+INTERNET_PROBES = [("1.1.1.1", 443), ("8.8.8.8", 443), ("9.9.9.9", 443)]
 
 
 def sshd_running() -> bool:
@@ -14,6 +19,17 @@ def sshd_running() -> bool:
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def internet_up(probes=INTERNET_PROBES, timeout: float = 2.0) -> bool:
+    """True if any probe accepts a TCP connection."""
+    for addr in probes:
+        try:
+            with socket.create_connection(addr, timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 class LocalVitals:

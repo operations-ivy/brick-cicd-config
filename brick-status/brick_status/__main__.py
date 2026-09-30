@@ -23,7 +23,7 @@ class Status:
     def __init__(self):
         self._lock = threading.Lock()
         self._summary = checks.summarize([])
-        self._host = {"sshd": None}
+        self._host = {"sshd": None, "internet": None}
         self._vitals: list[dict] = []
         self.updated = 0.0
 
@@ -50,7 +50,9 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
                 log.warning("vitals query failed: %s", e)
                 vitals = []
             vitals.append(local.read())
-            status.set(checks.summarize(checks.collect(prom)), {"sshd": host.sshd_running()}, vitals)
+            internet = host.internet_up()
+            status.set(checks.summarize(checks.collect(prom, internet)),
+                       {"sshd": host.sshd_running(), "internet": internet}, vitals)
             wake.set()
         except Exception:
             # Keep polling; a dead poller would leave the board showing stale data.
