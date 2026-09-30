@@ -68,6 +68,7 @@ at `http://jenkins.local`, and jobs run on brick9000 itself (no agents).
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
 | `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 | `APPLY=true` to delete (dry run otherwise) |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
+| `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
 ### Set up
 

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Run the chucks-wisdom joke importer with this job's parameters as its
+# IMPORTER_* settings (see chucks-wisdom's k8s_config/CLUSTER_SETUP.md). A Job
+# can't be re-run in place, so delete it and apply it again from the
+# chucks-wisdom mirror. Unless WAIT=true, return once the importer is running:
+# a random import at the default pace takes many hours.
+set -eu
+. "$(dirname "$0")/lib.sh"
+use_cluster
+manifest=$(mirror chucks-wisdom)/k8s_config/importer/importer-job.yaml
+kubectl -n chuck delete job importer --ignore-not-found --wait
+kubectl set env --local -f "$manifest" -o yaml \
+    IMPORTER_QUERY="${QUERY:-}" \
+    IMPORTER_CATEGORIES="${CATEGORIES:-}" \
+    IMPORTER_JOKES="${JOKES:-1000}" \
+    IMPORTER_TRIES_PER_CATEGORY="${TRIES_PER_CATEGORY:-1000}" \
+    IMPORTER_MAX_DUPLICATES="${MAX_DUPLICATES:-50}" \
+    IMPORTER_SLEEP_SECONDS="${SLEEP_SECONDS:-60}" \
+    | kubectl apply -f -
+if [ "${WAIT:-false}" = true ]; then
+    wait_for_job chuck importer
+else
+    kubectl -n chuck wait --for=condition=Ready pod -l job-name=importer --timeout=5m
+    kubectl -n chuck logs job/importer --tail=20 || true
+    echo "The importer is running; follow it with: kubectl -n chuck logs -f job/importer"
+fi
