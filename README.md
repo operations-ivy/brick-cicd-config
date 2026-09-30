@@ -74,6 +74,14 @@ cluster's Prometheus scrape them. Both are needed: enabling
 Metric names are prefixed `default_jenkins_`. This is where `brick-status`
 reads green/red build state from.
 
+The controller starts without the internet: its image is pulled only if
+missing (`IfNotPresent`, the tag is pinned) and plugins are installed on the
+first start only (`initializeOnce`; they live on the PVC). The chart's
+defaults re-pull and re-download on every restart, so a restart during an ISP
+outage kept Jenkins down until the internet came back. To add or change a
+plugin, install it from the UI, or run the `helm upgrade` once with
+`--set controller.initializeOnce=false`.
+
 ## brick-status (the status board on brick9000)
 
 `brick-status/` is a small Python daemon (standard library plus

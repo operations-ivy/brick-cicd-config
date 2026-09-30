@@ -16,6 +16,16 @@ controller:
   # thread stacks so the JVM isn't OOM-killed.
   javaOpts: "-Xms512m -Xmx1280m"
   jenkinsUrl: http://jenkins.local
+  # Keep the controller startable without the internet. The chart's defaults
+  # re-pull the (pinned) image and re-download every plugin from
+  # updates.jenkins.io on each start, so a pod restart during an ISP outage
+  # left Jenkins down until the internet came back. Plugins persist on the
+  # PVC; initializeOnce installs them on the first start only. Changing the
+  # plugin list later means installing through the UI, or a helm upgrade with
+  # initializeOnce briefly set to false.
+  image:
+    pullPolicy: IfNotPresent
+  initializeOnce: true
   # A ServiceMonitor, which Prometheus picks up from any namespace.
   # brick-status reads build status from these metrics.
   prometheus:
