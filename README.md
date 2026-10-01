@@ -151,10 +151,10 @@ values). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 - The overview is a CRT window running the real `cmatrix -bs`, the three area
   tiles, and a compact vitals strip for brick420 and brick2000 (from
   node_exporter) and brick9000 itself (read from `/proc` and `/sys`, since it
-  runs no node_exporter). It shows no numbers: each host gets a pie for root
-  disk and LED segment bars for CPU, memory and temperature, green, yellow or
-  red by level (CPU and memory turn yellow at 85% and red at 95%, temperature
-  at 70°C and 80°C, disk at 85% and 95%). The header shows a red
+  runs no node_exporter). Each host gets a pie for root disk and LED segment
+  bars for CPU, memory and temperature, green, yellow or red by level (CPU and
+  memory turn yellow at 85% and red at 95%, temperature at 158°F and 176°F,
+  disk at 85% and 95%), and its CPU temperature in °F beside the bar. The header shows a red
   "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
 - cmatrix runs in a pseudo-terminal sized to the window; its output streams to
   the page as server-sent events and xterm.js draws it with its WebGL renderer
