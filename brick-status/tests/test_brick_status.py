@@ -3,6 +3,7 @@ import re
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time as pytime
 import unittest
@@ -422,6 +423,17 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(self.get("/", proxied=True), 200)
         self.assertEqual(self.get("/api/state", proxied=True), 200)
         self.assertEqual(self.get("/api/matrix?cols=80&rows=24", proxied=True), 403)
+
+
+class PixelArtTest(unittest.TestCase):
+    def test_committed_svgs_match_the_generator(self):
+        """Rerun brick-status/tools/pixel_art.py after editing a drawing."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import pixel_art
+        drawings = {"server-ok": pixel_art.healthy_server(), "server-fire": pixel_art.burning_server(),
+                    "plugs-connected": pixel_art.plugs(True), "plugs-disconnected": pixel_art.plugs(False)}
+        for name, canvas in drawings.items():
+            self.assertEqual((pixel_art.OUT / f"{name}.svg").read_text(), canvas.svg(), name)
 
 
 JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"

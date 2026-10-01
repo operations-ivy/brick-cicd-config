@@ -91,12 +91,14 @@
 
   #content { min-height: 0; }
 
-  /* Jenkins' portrait: the pixel-art butler, or the horned one in flames when a
-     job has failed. Art from jenkins.io (CC BY-SA 3.0), credited on the Jenkins view. */
-  /* Beside the title and word, above the detail line, so they never overlap. */
-  .tile .butler { position: absolute; right: 0.9em; top: 0.6em; height: calc(100% - 2.7em); image-rendering: pixelated; }
-  .tile.art h2, .tile.art .word { margin-right: 4em; }  /* clear of the portrait; the detail line runs full width */
-  .tile.fail .butler { animation: blink 1.2s steps(2, jump-none) infinite; }
+  /* Each tile's picture, by its state (see tileArt): Jenkins (jenkins.io art,
+     CC BY-SA 3.0, credited on the Jenkins view), and our own pixel-art server
+     and plugs (brick-status/tools/pixel_art.py). Beside the title and word,
+     above the detail line, so they never overlap. */
+  .tile .mascot { position: absolute; right: 0.9em; top: 0.6em; height: calc(100% - 2.7em); image-rendering: pixelated; }
+  .tile.art h2, .tile.art .word { margin-right: 4em; }  /* clear of the picture; the detail line runs full width */
+  .tile.fail .mascot { animation: blink 1.2s steps(2, jump-none) infinite; }
+  .tile.unknown .mascot { opacity: 0.4; }
   .jenkins { display: grid; grid-template-columns: auto 1fr; gap: 0.8em; align-items: start; min-height: 0; }
   .portrait { display: grid; justify-items: center; gap: 0.3em; padding: 0.8em 1.1em 0.6em; --notch: 0.8em; }
   .portrait img { height: 8em; image-rendering: pixelated; }
@@ -224,13 +226,22 @@ function tile(name, group) {
   const checks = group ? [...group.checks].sort(bySeverity) : [];
   const why = checks.filter(c => c.state === state || state === "ok").slice(0, 2)
     .map(c => `${c.name} ${c.detail}`).join(", ");
-  const art = name === "builds" ? `<img class="butler" src="${butler(state)}" alt="">` : "";
-  return `<div class="tile plate ${state}${art ? " art" : ""}"><h2>${LABELS[name]}</h2>
+  const art = `<img class="mascot" src="${tileArt(name, state)}" alt="">`;
+  return `<div class="tile plate ${state} art"><h2>${LABELS[name]}</h2>
           <div class="word">${WORDS[name][state]}</div><div class="why mono">${esc(why)}</div>${art}</div>`;
 }
 
 // Jenkins' mood: in flames with horns when a job failed, the butler otherwise.
 const butler = state => `/static/vendor/jenkins/${state === "fail" ? "fire" : "pixelart"}.png`;
+
+// Each overview tile's picture. The cluster's server burns when it's down; the
+// wigle-sync plugs are connected while syncing is OK (or uploading), pulled
+// apart otherwise (failing, behind, or no data).
+function tileArt(name, state) {
+  if (name === "builds") return butler(state);
+  if (name === "cluster") return `/static/art/${state === "fail" ? "server-fire" : "server-ok"}.svg`;
+  return `/static/art/${state === "ok" || state === "active" ? "plugs-connected" : "plugs-disconnected"}.svg`;
+}
 
 function jenkinsView(group) {
   const state = group ? group.state : "unknown";
