@@ -38,6 +38,7 @@ PALETTE = {
     "A": "#ffb020",  # amber: warning
     "H": "#ff8f8f",  # horn, highlight
     "N": "#d81e1e",  # horn
+    "i": "#f0d6b7",  # Jenkins' skin
 }
 
 
@@ -272,8 +273,13 @@ FOOYYYYOF...............FOYYYOOF
     glow = {"#ef3d3a": PALETTE["O"], "#d33833": PALETTE["F"]}  # his red disc catches fire
     for (x, y), colour in read_png(JENKINS / "pixelart.png", 8).items():
         c.dot(x0 + x, y0 + y, glow.get(colour, colour))
-    for x, y in ((15, 9), (16, 9), (17, 9), (20, 9), (21, 9), (17, 8), (20, 8)):
-        c.dot(x0 + x, y0 + y, "R")     # glowing eyes
+    c.draw(x0 + 13, y0 + 5, """
+.KK......KK
+iiKK...KKii
+iiiii.iiiii
+.KRYK.KYRK.
+..KK...KK..
+""")                                   # dastardly brows over narrowed, glowing eyes
     horn = """
 K.......
 KK......
