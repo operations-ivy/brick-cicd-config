@@ -117,7 +117,11 @@ stops announcing it). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   cluster is down, which is when the bootstrap jobs run. The Jenkins tile shows
   the pixel-art Jenkins, or the horned one in flames when a job has failed
   (artwork from [jenkins.io](https://jenkins.io/), CC BY-SA 3.0, credited on the
-  Jenkins view; see `static/vendor/jenkins/`).
+  Jenkins view; see `static/vendor/jenkins/`). The other tiles have our own
+  pixel art to match (`brick-status/tools/pixel_art.py` draws it into
+  `static/art/`): a smiling server for the cluster, or one on fire when it's
+  down, and two plugs for wigle-sync, connected while syncing is OK, pulled
+  apart and sparking otherwise.
 - It asks Prometheus (`http://prometheus.local`, an Ingress defined
   in `brick-k8s-config`) about the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
