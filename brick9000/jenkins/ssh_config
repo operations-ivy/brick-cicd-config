@@ -1,0 +1,10 @@
+# ~/.ssh/config for Jenkins on brick9000 (copied into its home by setup).
+# The key is brick9000's Jenkins key, authorized for zaphod on each host.
+Host *
+    User zaphod
+    IdentityFile ~/.ssh/id_ed25519
+    BatchMode yes
+    ConnectTimeout 10
+    # A reimaged host gets a new key; accept a host seen for the first time,
+    # refuse one that changed (remove its known_hosts line after a reimage).
+    StrictHostKeyChecking accept-new

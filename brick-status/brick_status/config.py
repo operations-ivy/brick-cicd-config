@@ -29,6 +29,11 @@ def _ints(value: str) -> list[int]:
 @dataclass
 class Settings:
     prometheus_url: str = "http://prometheus.local"
+    # Jenkins runs on brick9000 itself (brick9000/jenkins); read as its
+    # read-only brick-status user, whose password setup puts in the env file.
+    jenkins_url: str = "http://127.0.0.1:8080"
+    jenkins_user: str = "brick-status"
+    jenkins_password: str = ""
     poll_seconds: float = 15.0
     http_host: str = "127.0.0.1"
     http_port: int = 8765
@@ -61,6 +66,9 @@ class Settings:
         env = os.environ.get
         s.prometheus_url = env("BRICK_STATUS_PROMETHEUS_URL", s.prometheus_url).rstrip("/")
         s.poll_seconds = float(env("BRICK_STATUS_POLL_SECONDS", s.poll_seconds))
+        s.jenkins_url = env("BRICK_STATUS_JENKINS_URL", s.jenkins_url).rstrip("/")
+        s.jenkins_user = env("BRICK_STATUS_JENKINS_USER", s.jenkins_user)
+        s.jenkins_password = env("BRICK_STATUS_JENKINS_PASSWORD", s.jenkins_password)
         s.http_host = env("BRICK_STATUS_HTTP_HOST", s.http_host)
         s.http_port = int(env("BRICK_STATUS_HTTP_PORT", s.http_port))
         s.plasma_fifo = env("BRICK_STATUS_PLASMA_FIFO", s.plasma_fifo)

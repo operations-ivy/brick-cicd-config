@@ -41,6 +41,7 @@ class Status:
 
 def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     prom = checks.Prometheus(settings.prometheus_url)
+    jenkins = checks.Jenkins(settings.jenkins_url, settings.jenkins_user, settings.jenkins_password)
     local = host.LocalVitals(socket.gethostname())
     while True:
         try:
@@ -51,7 +52,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
                 vitals = []
             vitals.append(local.read())
             internet = host.internet_up()
-            status.set(checks.summarize(checks.collect(prom, internet)),
+            status.set(checks.summarize(checks.collect(prom, jenkins, internet)),
                        {"sshd": host.sshd_running(), "internet": internet}, vitals)
             wake.set()
         except Exception:

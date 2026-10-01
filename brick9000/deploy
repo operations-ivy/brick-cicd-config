@@ -37,7 +37,19 @@ fi
 
 git checkout --quiet --force --detach "$target"
 rm -f "$state/failed"
-if ! git diff --quiet "$current" "$target" -- brick9000/; then
+changed() { ! git diff --quiet "$current" "$target" -- "$@"; }
+# Jenkins reads its config, jobs and scripts from this clone. A changed image
+# needs a rebuild (a failed one leaves Jenkins running as it was); changed
+# config or job definitions need a reload; changed scripts need nothing.
+if changed brick9000/jenkins/Dockerfile brick9000/jenkins/plugins.txt brick9000/jenkins/compose.yaml; then
+    brick9000/jenkins/up || echo "deploy: Jenkins image rebuild failed; still running the old one" >&2
+elif changed brick9000/jenkins/casc.yaml brick9000/jenkins/seed.groovy brick9000/jenkins/jobs; then
+    brick9000/jenkins/reload || echo "deploy: Jenkins config reload failed" >&2
+fi
+if changed brick9000/proxy; then
+    brick9000/proxy/up || echo "deploy: proxy update failed" >&2
+fi
+if changed brick9000/ ':!brick9000/jenkins' ':!brick9000/proxy'; then
     echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
 fi
 systemctl --user restart brick-status

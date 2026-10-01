@@ -1,0 +1,45 @@
+# Jenkins configuration as code. Read from the mounted git clone at start-up
+# and on reload (deploy reloads it when brick9000/jenkins/ changes), so edits
+# made in the UI don't survive: change this file instead.
+# ${name} values come from the files in /run/secrets (see compose.yaml).
+jenkins:
+  systemMessage: >-
+    brick9000 Jenkins: bootstrap and maintenance jobs for the brick homelab.
+    Configured from brick-cicd-config/brick9000/jenkins; changes made here are overwritten.
+  # No agents: jobs run on brick9000 itself, which is the point (it works
+  # when the cluster doesn't). Two at once is plenty for a Pi 4.
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "${admin_password}"
+        # Read-only: brick-status polls job state for the board.
+        - id: brick-status
+          password: "${brick_status_password}"
+  authorizationStrategy:
+    globalMatrix:
+      entries:
+        - user:
+            name: admin
+            permissions:
+              - Overall/Administer
+        - user:
+            name: brick-status
+            permissions:
+              - Overall/Read
+              - Job/Read
+  crumbIssuer: standard
+
+unclassified:
+  location:
+    url: http://jenkins.local/
+
+security:
+  # The seed script is ours, from git; it reads files (the job definitions).
+  globalJobDslSecurityConfiguration:
+    useScriptSecurity: false
+
+jobs:
+  - file: /brick-cicd-config/brick9000/jenkins/seed.groovy

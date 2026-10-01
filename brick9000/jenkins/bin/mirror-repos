@@ -1,0 +1,26 @@
+#!/bin/sh
+# Keep local clones of the brick repos at origin/main, so the other jobs work
+# from them even when GitHub (or the internet) isn't reachable. A failed fetch
+# keeps the last copy and says so, but doesn't fail the job: the internet being
+# down isn't something this job can fix.
+set -eu
+. "$(dirname "$0")/lib.sh"
+mkdir -p "$MIRRORS"
+for repo in $REPOS; do
+    dir=$MIRRORS/$repo
+    if [ ! -d "$dir/.git" ]; then
+        # Clone beside it and rename, so a job reading the mirror never sees
+        # half a clone.
+        rm -rf "$dir.tmp"
+        if ! git clone --quiet "$GITHUB/$repo.git" "$dir.tmp"; then
+            echo "WARNING: couldn't clone $repo"
+            continue
+        fi
+        mv "$dir.tmp" "$dir"
+    elif ! git -C "$dir" fetch --quiet --prune origin; then
+        echo "WARNING: couldn't fetch $repo; keeping $(git -C "$dir" log -1 --format='%h from %cr')"
+        continue
+    fi
+    git -C "$dir" checkout --quiet --force --detach origin/main
+    echo "$repo: $(git -C "$dir" log -1 --format='%h %s (%cr)')"
+done

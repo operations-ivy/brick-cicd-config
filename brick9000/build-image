@@ -8,7 +8,7 @@
 # which needs `docker login` done once on brick9000. While it runs, the
 # buttons flash rainbow; brick-status then flashes green for a pushed image or
 # pulses red for a failed build. It reads the state from
-# $XDG_STATE_HOME/brick-build/status.json, which this script writes.
+# $XDG_STATE_HOME/brick-build/status.json, which this script writes (build-status.sh).
 #
 # Run it detached so an SSH drop doesn't kill the build, and the log lands in
 # the journal:
@@ -17,17 +17,7 @@ set -eu
 [ $# -ge 3 ] || { echo "usage: $0 <git-url> <ref> <image:tag> [dockerfile]" >&2; exit 2; }
 url=$1 ref=$2 image=$3 dockerfile=${4:-Dockerfile}
 
-state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-build
-mkdir -p "$state"
-started=$(date +%s)
-
-# One JSON line per state change, replaced atomically so brick-status never
-# reads half a file.
-write_status() {  # <state> [finished]
-    printf '{"state": "%s", "image": "%s", "ref": "%s", "pid": %d, "started": %d%s}\n' \
-        "$1" "$image" "$ref" $$ "$started" "${2:+, \"finished\": $2}" >"$state/status.json.tmp"
-    mv "$state/status.json.tmp" "$state/status.json"
-}
+. "$(dirname "$0")/build-status.sh"
 
 scratch=$(mktemp -d)
 result=failed
