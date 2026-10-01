@@ -94,9 +94,6 @@ so Jenkins can reach it again. Sign in as `admin` with the password in
 `journalctl CONTAINER_NAME=brick-jenkins`; `JENKINS_HOME` is
 `~/.local/share/brick-jenkins`.
 
-The in-cluster Jenkins (`jenkins/`, the Helm chart on brick2000) is being
-retired in favour of this one.
-
 ### Port 80: the proxy
 
 `brick9000/proxy/` runs Caddy (Docker, host networking) on port 80, routing
@@ -104,8 +101,10 @@ by name (`Caddyfile`): `jenkins.local` to Jenkins on `127.0.0.1:8080`, and
 anything else to brick-status on `127.0.0.1:8765` as the read-only mirror.
 Plain HTTP, LAN only. `install.sh` starts it; deploy reloads it when
 `brick9000/proxy/` changes. brick9000 announces the extra names with
-`mdns-alias@<name>` user units (`brick-status` now; `jenkins` once brick420
-stops announcing it). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
+`mdns-alias@<name>` user units (`jenkins`, `brick-status`). The catch-all also
+sends `/prometheus` to Jenkins, so the cluster's Prometheus can scrape Jenkins'
+metrics at `192.168.1.221:80` (see brick-k8s-config's kube-prometheus-stack
+values). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 
 ## brick-status (the status board on brick9000)
 
