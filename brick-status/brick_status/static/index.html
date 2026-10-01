@@ -129,7 +129,8 @@
   .pie.fail i { animation: blink 1.2s steps(2, jump-none) infinite; }
   .host .lbl { font-size: 0.42em; color: var(--dim); letter-spacing: 0.08em; }
   /* CPU, memory, temperature: skewed LED segments, lit in the level's colour. */
-  .gauges { display: grid; grid-template-columns: auto 1fr; gap: 0.22em 0.4em; align-items: center; min-width: 0; }
+  .gauges { display: grid; grid-template-columns: auto 1fr auto; gap: 0.22em 0.4em; align-items: center; min-width: 0; }
+  .host .val { font-size: 0.42em; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
   .segs { display: grid; grid-template-columns: repeat(10, 1fr); gap: 0.12em; height: 0.42em; padding-left: 0.15em; }
   .segs i { background: var(--panel-edge); transform: skewX(-24deg); }
   .segs i.on { background: var(--s); }
@@ -261,8 +262,10 @@ function rows(group) {
   return `<div class="rows">${shown}${more}</div>`;
 }
 
-// Host vitals: key -> [label, warn at, fail at, full scale]
-const LEVELS = { cpu: ["CPU", 85, 95, 100], mem: ["MEM", 85, 95, 100], temp: ["TMP", 70, 80, 85], disk: ["DSK", 85, 95, 100] };
+// Host vitals: key -> [label, warn at, fail at, full scale]. Temperatures in °F
+// (70, 80 and 85°C); the hosts report °C and vitals() converts.
+const LEVELS = { cpu: ["CPU", 85, 95, 100], mem: ["MEM", 85, 95, 100], temp: ["TMP", 158, 176, 185], disk: ["DSK", 85, 95, 100] };
+const fahrenheit = c => c === undefined || c === null ? c : c * 9 / 5 + 32;
 const SEGMENTS = 10;
 
 function level(k, v) {
@@ -272,13 +275,15 @@ function level(k, v) {
 }
 
 function vitals(nodes) {
-  return (nodes || []).map(n => {
+  return (nodes || []).map(node => {
+    const n = { ...node, temp: fahrenheit(node.temp) };
     const lv = Object.fromEntries(Object.keys(LEVELS).map(k => [k, level(k, n[k])]));
     const worst = SEVERITY.find(st => Object.values(lv).some(l => l.state === st)) || "ok";
     const gauges = ["cpu", "mem", "temp"].map(k => {
       const lit = lv[k].state === "unknown" ? 0 : Math.max(1, Math.ceil(lv[k].pct / (100 / SEGMENTS)));
       const segs = Array.from({ length: SEGMENTS }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("");
-      return `<span class="lbl mono">${LEVELS[k][0]}</span><span class="segs ${lv[k].state}">${segs}</span>`;
+      const val = k === "temp" && lv[k].state !== "unknown" ? `${Math.round(n.temp)}°F` : "";
+      return `<span class="lbl mono">${LEVELS[k][0]}</span><span class="segs ${lv[k].state}">${segs}</span><span class="val mono">${val}</span>`;
     }).join("");
     return `<div class="host ${worst}"><div class="name mono">${esc(n.node)}</div>
       <div class="pie ${lv.disk.state}"><i style="--p:${lv.disk.pct.toFixed(0)}"></i><span class="lbl mono">DSK</span></div>
