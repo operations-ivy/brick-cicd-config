@@ -9,7 +9,9 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: git replaces Caddyfile on checkout, and a
+      # single-file bind mount keeps showing the container the old one.
+      - ./caddy:/etc/caddy:ro
       - caddy-data:/data
     logging:
       driver: journald

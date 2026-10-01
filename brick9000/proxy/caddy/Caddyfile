@@ -1,5 +1,6 @@
 # brick9000's front door on port 80 (LAN only, plain HTTP; nothing here is
-# reachable from outside the house). Reloaded by deploy when this file changes.
+# reachable from outside the house). deploy reloads it when brick9000/proxy/
+# changes (proxy/up).
 {
 	auto_https off
 }
