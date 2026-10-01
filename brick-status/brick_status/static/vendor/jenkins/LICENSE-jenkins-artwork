@@ -5,9 +5,10 @@ https://creativecommons.org/licenses/by-sa/3.0/
 
   pixelart.png  "Pixel Art" Jenkins, created by Heungsub Lee
                 https://www.jenkins.io/images/logos/pixelart/jenkins-pixelart-256.png
-  fire.png      "Fire" Jenkins, the Jenkins project
-                https://www.jenkins.io/images/logos/fire/256.png
+  pixelart-fire.svg  derived from pixelart.png: the same butler, with devil
+                horns, glowing eyes and flames added (drawn by
+                brick-status/tools/pixel_art.py). Also CC BY-SA 3.0.
 
-Both are unmodified. The Jenkins logo was designed by Charles Lowell. The
+pixelart.png is unmodified. The Jenkins logo was designed by Charles Lowell. The
 board credits the Jenkins project with a link on the Jenkins view, as the
 license requires wherever the logos are displayed.
