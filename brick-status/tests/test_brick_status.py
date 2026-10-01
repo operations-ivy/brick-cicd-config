@@ -359,6 +359,18 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual(offline["chuck/reader"], "fail")
         self.assertEqual(offline["chuck/reader-68-wrd2h"], "fail")
 
+    def test_finished_job_pods_are_not_scrape_failures(self):
+        queries = []
+
+        class Recording(FakeProm):
+            def query(self, promql):
+                queries.append(promql)
+                return super().query(promql)
+
+        checks.cluster_checks(Recording({}))
+        [scrape] = [q for q in queries if q.startswith("up == 0")]
+        self.assertIn('unless on (namespace, pod) (kube_pod_status_phase{phase=~"Succeeded|Failed"} == 1)', scrape)
+
     def test_internet_up_if_any_probe_answers(self):
         with socket.socket() as server:
             server.bind(("127.0.0.1", 0))
