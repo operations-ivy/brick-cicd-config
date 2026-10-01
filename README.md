@@ -97,7 +97,7 @@ so Jenkins can reach it again. Sign in as `admin` with the password in
 ### Port 80: the proxy
 
 `brick9000/proxy/` runs Caddy (Docker, host networking) on port 80, routing
-by name (`Caddyfile`): `jenkins.local` to Jenkins on `127.0.0.1:8080`, and
+by name (`caddy/Caddyfile`): `jenkins.local` to Jenkins on `127.0.0.1:8080`, and
 anything else to brick-status on `127.0.0.1:8765` as the read-only mirror.
 Plain HTTP, LAN only. `install.sh` starts it; deploy reloads it when
 `brick9000/proxy/` changes. brick9000 announces the extra names with
