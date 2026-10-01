@@ -90,7 +90,10 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         else:
             checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", FAIL, m["reason"]))
 
-    for m, _ in prom.query("up == 0"):
+    # A finished Job's pod (the chuck importer) stays behind until the Job is
+    # deleted, and Prometheus keeps trying to scrape it; it isn't down, it's done.
+    for m, _ in prom.query('up == 0 unless on (namespace, pod) '
+                           '(kube_pod_status_phase{phase=~"Succeeded|Failed"} == 1)'):
         checks.append(Check("cluster", f"scrape {m.get('job', '?')}", WARN,
                             f"{m.get('instance', '')} down"))
     return checks
