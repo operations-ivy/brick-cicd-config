@@ -46,7 +46,10 @@ if changed brick9000/jenkins/Dockerfile brick9000/jenkins/plugins.txt brick9000/
 elif changed brick9000/jenkins/casc.yaml brick9000/jenkins/seed.groovy brick9000/jenkins/jobs; then
     brick9000/jenkins/reload || echo "deploy: Jenkins config reload failed" >&2
 fi
-if changed brick9000/ ':!brick9000/jenkins'; then
+if changed brick9000/proxy; then
+    brick9000/proxy/up || echo "deploy: proxy update failed" >&2
+fi
+if changed brick9000/ ':!brick9000/jenkins' ':!brick9000/proxy'; then
     echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
 fi
 systemctl --user restart brick-status

@@ -35,7 +35,13 @@ def serve(settings, board, status) -> None:
                 }).encode()
                 self._send(200, "application/json", body)
             elif url.path == "/api/matrix":
-                self._matrix(parse_qs(url.query))
+                # Only the kiosk runs cmatrix. Through the LAN proxy (the read-only
+                # brick-status.local mirror) it's refused: only one cmatrix runs at
+                # a time, so a viewer starting one would stop the kiosk's.
+                if self.headers.get("X-Forwarded-For"):
+                    self._send(403, "text/plain", b"cmatrix is for brick9000's own screen")
+                else:
+                    self._matrix(parse_qs(url.query))
             elif url.path in ("/", "/index.html"):
                 self._file(STATIC / "index.html")
             elif url.path.startswith("/static/"):

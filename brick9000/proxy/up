@@ -1,0 +1,7 @@
+#!/bin/sh
+# Start (or update) the proxy, and reload its Caddyfile. Run by install.sh, and
+# by deploy when brick9000/proxy/ changes.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+docker compose -f "$here/compose.yaml" up -d
+docker exec brick-proxy caddy reload --config /etc/caddy/Caddyfile

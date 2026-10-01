@@ -14,6 +14,7 @@ shows how that's going.
 | --- | --- | --- |
 | `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
 | `brick9000` (Docker) | Jenkins: bootstrap and maintenance jobs | Has to work when the cluster doesn't, and be able to rebuild it |
+| `brick9000` (Docker) | Caddy on port 80: `jenkins.local`, and `brick-status.local` (a read-only mirror of the board) | One port, two names; both services listen only on localhost |
 
 ### brick9000 is not a cluster node
 
@@ -38,7 +39,8 @@ own journal. The secrets it needs live in files on the host
 brick9000 should be able to rebuild the whole brick homelab in an emergency,
 so the Jenkins that runs maintenance and bootstrap jobs can't live in the
 cluster it rebuilds. It runs on brick9000 in Docker (`brick9000/jenkins/`),
-at `http://jenkins.local`, and jobs run on brick9000 itself (no agents).
+at `http://jenkins.local`, and jobs run on brick9000 itself (no agents). It
+listens only on `127.0.0.1:8080`; the proxy (below) is what serves the name.
 
 - **Nothing at start-up needs the internet.** The image
   (`brick9000/jenkins/Dockerfile`) has the plugins (`plugins.txt`), `kubectl`,
@@ -95,6 +97,16 @@ so Jenkins can reach it again. Sign in as `admin` with the password in
 The in-cluster Jenkins (`jenkins/`, the Helm chart on brick2000) is being
 retired in favour of this one.
 
+### Port 80: the proxy
+
+`brick9000/proxy/` runs Caddy (Docker, host networking) on port 80, routing
+by name (`Caddyfile`): `jenkins.local` to Jenkins on `127.0.0.1:8080`, and
+anything else to brick-status on `127.0.0.1:8765` as the read-only mirror.
+Plain HTTP, LAN only. `install.sh` starts it; deploy reloads it when
+`brick9000/proxy/` changes. brick9000 announces the extra names with
+`mdns-alias@<name>` user units (`brick-status` now; `jenkins` once brick420
+stops announcing it). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
+
 ## brick-status (the status board on brick9000)
 
 `brick-status/` is a small Python daemon (standard library plus
@@ -125,6 +137,13 @@ retired in favour of this one.
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second,
   and reloads itself when brick-status restarts, so a deploy updates the
   screen too.
+- The same page is on the LAN, read-only, at `http://brick-status.local` (or
+  `brick9000.local`): a plain mirror of what the cabinet shows, including which
+  view is up. It changes nothing on the cabinet. Its CRT window stays empty
+  apart from its label, since only the kiosk runs cmatrix: requests that come
+  through the proxy (it adds `X-Forwarded-For`) can't start one, which would
+  stop the kiosk's. While the cabinet is quiet the header says "Display Off"
+  and the data keeps updating.
 - The overview is a CRT window running the real `cmatrix -bs`, the three area
   tiles, and a compact vitals strip for brick420 and brick2000 (from
   node_exporter) and brick9000 itself (read from `/proc` and `/sys`, since it

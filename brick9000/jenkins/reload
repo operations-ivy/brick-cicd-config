@@ -3,4 +3,4 @@
 # job definition changed. Run by deploy.
 set -eu
 token=$(cat "$HOME/.config/brick-jenkins/secrets/casc_reload_token")
-curl -fsS -X POST -o /dev/null "http://127.0.0.1/reload-configuration-as-code/?casc-reload-token=$token"
+curl -fsS -X POST -o /dev/null "http://127.0.0.1:8080/reload-configuration-as-code/?casc-reload-token=$token"

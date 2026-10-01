@@ -1,16 +1,20 @@
 import itertools
 import re
 import socket
-import subprocess
 import struct
+import subprocess
+import threading
+import time as pytime
 import unittest
+import urllib.error
+import urllib.request
 import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import build, checks, host, lights, patterns
+from brick_status import build, checks, host, lights, patterns, web
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, in_quiet_hours
-from brick_status.config import VIEWS
+from brick_status.config import VIEWS, Settings
 
 
 def ts(hour, minute=0):
@@ -334,6 +338,40 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual(set(summary["groups"]), {"builds", "cluster", "wigle"})
 
 
+class MirrorTest(unittest.TestCase):
+    """brick-status.local reaches the board through the LAN proxy, which adds
+    X-Forwarded-For: page and state yes, cmatrix no (it would stop the kiosk's)."""
+
+    def setUp(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        settings = Settings(http_host="127.0.0.1", http_port=port)
+        board = Board(VIEWS, active_seconds=120, quiet_start=time(0), quiet_end=time(0))
+        status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
+        threading.Thread(target=web.serve, args=(settings, board, status), daemon=True).start()
+        self.base = f"http://127.0.0.1:{port}"
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(self.base + "/api/state", timeout=1)
+                break
+            except OSError:
+                pytime.sleep(0.05)
+
+    def get(self, path, proxied):
+        headers = {"X-Forwarded-For": "192.168.1.50"} if proxied else {}
+        try:
+            with urllib.request.urlopen(urllib.request.Request(self.base + path, headers=headers), timeout=2) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_mirror_gets_page_and_state_but_no_cmatrix(self):
+        self.assertEqual(self.get("/", proxied=True), 200)
+        self.assertEqual(self.get("/api/state", proxied=True), 200)
+        self.assertEqual(self.get("/api/matrix?cols=80&rows=24", proxied=True), 403)
+
+
 JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"
 
 
@@ -357,7 +395,7 @@ class JenkinsJobsTest(unittest.TestCase):
 
     def test_job_scripts_parse(self):
         scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("setup", "up", "reload")]
-                   + [JENKINS.parent / n for n in ("build-image", "build-status.sh", "deploy", "install.sh")])
+                   + [JENKINS.parent / n for n in ("build-image", "build-status.sh", "deploy", "install.sh", "proxy/up")])
         for script in scripts:
             result = subprocess.run(["sh", "-n", str(script)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
