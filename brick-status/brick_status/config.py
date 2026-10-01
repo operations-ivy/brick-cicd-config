@@ -2,7 +2,12 @@
 
 import os
 from dataclasses import dataclass, field
-from datetime import time
+
+from .board import QuietSchedule
+
+# brick9000's schedule: off overnight until 2026-10-09, then off through the
+# work week (Monday 00:00 to Friday 16:00) and on all weekend.
+DEFAULT_QUIET = "00:00-06:00; 2026-10-09: Mon 00:00-Fri 16:00"
 
 # The four board views, in button order.
 VIEWS = ["overview", "builds", "cluster", "wigle"]
@@ -13,11 +18,8 @@ VIEWS = ["overview", "builds", "cluster", "wigle"]
 BUTTON_KEYS = [29, 56, 57, 42, 44, 45]
 KEY_LEFT = 105
 KEY_RIGHT = 106
-
-
-def _time(value: str) -> time:
-    hour, minute = value.split(":")
-    return time(int(hour), int(minute))
+# The button on the cabinet's side (KEY_ESC). Checked on the hardware.
+KEY_WAKE = 1
 
 
 def _ints(value: str) -> list[int]:
@@ -42,8 +44,10 @@ class Settings:
     # Seconds after the last button press before the board goes back to idle.
     active_seconds: float = 120.0
     cmatrix: str = "cmatrix"
-    quiet_start: time = time(0, 0)
-    quiet_end: time = time(6, 0)
+    # When the screen and lights are off; see board.QuietSchedule for the format.
+    quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
+    # How long the side button turns everything on for, while it's quiet.
+    wake_seconds: float = 1800.0
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
     # row, then left to right along the bottom.
@@ -75,10 +79,12 @@ class Settings:
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
-        if v := env("BRICK_STATUS_QUIET_START"):
-            s.quiet_start = _time(v)
-        if v := env("BRICK_STATUS_QUIET_END"):
-            s.quiet_end = _time(v)
+        if v := env("BRICK_STATUS_QUIET"):
+            s.quiet = QuietSchedule.parse(v)
+        elif env("BRICK_STATUS_QUIET_START") and env("BRICK_STATUS_QUIET_END"):
+            # The older daily-only settings.
+            s.quiet = QuietSchedule.parse(f'{env("BRICK_STATUS_QUIET_START")}-{env("BRICK_STATUS_QUIET_END")}')
+        s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
         if v := env("BRICK_STATUS_BUTTON_SLOTS"):
             s.button_slots = _ints(v)
         return s

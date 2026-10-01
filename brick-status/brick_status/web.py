@@ -27,6 +27,7 @@ def serve(settings, board, status) -> None:
                 body = json.dumps({
                     "boot": BOOT,
                     "mode": board.mode(now),
+                    "awake_until": board.awake_until(now),
                     "view": board.views[board.view(now)],
                     "views": board.views,
                     "updated": status.updated,

@@ -11,7 +11,7 @@ import time
 
 from . import build, checks, host, lights, web
 from .board import ACTIVE, QUIET, Board
-from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, VIEWS, Settings
+from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -64,7 +64,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = Settings.from_env()
-    board = Board(VIEWS, settings.active_seconds, settings.quiet_start, settings.quiet_end)
+    board = Board(VIEWS, settings.active_seconds, settings.quiet, settings.wake_seconds)
     status = Status()
     plasma = lights.Plasma(settings.plasma_fifo, settings.pattern_dir, settings.pattern_prefix)
     screen = Screen(settings.wlopm)
@@ -74,11 +74,14 @@ def main() -> None:
 
     def on_key(code: int) -> None:
         now = time.time()
-        if code in BUTTON_KEYS:
+        if code == KEY_WAKE:
+            if board.wake_button(now):
+                log.info("side button: on for %d minutes", settings.wake_seconds // 60)
+        elif code in BUTTON_KEYS:
             board.press_view(BUTTON_KEYS.index(code), now)
         elif code in (KEY_LEFT, KEY_RIGHT):
             board.step_view(1 if code == KEY_RIGHT else -1, now)
-        else:  # any other cabinet key still counts as input: it wakes the board
+        else:  # any other cabinet key counts as input (ignored while it's off)
             board.wake(now)
         wake.set()
 

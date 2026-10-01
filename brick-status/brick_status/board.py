@@ -4,14 +4,21 @@
   and the lights show the most important current event.
 - active: a button was pressed in the last `active_seconds`. The screen shows
   the chosen view and the lights show which button is which view.
-- quiet: overnight. Screen and lights are off; any cabinet key wakes the
-  board into active mode until it times out again.
+- quiet: inside the quiet schedule (see QuietSchedule). Screen and lights are
+  off and the cabinet keys do nothing, except the side button: it wakes the
+  board for `wake_seconds`, and does nothing while the board is already on.
 """
 
+import re
 import threading
-from datetime import datetime, time
+from dataclasses import dataclass
+from datetime import date, datetime, time
 
 IDLE, ACTIVE, QUIET = "idle", "active", "quiet"
+
+
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEK = 7 * 24 * 60
 
 
 def in_quiet_hours(now: time, start: time, end: time) -> bool:
@@ -22,38 +29,143 @@ def in_quiet_hours(now: time, start: time, end: time) -> bool:
     return now >= start or now < end  # wraps past midnight
 
 
+@dataclass(frozen=True)
+class Window:
+    """Quiet from start to end: every day (no weekday), or once a week."""
+    start: time
+    end: time
+    start_day: int | None = None  # 0 = Monday
+    end_day: int | None = None
+
+    def contains(self, dt: datetime) -> bool:
+        if self.start_day is None:
+            return in_quiet_hours(dt.time(), self.start, self.end)
+        minute = lambda day, t: day * 24 * 60 + t.hour * 60 + t.minute
+        now, start, end = minute(dt.weekday(), dt.time()), minute(self.start_day, self.start), \
+            minute(self.end_day, self.end)
+        if start == end:
+            return False
+        if start < end:
+            return start <= now < end
+        return now >= start or now < end  # wraps past the end of the week
+
+
+def _point(text: str) -> tuple[int | None, time]:
+    m = re.fullmatch(r"(?:([A-Za-z]{3})\s+)?(\d{1,2}):(\d{2})", text.strip())
+    if not m:
+        raise ValueError(f"bad time {text!r}: expected HH:MM or Day HH:MM (Mon..Sun)")
+    day = m.group(1)
+    if day is not None and day.capitalize() not in DAYS:
+        raise ValueError(f"bad day {day!r}: expected one of {', '.join(DAYS)}")
+    return (None if day is None else DAYS.index(day.capitalize())), time(int(m.group(2)), int(m.group(3)))
+
+
+def parse_window(text: str) -> Window | None:
+    """'00:00-06:00' (daily), 'Mon 00:00-Fri 16:00' (weekly) or 'none'."""
+    if text.strip().lower() == "none":
+        return None
+    start, _, end = text.partition("-")
+    (sd, st), (ed, et) = _point(start), _point(end)
+    if (sd is None) != (ed is None):
+        raise ValueError(f"bad window {text!r}: give a day on both ends or neither")
+    return Window(st, et, sd, ed)
+
+
+class QuietSchedule:
+    """When the board is quiet: a window, optionally changing on given dates.
+
+    Entries are separated by ';', each optionally prefixed with the date it
+    takes effect from (at midnight); the latest one that has started applies:
+        00:00-06:00; 2026-10-09: Mon 00:00-Fri 16:00
+    """
+
+    def __init__(self, entries: list[tuple[date | None, Window | None]]):
+        self.entries = sorted(entries, key=lambda e: e[0] or date.min)
+
+    @classmethod
+    def parse(cls, text: str) -> "QuietSchedule":
+        entries = []
+        for part in filter(None, (p.strip() for p in text.split(";"))):
+            m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}):\s*(.+)", part)
+            when = date.fromisoformat(m.group(1)) if m else None
+            entries.append((when, parse_window(m.group(2) if m else part)))
+        return cls(entries)
+
+    def window(self, day: date) -> Window | None:
+        current = None
+        for when, window in self.entries:
+            if when is None or when <= day:
+                current = window
+        return current
+
+    def is_quiet(self, dt: datetime) -> bool:
+        window = self.window(dt.date())
+        return window is not None and window.contains(dt)
+
+
 class Board:
-    def __init__(self, views: list[str], active_seconds: float, quiet_start: time, quiet_end: time):
+    def __init__(self, views: list[str], active_seconds: float, quiet: QuietSchedule,
+                 wake_seconds: float = 1800.0):
         self.views = views
         self.active_seconds = active_seconds
-        self.quiet_start = quiet_start
-        self.quiet_end = quiet_end
+        self.quiet = quiet
+        self.wake_seconds = wake_seconds
         self._view = 0
         self._last_press: float | None = None
+        self._awake_until: float | None = None
         self._lock = threading.Lock()
 
-    def wake(self, now: float) -> None:
-        """A key that isn't a view button: stay on the current view, but wake up."""
+    def _asleep(self, now: float) -> bool:
+        """In the quiet schedule and not woken by the side button (lock held)."""
+        if self._awake_until is not None and now < self._awake_until:
+            return False
+        return self.quiet.is_quiet(datetime.fromtimestamp(now))
+
+    def wake_button(self, now: float) -> bool:
+        """The side button: while asleep, turn everything on for wake_seconds.
+        Does nothing while the board is already on. True if it woke the board."""
         with self._lock:
-            self._last_press = now
+            if not self._asleep(now):
+                return False
+            self._awake_until = now + self.wake_seconds
+            return True
+
+    def wake(self, now: float) -> None:
+        """A key that isn't a view button: stay on the current view, but count as a press."""
+        with self._lock:
+            if not self._asleep(now):
+                self._last_press = now
 
     def press_view(self, index: int, now: float) -> None:
         with self._lock:
+            if self._asleep(now):
+                return  # keys do nothing while it's off; only the side button wakes it
             if 0 <= index < len(self.views):
                 self._view = index
             self._last_press = now
 
     def step_view(self, delta: int, now: float) -> None:
         with self._lock:
+            if self._asleep(now):
+                return
             self._view = (self._view + delta) % len(self.views)
             self._last_press = now
+
+    def awake_until(self, now: float) -> float | None:
+        """When a side-button wake ends, while one is keeping the board on."""
+        with self._lock:
+            if self._awake_until is not None and now < self._awake_until \
+                    and self.quiet.is_quiet(datetime.fromtimestamp(now)):
+                return self._awake_until
+            return None
 
     def mode(self, now: float) -> str:
         with self._lock:
             pressed = self._last_press is not None and now - self._last_press < self.active_seconds
+            asleep = self._asleep(now)
         if pressed:
             return ACTIVE
-        if in_quiet_hours(datetime.fromtimestamp(now).time(), self.quiet_start, self.quiet_end):
+        if asleep:
             return QUIET
         return IDLE
 
