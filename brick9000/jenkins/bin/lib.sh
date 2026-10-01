@@ -2,6 +2,8 @@
 
 # brick420, the k3s server.
 BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
+# brick9000, the host this Jenkins runs on (reached from its container over SSH).
+BRICK9000=${BRICK9000:-192.168.1.221}
 MIRRORS=${JENKINS_HOME:-/var/jenkins_home}/mirrors
 # The repos jobs read manifests and scripts from (brick-cicd-config itself is
 # mounted at /brick-cicd-config at the commit deploy checked out).
