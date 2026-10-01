@@ -442,10 +442,8 @@ class PixelArtTest(unittest.TestCase):
         """Rerun brick-status/tools/pixel_art.py after editing a drawing."""
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         import pixel_art
-        drawings = {"server-ok": pixel_art.healthy_server(), "server-fire": pixel_art.burning_server(),
-                    "plugs-connected": pixel_art.plugs(True), "plugs-disconnected": pixel_art.plugs(False)}
-        for name, canvas in drawings.items():
-            self.assertEqual((pixel_art.OUT / f"{name}.svg").read_text(), canvas.svg(), name)
+        for path, canvas in pixel_art.drawings().items():
+            self.assertEqual(path.read_text(), canvas.svg(), path.name)
 
 
 JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"

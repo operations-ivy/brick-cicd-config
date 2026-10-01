@@ -231,15 +231,17 @@ function tile(name, group) {
           <div class="word">${WORDS[name][state]}</div><div class="why mono">${esc(why)}</div>${art}</div>`;
 }
 
-// Jenkins' mood: in flames with horns when a job failed, the butler otherwise.
-const butler = state => `/static/vendor/jenkins/${state === "fail" ? "fire" : "pixelart"}.png`;
+// Jenkins' mood: the pixel-art butler, or the same butler in flames with horns
+// when a job failed.
+const butler = state => `/static/vendor/jenkins/${state === "fail" ? "pixelart-fire.svg" : "pixelart.png"}`;
 
-// Each overview tile's picture. The cluster's server burns when it's down; the
+// Each overview tile's picture. The cluster's server sweats when it's degraded
+// and burns when it's down; the
 // wigle-sync plugs are connected while syncing is OK (or uploading), pulled
 // apart otherwise (failing, behind, or no data).
 function tileArt(name, state) {
   if (name === "builds") return butler(state);
-  if (name === "cluster") return `/static/art/${state === "fail" ? "server-fire" : "server-ok"}.svg`;
+  if (name === "cluster") return `/static/art/server-${{fail: "fire", warn: "warn"}[state] || "ok"}.svg`;
   return `/static/art/${state === "ok" || state === "active" ? "plugs-connected" : "plugs-disconnected"}.svg`;
 }
 
