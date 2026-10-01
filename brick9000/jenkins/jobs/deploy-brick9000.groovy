@@ -4,7 +4,7 @@ pipeline {
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 5, unit: 'MINUTES') }
     stages {
         stage('Deploy') {
-            steps { sh '/brick-cicd-config/brick9000/jenkins/bin/deploy-now' }
+            steps { sh '/brick-cicd-config/brick9000/jenkins/bin/deploy-brick9000' }
         }
     }
 }
