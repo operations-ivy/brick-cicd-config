@@ -70,6 +70,7 @@ listens only on `127.0.0.1:8080`; the proxy (below) is what serves the name.
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
 | `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 | `APPLY=true` to delete (dry run otherwise) |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
+| `deploy-now` | Starts brick9000's deploy now instead of at its 2-hourly timer (returns at once; the deploy logs to `journalctl --user -u brick-deploy` on brick9000) | |
 | `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
 ### Set up
