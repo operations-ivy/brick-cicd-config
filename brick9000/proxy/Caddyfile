@@ -12,6 +12,13 @@ http://jenkins.local {
 # Everything else (brick-status.local, brick9000.local, the bare address): a
 # read-only mirror of the status board. brick-status sees the X-Forwarded-For
 # Caddy adds and serves it as a mirror, which never starts a cmatrix of its own.
+# Except /prometheus, Jenkins' metrics, which the cluster's Prometheus scrapes
+# at 192.168.1.221:80 (it can't resolve jenkins.local, an mDNS name).
 :80 {
-	reverse_proxy 127.0.0.1:8765
+	handle /prometheus* {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8765
+	}
 }

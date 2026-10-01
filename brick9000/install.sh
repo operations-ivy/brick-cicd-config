@@ -6,8 +6,8 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
 # Button input (the plasma daemon itself is already installed), and
-# avahi-publish to announce brick9000's other names (brick-status.local and,
-# once brick420 stops announcing it, jenkins.local).
+# avahi-publish to announce brick9000's other names (jenkins.local,
+# brick-status.local).
 sudo apt-get install -y python3-evdev avahi-utils
 # The plasma daemon (root) only loads patterns from /etc/plasma/; brick-status
 # (zaphod) writes its own into this subdirectory.
@@ -27,7 +27,7 @@ cp "$here/labwc-autostart" ~/.config/labwc/autostart
 "$here/proxy/up"
 
 systemctl --user daemon-reload
-systemctl --user enable --now mdns-alias@brick-status
+systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-status
 systemctl --user restart brick-status
 systemctl --user enable --now brick-deploy.timer
