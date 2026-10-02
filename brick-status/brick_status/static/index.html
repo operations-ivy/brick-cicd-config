@@ -92,7 +92,7 @@
   #content { min-height: 0; }
 
   /* Each tile's picture, by its state (see tileArt): Jenkins (jenkins.io art,
-     CC BY-SA 3.0, credited on the Jenkins view), and our own pixel-art server
+     CC BY-SA 3.0, credited on the Builds view), and our own pixel-art server
      and plugs (brick-status/tools/pixel_art.py). Beside the title and word,
      above the detail line, so they never overlap. */
   .tile .mascot { position: absolute; right: 0.9em; top: 0.6em; height: calc(100% - 2.7em); image-rendering: pixelated; }
@@ -209,7 +209,7 @@
 <script src="/static/vendor/addon-fit.js"></script>
 <script src="/static/vendor/addon-webgl.js"></script>
 <script>
-const LABELS = { overview: "Overview", builds: "Jenkins", cluster: "Cluster", wigle: "wigle-sync" };
+const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync" };
 const WORDS = {
   builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Running", unknown: "No data" },
   cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },

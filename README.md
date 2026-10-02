@@ -153,11 +153,11 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 `python3-evdev`) that runs as a systemd user service on brick9000:
 
 - Every 15s it asks Jenkins, on brick9000 itself, for each job's state (as the
-  read-only `brick-status` user), so the Jenkins view keeps working while the
-  cluster is down, which is when the bootstrap jobs run. The Jenkins tile shows
+  read-only `brick-status` user), so the Builds view keeps working while the
+  cluster is down, which is when the bootstrap jobs run. The Builds tile shows
   the pixel-art Jenkins, or the horned one in flames when a job has failed
   (artwork from [jenkins.io](https://jenkins.io/), CC BY-SA 3.0, credited on the
-  Jenkins view; see `static/vendor/jenkins/`). The other tiles have our own
+  Builds view; see `static/vendor/jenkins/`). The other tiles have our own
   pixel art to match (`brick-status/tools/pixel_art.py` draws it into
   `static/art/`): a smiling server for the cluster, or one on fire when it's
   down, and two plugs for wigle-sync, connected while syncing is OK, pulled
@@ -215,7 +215,7 @@ The board has three modes:
 | active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
 | quiet | the quiet schedule (below) | off | off; only the side button does anything: it turns everything on for 30 minutes |
 
-The six buttons are two rows of three. The top row picks Overview, Jenkins and
+The six buttons are two rows of three. The top row picks Overview, Builds and
 Cluster; bottom-left picks wigle-sync; the other two are free for now. The
 joystick left/right steps through the views. The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
