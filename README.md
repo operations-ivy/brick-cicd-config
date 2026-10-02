@@ -245,10 +245,14 @@ Idle light patterns, highest priority first:
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |
 | `calm` | slow green (0 255 0) breathing: all good |
 
-An image build on brick9000 itself (below) takes over the lights in idle and
-active mode: `image-building` flashes rainbow while it runs, then
-`image-pushed` flashes bright green or `image-failed` pulses red for a minute
-(`BRICK_STATUS_BUILD_RESULT_SECONDS`).
+A deploy or an image build on brick9000 itself (below) takes over the lights
+in idle and active mode. While brick9000 deploys a new commit, `deploying`
+boils the buttons: each one swells in a random colour on its own beat and pops
+dark, a new colour each time. An image build alone flashes `image-building`
+rainbow. Either way, `image-pushed` then flashes bright green or `image-failed`
+pulses red for a minute (`BRICK_STATUS_BUILD_RESULT_SECONDS`). A deploy
+outranks the image builds it runs along the way (Jenkins, the proxy), so the
+buttons boil until the whole deploy is done.
 
 The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
@@ -277,7 +281,9 @@ boot) `brick-deploy.timer` runs `brick9000/deploy`, which fetches from GitHub
 and, if the followed branch has moved, runs the tests on the new commit in a
 scratch worktree. Only if they pass does it switch the clone to that commit
 and restart brick-status. A commit that fails is left alone until the branch
-moves again. Changes under `brick9000/` itself (units, autostart) still need
+moves again. From the moment it finds a new commit until it's done, the
+buttons boil (see the lights above); it records its progress in
+`~/.local/state/brick-build/deploy.json`. Changes under `brick9000/` itself (units, autostart) still need
 `install.sh` rerun; the deploy log says so.
 
 brick9000 follows `main`. To try a branch on the real board before merging,

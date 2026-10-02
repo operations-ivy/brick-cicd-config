@@ -102,12 +102,16 @@ def main() -> None:
         summary = status.get()
         screen.set(mode != QUIET)
 
-        building = build.light_pattern(settings.build_status, now, settings.build_result_seconds)
+        # brick9000 deploying itself boils the buttons; it outranks the image
+        # builds it runs along the way.
+        building = (build.light_pattern(settings.deploy_status, now, settings.build_result_seconds,
+                                        running="deploying")
+                    or build.light_pattern(settings.build_status, now, settings.build_result_seconds))
 
         if mode == QUIET:
             plasma.off()
             last_active = None
-        elif building:  # a build on brick9000 takes over the lights
+        elif building:  # a deploy or build on brick9000 takes over the lights
             plasma.show(building)
             last_active = None
         elif mode == ACTIVE:
