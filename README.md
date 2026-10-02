@@ -14,7 +14,7 @@ shows how that's going.
 | --- | --- | --- |
 | `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
 | `brick9000` (Docker) | Jenkins: bootstrap and maintenance jobs | Has to work when the cluster doesn't, and be able to rebuild it |
-| `brick9000` (Docker) | Caddy on port 80: `jenkins.local`, and `brick-status.local` (a read-only mirror of the board) | One port, two names; both services listen only on localhost |
+| `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud`, plus the old `jenkins.local` and `brick-status.local` | The front door for the whole homelab; Jenkins and the board stay reachable when the cluster is down |
 
 ### brick9000 is not a cluster node
 
@@ -95,17 +95,57 @@ so Jenkins can reach it again. Sign in as `admin` with the password in
 `journalctl CONTAINER_NAME=brick-jenkins`; `JENKINS_HOME` is
 `~/.local/share/brick-jenkins`.
 
-### Port 80: the proxy
+### Ports 80 and 443: the proxy
 
-`brick9000/proxy/` runs Caddy (Docker, host networking) on port 80, routing
-by name (`caddy/Caddyfile`): `jenkins.local` to Jenkins on `127.0.0.1:8080`, and
-anything else to brick-status on `127.0.0.1:8765` as the read-only mirror.
-Plain HTTP, LAN only. `install.sh` starts it; deploy reloads it when
-`brick9000/proxy/` changes. brick9000 announces the extra names with
+`brick9000/proxy/` runs Caddy (Docker, host networking, `caddy/Caddyfile`) as
+the front door for every web UI in the homelab, each at its own name under
+`brick.nozdormu.cloud`, over HTTPS:
+
+| Name | Goes to |
+| --- | --- |
+| `jenkins.brick.nozdormu.cloud` | Jenkins on `127.0.0.1:8080` |
+| `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
+| `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, asking for the app's old `.local` name |
+| `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
+
+Plain HTTP to any of them redirects to HTTPS. brick9000 is the front door
+rather than the cluster's Traefik so that Jenkins and the board still answer
+when the cluster is down. A node that stops answering is skipped for 30s.
+Every app gets its own origin, so none of them needs to know it's behind a
+proxy.
+
+How the names work, and the hand-made parts outside git:
+
+- **Public DNS** (Porkbun, which also registers `nozdormu.cloud`): one record,
+  `A *.brick` to `192.168.1.221`. From outside the house it leads nowhere.
+- **The router's DNS** drops public answers that point
+  at private addresses (DNS rebinding protection), so each name also has an
+  entry in its static DNS host table, pointing at
+  `192.168.1.221`. It doesn't take wildcards: **a new app needs a new entry
+  there**. These entries also keep the names working while the internet is
+  down.
+- **Certificates**: one Let's Encrypt wildcard for `*.brick.nozdormu.cloud`,
+  through the DNS challenge (the image adds Caddy's Porkbun plugin; see
+  `Dockerfile`), so nothing needs to be reachable from outside. Caddy renews it
+  itself. The Porkbun API keys are in
+  `~/.config/brick-proxy/secrets/porkbun_api_key` and `porkbun_secret_key`
+  (mode 600, never in git), given to the container as Docker secrets. API
+  access must be on for the domain in Porkbun's settings. `proxy/up` creates
+  them empty if missing, and the proxy runs without them; only the HTTPS names
+  wait for a certificate. Porkbun's keys can change every domain on the
+  account, so treat them like any other secret.
+
+The old names still work for now, plain HTTP over mDNS: `jenkins.local` to
+Jenkins, and anything else (`brick-status.local`, `brick9000.local`, the bare
+address) to the board's mirror. brick9000 announces them with
 `mdns-alias@<name>` user units (`jenkins`, `brick-status`). The catch-all also
 sends `/prometheus` to Jenkins, so the cluster's Prometheus can scrape Jenkins'
-metrics at `192.168.1.221:80` (see brick-k8s-config's kube-prometheus-stack
-values). Logs: `journalctl CONTAINER_NAME=brick-proxy`.
+metrics at `brick9000:80` (see brick-k8s-config's kube-prometheus-stack
+values).
+
+`install.sh` starts it; deploy rebuilds the image (only when the `Dockerfile`
+changes does that take long) and reloads it when `brick9000/proxy/` changes.
+Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 
 ## brick-status (the status board on brick9000)
 

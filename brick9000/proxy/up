@@ -1,7 +1,19 @@
 #!/bin/sh
-# Start (or update) the proxy, and reload its Caddyfile. Run by install.sh, and
-# by deploy when brick9000/proxy/ changes.
+# Build the proxy image if anything in it changed, (re)start the container,
+# and reload its Caddyfile. Run by install.sh, and by deploy when
+# brick9000/proxy/ changes. A failed build leaves the running container alone.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
+
+# The Porkbun keys (README, "Ports 80 and 443"). Created empty if missing, so
+# the proxy starts without them; only the HTTPS names wait for a certificate.
+secrets=$HOME/.config/brick-proxy/secrets
+install -d -m 700 "$secrets"
+for f in porkbun_api_key porkbun_secret_key; do
+    [ -e "$secrets/$f" ] || install -m 600 /dev/null "$secrets/$f"
+    [ -s "$secrets/$f" ] || echo "proxy/up: $secrets/$f is empty; no HTTPS certificate until it's filled in" >&2
+done
+
+docker compose -f "$here/compose.yaml" build
 docker compose -f "$here/compose.yaml" up -d
 docker exec brick-proxy caddy reload --config /etc/caddy/Caddyfile

@@ -23,7 +23,8 @@ cp "$here/labwc-autostart" ~/.config/labwc/autostart
 # restarts it on boot). Before brick-status starts, so its login is in the env file.
 "$here/jenkins/setup"
 "$here/jenkins/up"
-# Port 80: jenkins.local to Jenkins, everything else to the board's LAN mirror.
+# Ports 80 and 443: the apps at <name>.brick.nozdormu.cloud, plus the old
+# jenkins.local and the board's LAN mirror (README, "Ports 80 and 443").
 "$here/proxy/up"
 
 systemctl --user daemon-reload
