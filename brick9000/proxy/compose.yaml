@@ -1,10 +1,11 @@
-# Caddy on brick9000's port 80, routing by name (see Caddyfile). Host
+# Caddy on brick9000's ports 80 and 443, routing by name (see Caddyfile). Host
 # networking, so it reaches Jenkins and brick-status on localhost.
 #   ~/brick-cicd-config/brick9000/proxy/up
 name: brick-proxy
 services:
   caddy:
-    image: caddy:2.11.4-alpine
+    build: .
+    image: brick-proxy:local
     container_name: brick-proxy
     restart: unless-stopped
     network_mode: host
@@ -12,10 +13,22 @@ services:
       # The directory, not the file: git replaces Caddyfile on checkout, and a
       # single-file bind mount keeps showing the container the old one.
       - ./caddy:/etc/caddy:ro
+      # Certificates and the ACME account; kept across rebuilds.
       - caddy-data:/data
+    secrets:
+      - porkbun_api_key
+      - porkbun_secret_key
     logging:
       driver: journald
       options:
         tag: brick-proxy
 volumes:
   caddy-data:
+
+# Porkbun API keys for the DNS challenge, filled in by hand (README); never in
+# git. proxy/up creates them empty if missing, so the proxy still starts.
+secrets:
+  porkbun_api_key:
+    file: ${HOME}/.config/brick-proxy/secrets/porkbun_api_key
+  porkbun_secret_key:
+    file: ${HOME}/.config/brick-proxy/secrets/porkbun_secret_key

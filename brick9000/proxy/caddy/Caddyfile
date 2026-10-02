@@ -1,20 +1,99 @@
-# brick9000's front door on port 80 (LAN only, plain HTTP; nothing here is
-# reachable from outside the house). deploy reloads it when brick9000/proxy/
-# changes (proxy/up).
+# brick9000's front door on ports 80 and 443 (LAN only; nothing here is
+# reachable from outside the house). deploy rebuilds and reloads it when
+# brick9000/proxy/ changes (proxy/up).
 {
-	auto_https off
+	# The redirects to HTTPS are written out below; the automatic ones would
+	# also catch the old plain-HTTP names.
+	auto_https disable_redirects
 }
 
-# Jenkins (brick9000/jenkins), which listens only on localhost.
+# The cluster's apps, through Traefik on either node. Traefik still routes by
+# the old .local names, so ask for those. Passive health checks: a node that
+# stops answering is skipped for 30s.
+(traefik) {
+	reverse_proxy 192.168.1.183:80 192.168.1.170:80 {
+		header_up Host {args[0]}
+		lb_policy first
+		lb_try_duration 5s
+		fail_duration 30s
+	}
+}
+
+# Every app at <name>.brick.nozdormu.cloud, under one wildcard certificate from
+# Let's Encrypt. The public DNS record points at 192.168.1.221, and the router's
+# DNS Server table has one entry per name (README). The DNS challenge goes
+# through Porkbun's API, so the names never need to be reachable from outside.
+*.brick.nozdormu.cloud {
+	tls {
+		dns porkbun {
+			api_key {file./run/secrets/porkbun_api_key}
+			api_secret_key {file./run/secrets/porkbun_secret_key}
+		}
+	}
+
+	# Jenkins (brick9000/jenkins), which listens only on localhost.
+	@jenkins host jenkins.brick.nozdormu.cloud
+	handle @jenkins {
+		reverse_proxy 127.0.0.1:8080
+	}
+	# The board's read-only mirror: brick-status sees the X-Forwarded-For Caddy
+	# adds and never starts a cmatrix of its own.
+	@status host status.brick.nozdormu.cloud
+	handle @status {
+		reverse_proxy 127.0.0.1:8765
+	}
+
+	@grafana host grafana.brick.nozdormu.cloud
+	handle @grafana {
+		import traefik grafana.local
+	}
+	@prometheus host prometheus.brick.nozdormu.cloud
+	handle @prometheus {
+		import traefik prometheus.local
+	}
+	@wigle host wigle.brick.nozdormu.cloud
+	handle @wigle {
+		import traefik wigle.local
+	}
+	@reader host reader.brick.nozdormu.cloud
+	handle @reader {
+		import traefik reader.local
+	}
+	# The Kubernetes Dashboard is only on Traefik's HTTPS entrypoint, behind
+	# Traefik's own self-signed certificate, so that hop skips verification.
+	@dashboard host dashboard.brick.nozdormu.cloud
+	handle @dashboard {
+		reverse_proxy https://192.168.1.183 https://192.168.1.170 {
+			header_up Host dashboard.local
+			lb_policy first
+			lb_try_duration 5s
+			fail_duration 30s
+			transport http {
+				tls_server_name dashboard.local
+				tls_insecure_skip_verify
+			}
+		}
+	}
+
+	handle {
+		respond "No app here" 404
+	}
+}
+
+http://*.brick.nozdormu.cloud {
+	redir https://{host}{uri} 308
+}
+
+# The old names, until everything has moved: plain HTTP over mDNS
+# (mdns-alias@jenkins and @brick-status).
 http://jenkins.local {
 	reverse_proxy 127.0.0.1:8080
 }
 
 # Everything else (brick-status.local, brick9000.local, the bare address): a
-# read-only mirror of the status board. brick-status sees the X-Forwarded-For
-# Caddy adds and serves it as a mirror, which never starts a cmatrix of its own.
-# Except /prometheus, Jenkins' metrics, which the cluster's Prometheus scrapes
-# at 192.168.1.221:80 (it can't resolve jenkins.local, an mDNS name).
+# read-only mirror of the status board. Except /prometheus, Jenkins' metrics,
+# which the cluster's Prometheus scrapes at brick9000:80 (pods can't resolve
+# mDNS names).
 :80 {
 	handle /prometheus* {
 		reverse_proxy 127.0.0.1:8080
