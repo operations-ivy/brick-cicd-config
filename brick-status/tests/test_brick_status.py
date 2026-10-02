@@ -166,7 +166,7 @@ class PatternTest(unittest.TestCase):
 
 
 class BuildLightsTest(unittest.TestCase):
-    def pattern(self, status, now=1000.0, alive=True):
+    def pattern(self, status, now=1000.0, alive=True, **kw):
         import json
         import os
         import tempfile
@@ -176,12 +176,18 @@ class BuildLightsTest(unittest.TestCase):
             if status is not None:
                 with open(path, "w") as f:
                     json.dump(status, f)
-            return build.light_pattern(path, now, result_seconds=60, alive=lambda pid: alive)
+            return build.light_pattern(path, now, result_seconds=60, alive=lambda pid: alive, **kw)
 
     def test_building_shows_rainbow_while_the_build_runs(self):
         status = {"state": "building", "pid": 123, "started": 900}
         self.assertEqual(self.pattern(status), "image-building")
         self.assertIsNone(self.pattern(status, alive=False))  # killed without a result
+
+    def test_deploy_boils_while_it_runs(self):
+        status = {"state": "building", "pid": 123, "started": 900}
+        self.assertEqual(self.pattern(status, running="deploying"), "deploying")
+        done = {**status, "state": "succeeded", "finished": 990}
+        self.assertEqual(self.pattern(done, running="deploying"), "image-pushed")
 
     def test_result_shows_for_a_while_then_stops(self):
         ok = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
@@ -195,7 +201,7 @@ class BuildLightsTest(unittest.TestCase):
         self.assertIsNone(self.pattern({"state": "unknown"}))
 
     def test_every_build_pattern_exists(self):
-        for name in ("image-building", "image-pushed", "image-failed"):
+        for name in ("deploying", "image-building", "image-pushed", "image-failed"):
             self.assertIn(name, patterns.BUILD)
 
     def test_rainbow_and_flash_colours(self):
@@ -204,6 +210,22 @@ class BuildLightsTest(unittest.TestCase):
                         and any(b > 200 for _, _, b in hues))
         flashes = {px for frame in patterns.BUILD["image-pushed"]() for px in frame}
         self.assertEqual(flashes, {patterns.GREEN, patterns.OFF})
+
+    def test_boil_bubbles_every_slot_on_its_own_beat(self):
+        frames = patterns.BUILD["deploying"]()
+        self.assertEqual(len(frames), 2 * patterns.FPS)
+        firsts = [patterns.LEDS_PER_SLOT * s for s in range(patterns.SLOTS)]
+        for i in firsts:
+            column = [frame[i] for frame in frames]
+            # Swells to full brightness and drops back near dark (the pop).
+            self.assertGreater(max(max(px) for px in column), 240)
+            self.assertLess(min(max(px) for px in column), 20)
+        # Many colours at once, and the slots don't pop in step.
+        self.assertGreater(len({frames[60][i] for i in firsts}), 5)
+        pops = [min(range(len(frames)), key=lambda f: max(frames[f][i])) for i in firsts]
+        self.assertGreater(len(set(pops)), 3)
+        # Seeded: the same PNG on every start.
+        self.assertEqual(patterns.boil(2.0), frames)
 
 
 class DebouncerTest(unittest.TestCase):

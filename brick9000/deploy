@@ -25,8 +25,20 @@ current=$(git rev-parse HEAD)
 [ "$target" != "$current" ] || exit 0
 [ "$target" != "$(cat "$state/failed" 2>/dev/null)" ] || exit 0
 
+# From here brick9000 is rebuilding itself: the buttons boil until it's done,
+# then flash green or pulse red (brick-status/brick_status/build.py).
+image=brick9000 ref=$(git rev-parse --short "$target") status_name=deploy
+. "$repo/brick9000/build-status.sh"
+result=failed
 scratch=$(mktemp -d)
-trap 'git worktree remove --force "$scratch/tree" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+finish() {
+    git worktree remove --force "$scratch/tree" 2>/dev/null || true
+    rm -rf "$scratch"
+    write_status "$result" "$(date +%s)"
+}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
+write_status building
 git worktree add --quiet --detach "$scratch/tree" "$target"
 if ! "$scratch/tree/scripts/test" >"$scratch/log" 2>&1; then
     cat "$scratch/log" >&2
@@ -52,5 +64,6 @@ fi
 if changed brick9000/ ':!brick9000/jenkins' ':!brick9000/proxy'; then
     echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
 fi
+result=succeeded
 systemctl --user restart brick-status
 echo "deploy: $branch @ $(git rev-parse --short HEAD) (was $(git rev-parse --short "$current"))"

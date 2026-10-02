@@ -55,6 +55,9 @@ class Settings:
     # Written by brick9000/build-image; drives the build lights.
     build_status: str = os.path.join(
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/status.json")
+    # Written by brick9000/deploy; boils the buttons while it runs.
+    deploy_status: str = os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/deploy.json")
     # How long the lights show a finished build's result.
     build_result_seconds: float = 60.0
     input_device_name: str = "gpio_keys"
@@ -75,6 +78,7 @@ class Settings:
         s.pattern_dir = env("BRICK_STATUS_PATTERN_DIR", s.pattern_dir)
         s.active_seconds = float(env("BRICK_STATUS_ACTIVE_SECONDS", s.active_seconds))
         s.build_status = env("BRICK_STATUS_BUILD_STATUS", s.build_status)
+        s.deploy_status = env("BRICK_STATUS_DEPLOY_STATUS", s.deploy_status)
         s.build_result_seconds = float(env("BRICK_STATUS_BUILD_RESULT_SECONDS", s.build_result_seconds))
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)

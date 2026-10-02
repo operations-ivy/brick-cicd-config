@@ -6,6 +6,7 @@ the daemon plays rows at 60 frames per second and loops.
 
 import colorsys
 import math
+import random
 import struct
 import zlib
 
@@ -92,6 +93,32 @@ def rainbow(seconds: float) -> list[Frame]:
     return frames
 
 
+def boil(seconds: float, seed: int = 9000) -> list[Frame]:
+    """Every slot bubbling on its own beat: a random hue swells, then pops dark.
+
+    Each slot's beat divides the loop, and each bubble's hue is fixed per beat,
+    so the loop repeats seamlessly. Seeded, so the PNG is the same every start.
+    """
+    n = int(seconds * FPS)
+    rng = random.Random(seed)
+    beats = [b for b in range(n // 8, n // 2 + 1) if n % b == 0]
+    slots = []
+    for _ in range(SLOTS):
+        beat = rng.choice(beats)
+        hues = [rng.random() for _ in range(n // beat)]
+        slots.append((beat, rng.randrange(beat), hues))
+    frames = []
+    for f in range(n):
+        row = []
+        for beat, phase, hues in slots:
+            g = f + phase
+            t = (g % beat + 1) / beat  # full on the beat's last frame, then pop
+            r, gr, b = colorsys.hsv_to_rgb(hues[g // beat % len(hues)], 1.0, 0.04 + 0.96 * t ** 2.5)
+            row.append((round(r * 255), round(gr * 255), round(b * 255)))
+        frames.append(_slots(row))
+    return frames
+
+
 def flash(colour: Rgb, seconds: float) -> list[Frame]:
     """Hard on/off blink: on for the first half of each period, off for the second."""
     n = int(seconds * FPS)
@@ -108,9 +135,10 @@ IDLE = {
     "calm": lambda: pulse(GREEN, 6.0, 0.03),
 }
 
-# Image builds on brick9000 (see build.py). These take over the lights in
-# idle and active mode alike.
+# Image builds and deploys on brick9000 (see build.py). These take over the
+# lights in idle and active mode alike; a deploy outranks an image build.
 BUILD = {
+    "deploying": lambda: boil(2.0),
     "image-building": lambda: rainbow(1.5),
     "image-pushed": lambda: flash(GREEN, 0.5),
     "image-failed": lambda: pulse(RED, 0.8, 0.0),
