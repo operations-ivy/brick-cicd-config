@@ -7,8 +7,9 @@ failing Jenkins is that pixel-art Jenkins (Heungsub Lee, CC BY-SA 3.0) read from
 its PNG and set on fire, so it is CC BY-SA 3.0 too (see the LICENSE file next
 to it). Edit the drawings below and rerun:
     python3 brick-status/tools/pixel_art.py
-which rewrites brick-status/brick_status/static/art/*.svg and
-static/vendor/jenkins/pixelart-fire.svg.
+which rewrites brick-status/brick_status/static/art/*.svg,
+static/vendor/jenkins/pixelart-fire.svg, and the PNGs phone pages attach in
+static/notify/.
 """
 
 import struct
@@ -19,6 +20,7 @@ SIZE = 24
 STATIC = Path(__file__).resolve().parents[1] / "brick_status" / "static"
 OUT = STATIC / "art"
 JENKINS = STATIC / "vendor" / "jenkins"
+NOTIFY = STATIC / "notify"
 
 PALETTE = {
     "K": "#0b0f1a",  # outline
@@ -70,6 +72,21 @@ class Canvas:
                         for (x, y), c in sorted(self.px.items(), key=lambda p: (p[0][1], p[0][0])))
         return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.size} {self.size}" '
                 f'shape-rendering="crispEdges">{rects}</svg>\n')
+
+    def png(self, scale=16, margin=2, background="#05070d") -> bytes:
+        """The drawing as a PNG, blown up scale x and on a dark square, for phone
+        pages: iOS shows PNG attachments but not SVG."""
+        side = (self.size + 2 * margin) * scale
+        rgb = lambda c: bytes.fromhex(PALETTE.get(c, c).lstrip("#"))
+        rows = []
+        for y in range(side):
+            j = y // scale - margin
+            rows.append(b"\0" + b"".join(rgb(self.px.get((x // scale - margin, j), background))
+                                         for x in range(side)))
+        chunk = lambda kind, data: (struct.pack(">I", len(data)) + kind + data
+                                    + struct.pack(">I", zlib.crc32(kind + data)))
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
 
 
 FACES = {  # the server's screen, by mood
@@ -302,11 +319,22 @@ def drawings() -> dict[Path, Canvas]:
             JENKINS / "pixelart-fire.svg": jenkins_on_fire()}
 
 
+def page_art() -> dict[Path, Canvas]:
+    """The art phone pages attach (brick_status/notify.py), as PNGs."""
+    return {NOTIFY / "server-ok.png": healthy_server(), NOTIFY / "server-warn.png": degraded_server(),
+            NOTIFY / "server-fire.png": burning_server(),
+            NOTIFY / "plugs-connected.png": plugs(True), NOTIFY / "plugs-disconnected.png": plugs(False)}
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
+    NOTIFY.mkdir(parents=True, exist_ok=True)
     for path, canvas in drawings().items():
         path.write_text(canvas.svg())
         print(f"wrote {path.name} ({len(canvas.px)} pixels)")
+    for path, canvas in page_art().items():
+        path.write_bytes(canvas.png())
+        print(f"wrote {path.name}")
 
 
 if __name__ == "__main__":

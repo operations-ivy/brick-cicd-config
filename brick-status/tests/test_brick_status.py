@@ -13,7 +13,7 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import build, checks, host, lights, patterns, web
+from brick_status import build, checks, host, lights, notify, patterns, web
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
 
@@ -381,6 +381,13 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual(offline["chuck/reader"], "fail")
         self.assertEqual(offline["chuck/reader-68-wrd2h"], "fail")
 
+    def test_control_plane_from_the_apiserver_scrape(self):
+        down = FakeProm({'up{job="apiserver"}': [({"job": "apiserver"}, 0)]})
+        [check] = [c for c in checks.cluster_checks(down) if c.name == "control plane"]
+        self.assertEqual((check.state, check.detail), ("fail", "API down"))
+        # No scrape result at all (not set up yet): no row, rather than a false alarm.
+        self.assertFalse([c for c in checks.cluster_checks(FakeProm({})) if c.name == "control plane"])
+
     def test_finished_job_pods_are_not_scrape_failures(self):
         queries = []
 
@@ -466,6 +473,227 @@ class PixelArtTest(unittest.TestCase):
         import pixel_art
         for path, canvas in pixel_art.drawings().items():
             self.assertEqual(path.read_text(), canvas.svg(), path.name)
+
+
+    def test_committed_page_pngs_match_the_generator(self):
+        """Compared decompressed, so a different zlib build can't fail it."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import pixel_art
+
+        def pixels(png):
+            pos, header, idat = 8, b"", b""
+            while pos < len(png):
+                n, kind = struct.unpack(">I4s", png[pos:pos + 8])
+                data = png[pos + 8:pos + 8 + n]
+                if kind == b"IHDR":
+                    header = data
+                elif kind == b"IDAT":
+                    idat += data
+                pos += 12 + n
+            return header, zlib.decompress(idat)
+
+        for path, canvas in pixel_art.page_art().items():
+            self.assertEqual(pixels(path.read_bytes()), pixels(canvas.png()), path.name)
+            self.assertTrue((notify.ART / path.name).exists(), path.name)
+
+
+def cluster_summary(*cluster, wigle=()):
+    groups = [checks.Check("cluster", *c) for c in cluster] + [checks.Check("wigle", *c) for c in wigle]
+    return checks.summarize(groups)
+
+
+class FindProblemsTest(unittest.TestCase):
+    def test_nodes_wigle_and_disks(self):
+        summary = cluster_summary(("control plane", "ok", "API up"), ("brick420", "ok", "Ready"),
+                                  ("brick2000", "fail", "NotReady"),
+                                  wigle=[("last sync", "fail", "failing for 2h+")])
+        vitals = [{"node": "brick420", "disk": 42.0}, {"node": "brick9000", "disk": 91.5}]
+        found, seen = notify.find_problems(summary, True, vitals)
+        self.assertEqual({p.key for p in found}, {"node:brick2000", "wigle", "disk:brick9000"})
+        self.assertEqual(seen, {"unreachable", "control-plane", "node", "wigle",
+                                "disk:brick420", "disk:brick9000"})
+
+    def test_unreachable_prometheus_hides_everything_it_feeds(self):
+        summary = cluster_summary(("prometheus", "unknown", "unreachable: timed out"),
+                                  wigle=[("prometheus", "unknown", "unreachable: timed out")])
+        found, seen = notify.find_problems(summary, True, [{"node": "brick9000", "disk": 50.0}])
+        self.assertEqual([p.key for p in found], ["unreachable"])
+        self.assertEqual(seen, {"unreachable"})
+
+    def test_no_internet_means_no_unreachable_page(self):
+        summary = cluster_summary(("prometheus", "unknown", "unreachable"))
+        self.assertEqual(notify.find_problems(summary, False, []), ([], set()))
+
+    def test_control_plane_down_leaves_nodes_unknown(self):
+        # kube-state-metrics needs the API, so node rows go stale with it.
+        summary = cluster_summary(("control plane", "fail", "API down"), ("brick420", "ok", "Ready"))
+        found, seen = notify.find_problems(summary, True, [])
+        self.assertEqual([p.key for p in found], ["control-plane"])
+        self.assertNotIn("node", seen)
+
+
+class PagerTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.dir))
+        self.holds = {"node": 600, "wigle": 600}
+
+    def pager(self):
+        import random
+        return notify.Pager(self.dir / "notify.json", self.dir / "incidents.jsonl", self.holds, random.Random(1))
+
+    def incidents(self):
+        return [__import__("json").loads(l) for l in (self.dir / "incidents.jsonl").read_text().splitlines()]
+
+    NODE = notify.Problem("node", "brick2000")
+    SEEN = {"node", "wigle"}
+
+    def test_a_blip_never_pages_but_is_logged(self):
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([], self.SEEN, 300)
+        self.assertEqual(p.take(), [])
+        [incident] = self.incidents()
+        self.assertEqual((incident["kind"], incident["subject"], incident["paged"]), ("node", "brick2000", False))
+
+    def test_sustained_problem_pages_once_then_clears_once(self):
+        p = self.pager()
+        for t in (0, 300, 600, 900, 1200):
+            p.observe([self.NODE], self.SEEN, t)
+        [page] = p.take()
+        self.assertEqual(page["title"], "brick2000 is down")
+        self.assertIn("10 min", page["message"])
+        self.assertEqual((page["priority"], page["art"]), (4, "server-fire"))
+        p.sent(page)
+        p.observe([], self.SEEN, 1800)
+        [clear] = p.take()
+        self.assertEqual((clear["title"], clear["priority"]), ("brick2000 is back", 3))
+        self.assertIn("30 min", clear["message"])
+        self.assertTrue(self.incidents()[0]["paged"])
+
+    def test_restart_neither_repages_nor_forgets(self):
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([self.NODE], self.SEEN, 700)
+        p.sent(p.take()[0])
+        again = self.pager()                      # brick-status restarted
+        again.observe([self.NODE], self.SEEN, 800)
+        self.assertEqual(again.take(), [])
+        again.observe([], self.SEEN, 900)
+        self.assertEqual([m["title"] for m in again.take()], ["brick2000 is back"])
+
+    def test_unsent_pages_survive_a_restart(self):
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([self.NODE], self.SEEN, 700)
+        self.assertEqual(len(self.pager().take()), 1)
+
+    def test_a_problem_out_of_sight_is_not_resolved(self):
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([self.NODE], self.SEEN, 700)
+        p.sent(p.take()[0])
+        p.observe([], {"wigle"}, 800)             # node readiness unknown: still open
+        self.assertEqual(p.take(), [])
+        self.assertFalse((self.dir / "incidents.jsonl").exists())
+
+    def test_failed_sends_stay_queued(self):
+        class Down:
+            def send(self, message):
+                raise OSError("offline")
+
+        class Up:
+            sent = []
+
+            def send(self, message):
+                self.sent.append(message["title"])
+
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([self.NODE], self.SEEN, 700)
+        notify.deliver(p, Down())
+        self.assertEqual(len(p.take()), 1)
+        up = Up()
+        notify.deliver(p, up)
+        self.assertEqual((up.sent, p.take()), (["brick2000 is down"], []))
+
+
+class PageWordingTest(unittest.TestCase):
+    LEAKS = re.compile(r"\d+\.\d+\.\d+\.\d+|https?://|\.local\b|@")
+
+    def test_every_page_is_bland(self):
+        """Pages go through a third-party server: brick names, durations and states only."""
+        import random
+        for kind in notify.PAGES:
+            for cleared in (False, True):
+                for seed in range(5):
+                    m = notify.page_message(notify.Problem(kind, "brick2000"), 4000, cleared, random.Random(seed))
+                    for text in (m["title"], m["message"]):
+                        self.assertIsNone(self.LEAKS.search(text), text)
+                    self.assertTrue((notify.ART / f"{m['art']}.png").exists(), m["art"])
+        self.assertEqual(set(notify.PAGES), set(notify.CLEARS))
+        self.assertEqual(set(notify.PAGES), set(notify.HOLDS))
+
+    def test_durations(self):
+        self.assertEqual([notify.duration(s) for s in (59, 1800, 5400, 12 * 3600, 3 * 86400)],
+                         ["0 min", "30 min", "2 h", "12 h", "3 days"])
+
+
+class NtfyTest(unittest.TestCase):
+    """Sends to a local stand-in for ntfy and checks what arrived."""
+
+    def serve(self, refuse_files=False):
+        import http.server
+        received = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_PUT(self):
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                received.append((self.path, dict(self.headers), body))
+                code = 413 if refuse_files and "Filename" in self.headers else 200
+                self.send_response(code)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}", received
+
+    def test_page_with_art(self):
+        url, received = self.serve()
+        message = {"title": "brick2000 is down", "message": "Lost brick2000 30 min back.",
+                   "tags": "fire,pick", "priority": 4, "art": "server-fire"}
+        notify.Ntfy(url, "topic-abc", click="https://status.brick.nozdormu.cloud").send(message)
+        [(path, headers, body)] = received
+        self.assertEqual(path, "/topic-abc")
+        self.assertEqual(body, (notify.ART / "server-fire.png").read_bytes())
+        self.assertEqual((headers["Title"], headers["Message"], headers["Filename"], headers["Priority"],
+                          headers["Tags"], headers["Click"]),
+                         ("brick2000 is down", "Lost brick2000 30 min back.", "server-fire.png", "4",
+                          "fire,pick", "https://status.brick.nozdormu.cloud"))
+
+    def test_refused_attachment_falls_back_to_text_and_non_ascii_is_encoded(self):
+        url, received = self.serve(refuse_files=True)
+        message = {"title": "Ol’ Brick", "message": "café °F", "tags": "pick",
+                   "priority": 3, "art": "server-ok"}
+        notify.Ntfy(url, "t").send(message)
+        self.assertEqual(len(received), 2)
+        _, headers, body = received[1]
+        self.assertNotIn("Filename", headers)
+        self.assertEqual(body.decode(), "café °F")
+        self.assertTrue(headers["Title"].startswith("=?UTF-8?B?"))
+
+    def test_topic_file(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix="topic") as f:
+            f.write("abc123\n")
+            f.flush()
+            self.assertEqual(notify.read_topic(f.name), "abc123")
+        self.assertEqual(notify.read_topic("/nonexistent/topic"), "")
 
 
 JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"

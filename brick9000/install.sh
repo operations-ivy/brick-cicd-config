@@ -15,6 +15,10 @@ sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status
 
 mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 [ -f ~/.config/brick-status/env ] || cp "$here/brick-status.env.example" ~/.config/brick-status/env
+# The ntfy topic phone pages go to: anyone who knows it can read and send
+# pages, so it's long, random and never printed. Kept if it exists.
+topic=~/.config/brick-status/ntfy_topic
+[ -s "$topic" ] || (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
 cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/mdns-alias@.service" ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart

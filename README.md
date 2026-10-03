@@ -259,6 +259,57 @@ The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
 60fps), so changing one needs only a restart, not a reinstall.
 
+### Alerts
+
+The board shows everything, but from 2026-10-09 it's dark all work week. So
+brick-status also pages a phone, through [ntfy](https://ntfy.sh), for the few
+problems that need a person and won't heal by themselves
+(`brick_status/notify.py`). The aim is under one page a month. Everything else
+(failed Jenkins jobs, crash-loops, degraded workloads) stays on the board.
+Pages come from brick9000, outside the cluster, so they still go out when the
+cluster is down.
+
+| Page | After |
+| --- | --- |
+| Can't reach Prometheus, though the internet is up | 30 min |
+| Control plane down (`up{job="apiserver"}`, also a row on the cluster view) | 30 min |
+| A node `NotReady` | 30 min |
+| wigle-sync failing (its check is red after 2h of failing runs; files pile up on brick69) | 12 h |
+| A host's root disk over 85% | 1 h |
+
+Each problem pages once when it has lasted that long and once more ("all
+clear") when it's gone. A problem can't clear while its data is missing:
+nodes aren't "back" just because the control plane took their readiness
+with it. Open problems and unsent pages are kept in
+`~/.local/state/brick-status/notify.json`, so a restart doesn't page twice and
+a page that couldn't go out (no internet) goes out later. Every problem, paged
+or not, is logged to `incidents.jsonl` next to it, for the weekly report.
+
+Ol' Brick, the outfit's old prospector, writes the pages, and they carry the
+board's pixel art (PNGs in `static/notify/`, drawn by
+`tools/pixel_art.py`; iOS shows PNG attachments, not SVG).
+
+**Privacy.** Pages go through the public ntfy.sh server (and Apple's push
+service, to reach an iPhone). There is no end-to-end encryption, and the server
+keeps messages for a few hours (the art too, at an unguessable public URL).
+So pages hold only brick names, durations and
+states: a test fails if any message could contain an IP, URL or `.local`
+name. The one exception is where tapping a page goes, which ntfy sends
+separately from the message (`BRICK_STATUS_NTFY_CLICK`, by default the
+board's mirror at `https://status.brick.nozdormu.cloud`). That name is already
+in public DNS and only opens on the home network; set it empty to send no
+link. The topic name works as the password: anyone who knows it can read and
+send pages. `install.sh` makes a long random one in
+`~/.config/brick-status/ntfy_topic` (mode 600; never in git or the env file).
+To self-host ntfy later, point `BRICK_STATUS_NTFY_URL` at it.
+
+Subscribe on the phone: install the ntfy app, add a subscription to the
+topic in that file (server `ntfy.sh`), then on brick9000:
+
+```bash
+cd ~/brick-cicd-config/brick-status && python3 -m brick_status notify --test
+```
+
 ### Install on brick9000
 
 brick9000 runs a git clone of this repo (public, so no credentials). Once, on

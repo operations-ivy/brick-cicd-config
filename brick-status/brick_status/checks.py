@@ -63,6 +63,11 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
     for m, v in prom.query('kube_node_status_condition{condition="Ready",status="true"}'):
         checks.append(Check("cluster", m["node"], OK if v == 1 else FAIL,
                             "Ready" if v == 1 else "NotReady"))
+    # Prometheus (on brick2000) still scrapes the API server while it's down,
+    # whereas node readiness comes through the API and goes stale with it.
+    for _, v in prom.query('up{job="apiserver"}'):
+        checks.append(Check("cluster", "control plane", OK if v == 1 else FAIL,
+                            "API up" if v == 1 else "API down"))
 
     stuck = prom.query('sum by (namespace, pod, reason) (kube_pod_container_status_waiting_reason'
                        '{reason=~"CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError"}) > 0')

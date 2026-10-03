@@ -1,15 +1,21 @@
 """brick-status: the status board daemon on brick9000.
 
 Polls Prometheus, serves the board page Chromium shows in kiosk mode, reads
-the front-panel buttons, and drives the plasma button lights and the screen.
+the front-panel buttons, drives the plasma button lights and the screen, and
+pages a phone about problems that need a person (notify.py).
+
+    python3 -m brick_status                # the daemon
+    python3 -m brick_status notify --test  # send a test page
 """
 
+import argparse
 import logging
 import socket
 import threading
 import time
+from pathlib import Path
 
-from . import build, checks, host, lights, web
+from . import build, checks, host, lights, notify, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
@@ -39,10 +45,21 @@ class Status:
             return {**self._summary, "host": self._host, "vitals": self._vitals}
 
 
+def ntfy_from(settings: Settings) -> notify.Ntfy | None:
+    topic = notify.read_topic(settings.ntfy_topic_file)
+    if not topic:
+        log.warning("no ntfy topic in %s: pages are not sent", settings.ntfy_topic_file)
+        return None
+    return notify.Ntfy(settings.ntfy_url, topic, settings.ntfy_click)
+
+
 def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     prom = checks.Prometheus(settings.prometheus_url)
     jenkins = checks.Jenkins(settings.jenkins_url, settings.jenkins_user, settings.jenkins_password)
     local = host.LocalVitals(socket.gethostname())
+    state = Path(settings.notify_dir)
+    pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
+    ntfy = ntfy_from(settings)
     while True:
         try:
             try:
@@ -52,18 +69,38 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
                 vitals = []
             vitals.append(local.read())
             internet = host.internet_up()
-            status.set(checks.summarize(checks.collect(prom, jenkins, internet)),
-                       {"sshd": host.sshd_running(), "internet": internet}, vitals)
+            summary = checks.summarize(checks.collect(prom, jenkins, internet))
+            status.set(summary, {"sshd": host.sshd_running(), "internet": internet}, vitals)
             wake.set()
+            pager.observe(*notify.find_problems(summary, internet, vitals), time.time())
+            if internet:  # otherwise each send would stall the poll until it timed out
+                notify.deliver(pager, ntfy)
         except Exception:
             # Keep polling; a dead poller would leave the board showing stale data.
             log.exception("poll failed")
         time.sleep(settings.poll_seconds)
 
 
+def send_test_page(settings: Settings) -> None:
+    ntfy = ntfy_from(settings)
+    if ntfy is None:
+        raise SystemExit(f"no ntfy topic in {settings.ntfy_topic_file}; run brick9000/install.sh")
+    ntfy.send(notify.test_message())
+    print("Test page sent.")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = Settings.from_env()
+    parser = argparse.ArgumentParser(prog="brick_status")
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("notify", help="phone pages").add_argument(
+        "--test", action="store_true", required=True, help="send a test page")
+    args = parser.parse_args()
+    if args.command == "notify":
+        send_test_page(settings)
+        return
+
     board = Board(VIEWS, settings.active_seconds, settings.quiet, settings.wake_seconds)
     status = Status()
     plasma = lights.Plasma(settings.plasma_fifo, settings.pattern_dir, settings.pattern_prefix)

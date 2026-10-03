@@ -62,6 +62,17 @@ class Settings:
     build_result_seconds: float = 60.0
     input_device_name: str = "gpio_keys"
     wlopm: str = "wlopm"
+    # Phone pages (notify.py). The topic name is the only thing keeping others
+    # from reading or sending pages, so it lives in its own file, made by
+    # install.sh; with no file, nothing is sent.
+    ntfy_url: str = "https://ntfy.sh"
+    ntfy_topic_file: str = os.path.expanduser("~/.config/brick-status/ntfy_topic")
+    # Where tapping a page goes: the board's mirror, which only opens at home
+    # (the name points at a LAN address). Empty for nowhere.
+    ntfy_click: str = "https://status.brick.nozdormu.cloud"
+    # Open problems, unsent pages, and the incident log the weekly report reads.
+    notify_dir: str = os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-status")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -91,4 +102,8 @@ class Settings:
         s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
         if v := env("BRICK_STATUS_BUTTON_SLOTS"):
             s.button_slots = _ints(v)
+        s.ntfy_url = env("BRICK_STATUS_NTFY_URL", s.ntfy_url).rstrip("/")
+        s.ntfy_topic_file = env("BRICK_STATUS_NTFY_TOPIC_FILE", s.ntfy_topic_file)
+        s.ntfy_click = env("BRICK_STATUS_NTFY_CLICK", s.ntfy_click)
+        s.notify_dir = env("BRICK_STATUS_NOTIFY_DIR", s.notify_dir)
         return s
