@@ -17,13 +17,14 @@ import json
 import logging
 import os
 import random
+import re
 import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from .checks import FAIL, UNKNOWN
+from .checks import FAIL, UNKNOWN, WARN
 
 log = logging.getLogger("brick-status.notify")
 
@@ -138,7 +139,50 @@ CLEARS = {
 }
 
 
-def page_message(problem: Problem, held: float, cleared: bool, rng: random.Random) -> dict:
+# Pages go through a third-party server; nothing that looks like an address,
+# a link or an account goes in one (see the README, "Privacy").
+LEAKS = re.compile(r"\d+\.\d+\.\d+\.\d+|https?://|\.local\b|@")
+
+
+def _host_line(v: dict) -> str:
+    parts = []
+    if "disk" in v:
+        parts.append(f"Disk {v['disk']:.0f}%")
+    if "mem" in v:
+        parts.append(f"Mem {v['mem']:.0f}%")
+    if "cpu" in v:
+        parts.append(f"CPU {v['cpu']:.0f}%")
+    if "temp" in v:
+        parts.append(f"{v['temp'] * 9 / 5 + 32:.0f}°F")
+    return " · ".join(parts)
+
+
+def facts(problem: Problem, summary: dict, vitals: list[dict]) -> str:
+    """A short line of numbers to go under a page: fixed labels, no log text.
+
+    Empty when there's nothing to say, or when it could leak something.
+    """
+    hosts = {v["node"]: v for v in vitals if "node" in v}
+    cluster = summary.get("groups", {}).get("cluster", {}).get("checks", [])
+    wigle = {c["name"]: c["detail"] for c in summary.get("groups", {}).get("wigle", {}).get("checks", [])}
+    short = sum(1 for c in cluster if "/" in c["name"] and c["state"] in (WARN, FAIL))
+    if problem.kind == "disk" and problem.subject in hosts:
+        line = _host_line(hosts[problem.subject])
+    elif problem.kind in ("node", "control-plane"):
+        up = [f"{name} CPU {v['cpu']:.0f}% Mem {v['mem']:.0f}%" for name, v in sorted(hosts.items())
+              if name != problem.subject and name != "brick9000" and "cpu" in v and "mem" in v]
+        line = "Still answering: " + ", ".join(up) if up else "No node answering"
+        if problem.kind == "node":
+            line += f" · Workloads short: {short}"
+    elif problem.kind == "wigle" and "last sync" in wigle:
+        line = f"Last sync: {wigle['last sync']} · Uploaded: {wigle.get('files uploaded', '—')}"
+    else:
+        line = ""
+    return "" if LEAKS.search(line) else line
+
+
+def page_message(problem: Problem, held: float, cleared: bool, rng: random.Random,
+                 extra: str = "") -> dict:
     words = {"subject": problem.subject, "held": duration(held)}
     if cleared:
         title, text, art = CLEARS[problem.kind]
@@ -146,12 +190,16 @@ def page_message(problem: Problem, held: float, cleared: bool, rng: random.Rando
     else:
         title, texts, tags, art = PAGES[problem.kind]
         text, priority = rng.choice(texts), 4
-    return {"title": title.format(**words), "message": text.format(**words),
+    message = text.format(**words) + (f"\n{extra}" if extra else "")
+    return {"title": title.format(**words), "message": message,
             "tags": tags, "priority": priority, "art": art}
 
 
-def test_message() -> dict:
-    return {"title": "Ol' Brick checkin' in", "message": "Just testin' the telegraph. Nothin's wrong.",
+def test_message(vitals: dict | None = None) -> dict:
+    """A test page; with brick9000's own vitals, it shows what a facts line looks like."""
+    line = f"{vitals['node']}: {_host_line(vitals)}" if vitals else ""
+    message = "Just testin' the telegraph. Nothin's wrong." + (f"\n{line}" if line and not LEAKS.search(line) else "")
+    return {"title": "Ol' Brick checkin' in", "message": message,
             "tags": "pick,wave", "priority": 3, "art": "server-ok"}
 
 
@@ -172,7 +220,9 @@ class Pager:
         self.open: dict[str, dict] = state.get("open", {})
         self.outbox: list[dict] = state.get("outbox", [])
 
-    def observe(self, problems: list[Problem], seen: set[str], now: float) -> None:
+    def observe(self, problems: list[Problem], seen: set[str], now: float,
+                extra=lambda problem: "") -> None:
+        """`extra(problem)` gives the facts line for a page or all-clear sent now."""
         current = {p.key: p for p in problems}
         changed = False
         for key, p in current.items():
@@ -184,11 +234,11 @@ class Pager:
             held = now - entry["since"]
             if key in current:
                 if not entry["paged"] and held >= self.holds[problem.kind]:
-                    self.outbox.append(page_message(problem, held, False, self.rng))
+                    self.outbox.append(page_message(problem, held, False, self.rng, extra(problem)))
                     entry["paged"] = changed = True
             elif problem.kind in seen or key in seen:
                 if entry["paged"]:
-                    self.outbox.append(page_message(problem, held, True, self.rng))
+                    self.outbox.append(page_message(problem, held, True, self.rng, extra(problem)))
                 self._record(entry, now)
                 del self.open[key]
                 changed = True
@@ -218,8 +268,9 @@ class Pager:
 
 
 def _header(text: str) -> str:
-    """HTTP headers are Latin-1; ntfy reads RFC 2047 encoded words for anything else."""
-    if text.isascii():
+    """HTTP headers are Latin-1 and one line; ntfy reads RFC 2047 encoded words
+    for anything else."""
+    if text.isascii() and "\n" not in text:
         return text
     return "=?UTF-8?B?" + base64.b64encode(text.encode()).decode() + "?="
 
