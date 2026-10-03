@@ -72,7 +72,8 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             summary = checks.summarize(checks.collect(prom, jenkins, internet))
             status.set(summary, {"sshd": host.sshd_running(), "internet": internet}, vitals)
             wake.set()
-            pager.observe(*notify.find_problems(summary, internet, vitals), time.time())
+            pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
+                          lambda problem: notify.facts(problem, summary, vitals))
             if internet:  # otherwise each send would stall the poll until it timed out
                 notify.deliver(pager, ntfy)
         except Exception:
@@ -85,7 +86,9 @@ def send_test_page(settings: Settings) -> None:
     ntfy = ntfy_from(settings)
     if ntfy is None:
         raise SystemExit(f"no ntfy topic in {settings.ntfy_topic_file}; run brick9000/install.sh")
-    ntfy.send(notify.test_message())
+    local = host.LocalVitals(socket.gethostname())
+    time.sleep(1)  # CPU % is measured between two reads
+    ntfy.send(notify.test_message(local.read()))
     print("Test page sent.")
 
 

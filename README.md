@@ -294,7 +294,12 @@ service, to reach an iPhone). There is no end-to-end encryption, and the server
 keeps messages for a few hours (the art too, at an unguessable public URL).
 So pages hold only brick names, durations and
 states: a test fails if any message could contain an IP, URL or `.local`
-name. The one exception is where tapping a page goes, which ntfy sends
+name. Under Ol' Brick's line, a page carries one line of numbers with fixed
+labels, never log text: the host's disk, memory, CPU and temperature for a
+full disk; how the other nodes are coping for a node or the control plane
+down; the last sync's state for wigle-sync. A line that could leak anything
+is dropped rather than sent. `notify --test` shows brick9000's own numbers
+that way. The one exception is where tapping a page goes, which ntfy sends
 separately from the message (`BRICK_STATUS_NTFY_CLICK`, by default the
 board's mirror at `https://status.brick.nozdormu.cloud`). That name is already
 in public DNS and only opens on the home network; set it empty to send no

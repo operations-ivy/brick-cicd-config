@@ -635,6 +635,58 @@ class PageWordingTest(unittest.TestCase):
         self.assertEqual(set(notify.PAGES), set(notify.CLEARS))
         self.assertEqual(set(notify.PAGES), set(notify.HOLDS))
 
+    VITALS = [{"node": "brick420", "cpu": 31.2, "mem": 58.9, "temp": 55.0, "disk": 61.0},
+              {"node": "brick2000", "cpu": 12.4, "mem": 40.6, "temp": 50.0, "disk": 87.3},
+              {"node": "brick9000", "cpu": 20.0, "mem": 25.0, "temp": 60.0, "disk": 30.0}]
+    SUMMARY = {"groups": {
+        "cluster": {"checks": [{"name": "brick420", "state": "ok", "detail": "Ready"},
+                               {"name": "brick2000", "state": "fail", "detail": "NotReady"},
+                               {"name": "chuck/reader", "state": "fail", "detail": "1 unavailable"},
+                               {"name": "prometheus", "state": "unknown",
+                                "detail": "unreachable: http://192.168.1.183:9090 refused"}]},
+        "wigle": {"checks": [{"name": "last sync", "state": "fail", "detail": "failing for 2h+"},
+                             {"name": "files uploaded", "state": "ok", "detail": "0"}]}}}
+
+    def facts(self, kind, subject=""):
+        return notify.facts(notify.Problem(kind, subject), self.SUMMARY, self.VITALS)
+
+    def test_facts_are_a_few_numbers(self):
+        self.assertEqual(self.facts("disk", "brick2000"), "Disk 87% · Mem 41% · CPU 12% · 122°F")
+        self.assertEqual(self.facts("node", "brick2000"),
+                         "Still answering: brick420 CPU 31% Mem 59% · Workloads short: 1")
+        self.assertEqual(self.facts("control-plane"),
+                         "Still answering: brick2000 CPU 12% Mem 41%, brick420 CPU 31% Mem 59%")
+        self.assertEqual(self.facts("wigle"), "Last sync: failing for 2h+ · Uploaded: 0")
+        self.assertEqual(self.facts("unreachable"), "")
+        self.assertEqual(self.facts("disk", "brick69"), "")  # no vitals for it
+
+    def test_facts_that_could_leak_are_dropped(self):
+        summary = {"groups": {"wigle": {"checks": [
+            {"name": "last sync", "state": "fail", "detail": "error from http://192.168.1.183"}]}}}
+        self.assertEqual(notify.facts(notify.Problem("wigle"), summary, []), "")
+
+    def test_facts_ride_under_the_page_and_stay_bland(self):
+        import random
+        for kind in notify.PAGES:
+            for cleared in (False, True):
+                extra = self.facts(kind, "brick2000")
+                m = notify.page_message(notify.Problem(kind, "brick2000"), 4000, cleared, random.Random(1), extra)
+                self.assertIsNone(self.LEAKS.search(m["message"]), m["message"])
+                if extra:
+                    self.assertTrue(m["message"].endswith("\n" + extra))
+
+    def test_test_page_shows_a_facts_line(self):
+        m = notify.test_message(self.VITALS[2])
+        self.assertEqual(m["message"].split("\n")[1], "brick9000: Disk 30% · Mem 25% · CPU 20% · 140°F")
+        self.assertNotIn("\n", notify.test_message()["message"])
+
+    def test_two_line_messages_survive_the_header(self):
+        import base64
+        encoded = notify._header("Line one\nDisk 87%")
+        self.assertTrue(encoded.startswith("=?UTF-8?B?"))
+        self.assertEqual(base64.b64decode(encoded[10:-2]).decode(), "Line one\nDisk 87%")
+        self.assertEqual(notify._header("plain"), "plain")
+
     def test_durations(self):
         self.assertEqual([notify.duration(s) for s in (59, 1800, 5400, 12 * 3600, 3 * 86400)],
                          ["0 min", "30 min", "2 h", "12 h", "3 days"])
