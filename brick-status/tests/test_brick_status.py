@@ -667,14 +667,14 @@ class NtfyTest(unittest.TestCase):
         url, received = self.serve()
         message = {"title": "brick2000 is down", "message": "Lost brick2000 30 min back.",
                    "tags": "fire,pick", "priority": 4, "art": "server-fire"}
-        notify.Ntfy(url, "topic-abc", click="http://brick-status.local").send(message)
+        notify.Ntfy(url, "topic-abc", click="https://status.brick.nozdormu.cloud").send(message)
         [(path, headers, body)] = received
         self.assertEqual(path, "/topic-abc")
         self.assertEqual(body, (notify.ART / "server-fire.png").read_bytes())
         self.assertEqual((headers["Title"], headers["Message"], headers["Filename"], headers["Priority"],
                           headers["Tags"], headers["Click"]),
                          ("brick2000 is down", "Lost brick2000 30 min back.", "server-fire.png", "4",
-                          "fire,pick", "http://brick-status.local"))
+                          "fire,pick", "https://status.brick.nozdormu.cloud"))
 
     def test_refused_attachment_falls_back_to_text_and_non_ascii_is_encoded(self):
         url, received = self.serve(refuse_files=True)

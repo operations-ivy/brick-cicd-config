@@ -294,7 +294,11 @@ service, to reach an iPhone). There is no end-to-end encryption, and the server
 keeps messages for a few hours (the art too, at an unguessable public URL).
 So pages hold only brick names, durations and
 states: a test fails if any message could contain an IP, URL or `.local`
-name. The topic name works as the password: anyone who knows it can read and
+name. The one exception is where tapping a page goes, which ntfy sends
+separately from the message (`BRICK_STATUS_NTFY_CLICK`, by default the
+board's mirror at `https://status.brick.nozdormu.cloud`). That name is already
+in public DNS and only opens on the home network; set it empty to send no
+link. The topic name works as the password: anyone who knows it can read and
 send pages. `install.sh` makes a long random one in
 `~/.config/brick-status/ntfy_topic` (mode 600; never in git or the env file).
 To self-host ntfy later, point `BRICK_STATUS_NTFY_URL` at it.

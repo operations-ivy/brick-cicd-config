@@ -67,8 +67,9 @@ class Settings:
     # install.sh; with no file, nothing is sent.
     ntfy_url: str = "https://ntfy.sh"
     ntfy_topic_file: str = os.path.expanduser("~/.config/brick-status/ntfy_topic")
-    # Where tapping a page goes; the board's LAN mirror only opens at home.
-    ntfy_click: str = ""
+    # Where tapping a page goes: the board's mirror, which only opens at home
+    # (the name points at a LAN address). Empty for nowhere.
+    ntfy_click: str = "https://status.brick.nozdormu.cloud"
     # Open problems, unsent pages, and the incident log the weekly report reads.
     notify_dir: str = os.path.join(
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-status")
