@@ -60,9 +60,12 @@
 	}
 	# The Kubernetes Dashboard is only on Traefik's HTTPS entrypoint, behind
 	# Traefik's own self-signed certificate, so that hop skips verification.
+	# To an HTTPS upstream Caddy sends the upstream's address as Host, so pass
+	# the name on explicitly.
 	@dashboard host dashboard.brick.nozdormu.cloud
 	handle @dashboard {
 		reverse_proxy https://192.168.1.183 https://192.168.1.170 {
+			header_up Host {host}
 			lb_policy first
 			lb_try_duration 5s
 			fail_duration 30s
