@@ -6,8 +6,8 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
 # Button input (the plasma daemon itself is already installed), and
-# avahi-publish to announce brick9000's other names (jenkins.local,
-# brick-status.local).
+# avahi-publish to announce brick9000's old names (jenkins.local,
+# brick-status.local), which the proxy redirects to the new ones.
 sudo apt-get install -y python3-evdev avahi-utils
 # The plasma daemon (root) only loads patterns from /etc/plasma/; brick-status
 # (zaphod) writes its own into this subdirectory.
@@ -23,8 +23,8 @@ cp "$here/labwc-autostart" ~/.config/labwc/autostart
 # restarts it on boot). Before brick-status starts, so its login is in the env file.
 "$here/jenkins/setup"
 "$here/jenkins/up"
-# Ports 80 and 443: the apps at <name>.brick.nozdormu.cloud, plus the old
-# jenkins.local and the board's LAN mirror (README, "Ports 80 and 443").
+# Ports 80 and 443: the apps at <name>.brick.nozdormu.cloud, and redirects
+# from the old names (README, "Ports 80 and 443").
 "$here/proxy/up"
 
 systemctl --user daemon-reload

@@ -37,7 +37,7 @@ def serve(settings, board, status) -> None:
                 self._send(200, "application/json", body)
             elif url.path == "/api/matrix":
                 # Only the kiosk runs cmatrix. Through the LAN proxy (the read-only
-                # brick-status.local mirror) it's refused: only one cmatrix runs at
+                # status.brick.nozdormu.cloud mirror) it's refused: only one cmatrix runs at
                 # a time, so a viewer starting one would stop the kiosk's.
                 if self.headers.get("X-Forwarded-For"):
                     self._send(403, "text/plain", b"cmatrix is for brick9000's own screen")

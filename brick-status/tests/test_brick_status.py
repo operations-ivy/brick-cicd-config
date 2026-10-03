@@ -426,7 +426,7 @@ class ChecksTest(unittest.TestCase):
 
 
 class MirrorTest(unittest.TestCase):
-    """brick-status.local reaches the board through the LAN proxy, which adds
+    """status.brick.nozdormu.cloud reaches the board through the LAN proxy, which adds
     X-Forwarded-For: page and state yes, cmatrix no (it would stop the kiosk's)."""
 
     def setUp(self):

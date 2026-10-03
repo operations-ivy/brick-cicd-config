@@ -34,7 +34,7 @@ jenkins:
 
 unclassified:
   location:
-    url: http://jenkins.local/
+    url: https://jenkins.brick.nozdormu.cloud/
 
 security:
   # The seed script is ours, from git; it reads files (the job definitions).

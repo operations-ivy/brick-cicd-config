@@ -1,4 +1,4 @@
-# Jenkins on brick9000, at http://jenkins.local through the proxy on port 80
+# Jenkins on brick9000, at https://jenkins.brick.nozdormu.cloud through the proxy
 # (brick9000/proxy); it listens only on localhost itself. Started by install.sh
 # and kept current by deploy; Docker restarts it on boot.
 #   docker compose -f ~/brick-cicd-config/brick9000/jenkins/compose.yaml up -d --build
