@@ -30,7 +30,7 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bunker); color: var(--bone); overflow: hidden; cursor: none; }
-  body.mirror { cursor: auto; }  /* brick-status.local, viewed from another machine */
+  body.mirror { cursor: auto; }  /* status.brick.nozdormu.cloud, viewed from another machine */
   body {
     font-family: "Barlow Condensed", "DejaVu Sans Condensed", sans-serif;
     display: grid; grid-template-rows: auto 1fr auto; font-size: 2.3vw;
@@ -312,7 +312,7 @@ function matrixColour(s) {
   return "green";
 }
 
-// Opened through the LAN proxy (brick-status.local) rather than on brick9000's
+// Opened through the LAN proxy (status.brick.nozdormu.cloud) rather than on brick9000's
 // own screen: a read-only mirror of the kiosk. It leaves the CRT window empty
 // (with its label): only the kiosk runs cmatrix.
 const MIRROR = !["127.0.0.1", "localhost"].includes(location.hostname);

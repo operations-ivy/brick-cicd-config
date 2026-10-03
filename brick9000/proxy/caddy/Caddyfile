@@ -7,12 +7,11 @@
 	auto_https disable_redirects
 }
 
-# The cluster's apps, through Traefik on either node. Traefik still routes by
-# the old .local names, so ask for those. Passive health checks: a node that
-# stops answering is skipped for 30s.
+# The cluster's apps, through Traefik on either node, which routes by the same
+# names (each ingress lists its <name>.brick.nozdormu.cloud host). Passive
+# health checks: a node that stops answering is skipped for 30s.
 (traefik) {
 	reverse_proxy 192.168.1.183:80 192.168.1.170:80 {
-		header_up Host {args[0]}
 		lb_policy first
 		lb_try_duration 5s
 		fail_duration 30s
@@ -45,31 +44,33 @@
 
 	@grafana host grafana.brick.nozdormu.cloud
 	handle @grafana {
-		import traefik grafana.local
+		import traefik
 	}
 	@prometheus host prometheus.brick.nozdormu.cloud
 	handle @prometheus {
-		import traefik prometheus.local
+		import traefik
 	}
 	@wigle host wigle.brick.nozdormu.cloud
 	handle @wigle {
-		import traefik wigle.local
+		import traefik
 	}
 	@reader host reader.brick.nozdormu.cloud
 	handle @reader {
-		import traefik reader.local
+		import traefik
 	}
 	# The Kubernetes Dashboard is only on Traefik's HTTPS entrypoint, behind
 	# Traefik's own self-signed certificate, so that hop skips verification.
+	# To an HTTPS upstream Caddy sends the upstream's address as Host, so pass
+	# the name on explicitly.
 	@dashboard host dashboard.brick.nozdormu.cloud
 	handle @dashboard {
 		reverse_proxy https://192.168.1.183 https://192.168.1.170 {
-			header_up Host dashboard.local
+			header_up Host {host}
 			lb_policy first
 			lb_try_duration 5s
 			fail_duration 30s
 			transport http {
-				tls_server_name dashboard.local
+				tls_server_name dashboard.brick.nozdormu.cloud
 				tls_insecure_skip_verify
 			}
 		}
@@ -84,21 +85,21 @@ http://*.brick.nozdormu.cloud {
 	redir https://{host}{uri} 308
 }
 
-# The old names, until everything has moved: plain HTTP over mDNS
-# (mdns-alias@jenkins and @brick-status).
+# The old names over mDNS (mdns-alias@jenkins and @brick-status) redirect to
+# the new ones until they're retired; 308 keeps a webhook's POST a POST.
 http://jenkins.local {
-	reverse_proxy 127.0.0.1:8080
+	redir https://jenkins.brick.nozdormu.cloud{uri} 308
 }
 
-# Everything else (brick-status.local, brick9000.local, the bare address): a
-# read-only mirror of the status board. Except /prometheus, Jenkins' metrics,
-# which the cluster's Prometheus scrapes at brick9000:80 (pods can't resolve
-# mDNS names).
+# Everything else (brick-status.local, brick9000.local, the bare address)
+# redirects to the board's mirror. Except /prometheus, Jenkins' metrics, which
+# the cluster's Prometheus scrapes at brick9000:80 (see brick-k8s-config's
+# kube-prometheus-stack values).
 :80 {
 	handle /prometheus* {
 		reverse_proxy 127.0.0.1:8080
 	}
 	handle {
-		reverse_proxy 127.0.0.1:8765
+		redir https://status.brick.nozdormu.cloud{uri} 308
 	}
 }

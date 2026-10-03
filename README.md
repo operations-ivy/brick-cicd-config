@@ -14,7 +14,7 @@ shows how that's going.
 | --- | --- | --- |
 | `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
 | `brick9000` (Docker) | Jenkins: bootstrap and maintenance jobs | Has to work when the cluster doesn't, and be able to rebuild it |
-| `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud`, plus the old `jenkins.local` and `brick-status.local` | The front door for the whole homelab; Jenkins and the board stay reachable when the cluster is down |
+| `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; Jenkins and the board stay reachable when the cluster is down |
 
 ### brick9000 is not a cluster node
 
@@ -39,7 +39,7 @@ own journal. The secrets it needs live in files on the host
 brick9000 should be able to rebuild the whole brick homelab in an emergency,
 so the Jenkins that runs maintenance and bootstrap jobs can't live in the
 cluster it rebuilds. It runs on brick9000 in Docker (`brick9000/jenkins/`),
-at `http://jenkins.local`, and jobs run on brick9000 itself (no agents). It
+at `https://jenkins.brick.nozdormu.cloud`, and jobs run on brick9000 itself (no agents). It
 listens only on `127.0.0.1:8080`; the proxy (below) is what serves the name.
 
 - **Nothing at start-up needs the internet.** The image
@@ -55,7 +55,7 @@ listens only on `127.0.0.1:8080`; the proxy (below) is what serves the name.
   header comments give its description, parameters and schedule (see
   `seed.groovy`); the pipeline calls a script in `bin/`, where the logic lives.
 - **Webhooks from the LAN.** Every job can be started with
-  `curl -X POST 'http://jenkins.local/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
+  `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
   parameters in the query string (`&APPLY=true`). The secret is
   `~/.config/brick-jenkins/secrets/webhook_secret` on brick9000.
 - **Cluster access per run.** Jobs reach the hosts with Jenkins' own SSH key
@@ -105,7 +105,7 @@ the front door for every web UI in the homelab, each at its own name under
 | --- | --- |
 | `jenkins.brick.nozdormu.cloud` | Jenkins on `127.0.0.1:8080` |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
-| `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, asking for the app's old `.local` name |
+| `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
 Plain HTTP to any of them redirects to HTTPS. brick9000 is the front door
@@ -135,11 +135,12 @@ How the names work, and the hand-made parts outside git:
   wait for a certificate. Porkbun's keys can change every domain on the
   account, so treat them like any other secret.
 
-The old names still work for now, plain HTTP over mDNS: `jenkins.local` to
-Jenkins, and anything else (`brick-status.local`, `brick9000.local`, the bare
-address) to the board's mirror. brick9000 announces them with
-`mdns-alias@<name>` user units (`jenkins`, `brick-status`). The catch-all also
-sends `/prometheus` to Jenkins, so the cluster's Prometheus can scrape Jenkins'
+The old names redirect (`308`, so a webhook's POST stays a POST, with
+`curl -L`): `http://jenkins.local` to Jenkins, and anything else on port 80
+(`brick-status.local`, `brick9000.local`, the bare address) to the board's
+mirror. brick9000 still announces them with `mdns-alias@<name>` user units
+(`jenkins`, `brick-status`) until they're retired. Port 80 also sends
+`/prometheus` to Jenkins, so the cluster's Prometheus can scrape Jenkins'
 metrics at `brick9000:80` (see brick-k8s-config's kube-prometheus-stack
 values).
 
@@ -162,8 +163,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   `static/art/`): a smiling server for the cluster, or one on fire when it's
   down, and two plugs for wigle-sync, connected while syncing is OK, pulled
   apart and sparking otherwise.
-- It asks Prometheus (`http://prometheus.local`, an Ingress defined
-  in `brick-k8s-config`) about the cluster (node
+- It asks Prometheus (`https://prometheus.brick.nozdormu.cloud`, through
+  brick9000's own proxy to an Ingress defined in `brick-k8s-config`) about the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
   targets) and wigle-sync (Pushgateway metrics, plus a running CronJob pod
   meaning "uploading"). The wigle-sync view has three rows: how the last sync
@@ -181,8 +182,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second,
   and reloads itself when brick-status restarts, so a deploy updates the
   screen too.
-- The same page is on the LAN, read-only, at `http://brick-status.local` (or
-  `brick9000.local`): a plain mirror of what the cabinet shows, including which
+- The same page is on the LAN, read-only, at
+  `https://status.brick.nozdormu.cloud`: a plain mirror of what the cabinet shows, including which
   view is up. It changes nothing on the cabinet. Its CRT window stays empty
   apart from its label, since only the kiosk runs cmatrix: requests that come
   through the proxy (it adds `X-Forwarded-For`) can't start one, which would
@@ -283,8 +284,8 @@ scratch worktree. Only if they pass does it switch the clone to that commit
 and restart brick-status. A commit that fails is left alone until the branch
 moves again. From the moment it finds a new commit until it's done, the
 buttons boil (see the lights above); it records its progress in
-`~/.local/state/brick-build/deploy.json`. Changes under `brick9000/` itself (units, autostart) still need
-`install.sh` rerun; the deploy log says so.
+`~/.local/state/brick-build/deploy.json`. Changes under `brick9000/` itself
+(units, autostart) still need `install.sh` rerun; the deploy log says so.
 
 brick9000 follows `main`. To try a branch on the real board before merging,
 set `BRICK_DEPLOY_BRANCH=<branch>` in the env file, then check now instead of

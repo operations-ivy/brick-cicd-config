@@ -9,7 +9,7 @@
 //
 // Every job can be started from the LAN with a webhook, parameters in the
 // query string:
-//   curl -X POST 'http://jenkins.local/generic-webhook-trigger/invoke?token=<name>-<secret>&NAME=value'
+//   curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<name>-<secret>&NAME=value'
 // where <secret> is ~/.config/brick-jenkins/secrets/webhook_secret on brick9000.
 
 def root = '/brick-cicd-config/brick9000/jenkins'
@@ -28,7 +28,7 @@ new File("${root}/jobs").listFiles().findAll { it.name.endsWith('.groovy') }.sor
     def about = header.findAll { !it.startsWith('param ') && !it.startsWith('cron ') }.join('\n')
 
     pipelineJob(name) {
-        description("${about}\n\nWebhook: POST http://jenkins.local/generic-webhook-trigger/invoke?token=${name}-<webhook secret>" +
+        description("${about}\n\nWebhook: POST https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=${name}-<webhook secret>" +
                     (params ? params.collect { "&${it.name}=…" }.join('') : ''))
         logRotator { numToKeep(30) }
         if (params) {
