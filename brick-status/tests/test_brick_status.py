@@ -803,6 +803,11 @@ class JenkinsJobsTest(unittest.TestCase):
             for path in paths:
                 self.assertTrue((JENKINS / path).is_file(), f"{job.name}: {path} missing")
 
+    def test_ssh_config_is_not_writable(self):
+        # ssh refuses a config file anyone but root can write, and COPY keeps
+        # the checkout's mode, which can be group-writable.
+        self.assertIn("COPY --chmod=644 ssh_config /etc/ssh/ssh_config.d/", (JENKINS / "Dockerfile").read_text())
+
     def test_secret_keys_are_sealed(self):
         # Every key Jenkins reads from the brick-jenkins Secret is one seal-secrets puts there.
         sealed = set(re.findall(r"--from-file=([\w-]+)", (JENKINS / "seal-secrets").read_text()))
