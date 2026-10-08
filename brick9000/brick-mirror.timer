@@ -1,0 +1,10 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Mirror the brick repos onto brick9000 every 2 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=2h
+
+[Install]
+WantedBy=timers.target

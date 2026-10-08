@@ -1,0 +1,46 @@
+#!/bin/sh
+# Install or upgrade the cluster's Jenkins, from the laptop (README, "Jenkins").
+#
+# The image tag in values.yaml names one build of this directory. If Docker
+# Hub doesn't have it yet, build it natively on brick2000's BuildKit (the
+# brick2000-arm64 builder, see brick-k8s-config's README) and push it; if it
+# does, check it was built from the same files. Then helm upgrade --install.
+# Run it from a clean, committed tree, so the image matches a commit.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+CHART_VERSION=5.9.68
+export KUBECONFIG=${KUBECONFIG:-$HOME/.kube/chuck-config}
+
+if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
+    echo "release: commit the changes under jenkins/ first" >&2
+    exit 1
+fi
+tag=$(sed -n 's/^    tag: "\(.*\)"$/\1/p' "$here/values.yaml")
+image=docker.io/whitepatrick/brick-jenkins:$tag
+# The last commit to change what goes into the image (everything here but
+# the files the image doesn't carry).
+revision=$(git -C "$here" log -1 --format=%H -- . ':!values.yaml' ':!namespace.yaml' ':!release' ':!seal-secrets')
+
+built=$(docker buildx imagetools inspect "$image" \
+    --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}' 2>/dev/null || true)
+if [ -z "$built" ]; then
+    echo "release: building $image at $revision"
+    docker buildx build --builder brick2000-arm64 --platform linux/arm64 \
+        --label "org.opencontainers.image.revision=$revision" \
+        --label "org.opencontainers.image.source=https://github.com/operations-ivy/brick-cicd-config" \
+        -t "$image" --push "$here"
+elif [ "$built" != "$revision" ]; then
+    echo "release: $image was built from $built, but jenkins/ is now at $revision; bump the tag in values.yaml" >&2
+    exit 1
+else
+    echo "release: $image is already on Docker Hub"
+fi
+
+kubectl apply -f "$here/namespace.yaml"
+if ! kubectl -n jenkins get secret brick-jenkins >/dev/null 2>&1; then
+    echo "release: no brick-jenkins Secret yet; run jenkins/seal-secrets and apply what it makes" >&2
+    exit 1
+fi
+helm repo add jenkins https://charts.jenkins.io --force-update >/dev/null
+helm upgrade --install jenkins jenkins/jenkins --version "$CHART_VERSION" \
+    --namespace jenkins --values "$here/values.yaml" --wait --timeout 10m

@@ -1,5 +1,5 @@
 """Image builds and deploys on brick9000 itself, as reported by
-brick9000/build-status.sh (sourced by build-image, jenkins/up and deploy).
+brick9000/build-status.sh (sourced by build-image and deploy).
 
 Each writes one JSON object to its status file: `state` is "building", then
 "succeeded" or "failed" with a `finished` time. Image builds share one file;

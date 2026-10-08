@@ -1,0 +1,19 @@
+#!/bin/sh
+# Keep the newest two versions of each app image on Docker Hub, on both nodes
+# and on brick9000 (brick-k8s-config's prune_images.py). Dry run unless APPLY=true.
+set -eu
+. "$(dirname "$0")/lib.sh"
+script=$(mirror brick-k8s-config)/scripts/prune_images.py
+# Docker Hub deletes with the account's access token, from the brick-jenkins
+# Secret; "this machine" in prune_images.py is brick9000's Docker, over SSH.
+secrets=/run/secrets/additional
+if [ -s "$secrets/dockerhub-token" ]; then
+    DOCKERHUB_USERNAME=$(cat "$secrets/dockerhub-username")
+    DOCKERHUB_TOKEN=$(cat "$secrets/dockerhub-token")
+    export DOCKERHUB_USERNAME DOCKERHUB_TOKEN
+fi
+export DOCKER_HOST=${DOCKER_HOST:-ssh://zaphod@$BRICK9000}
+if [ "${APPLY:-false}" = true ]; then
+    exec python3 "$script" --apply
+fi
+exec python3 "$script"

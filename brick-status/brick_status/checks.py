@@ -105,9 +105,8 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
 
 
 class Jenkins:
-    """Jenkins on brick9000 itself, read directly rather than through the
-    cluster's Prometheus, so the board still shows jobs while the cluster is
-    down (exactly when the bootstrap jobs run)."""
+    """Jenkins on the cluster, read through its API (as brick-status' read-only
+    user) rather than Prometheus, which only has build results by the minute."""
 
     TREE = "jobs[name,lastBuild[number,building,timestamp],lastCompletedBuild[result,timestamp]]"
 
@@ -129,8 +128,10 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
     now = time.time() if now is None else now
     try:
         jobs = jenkins.jobs()
-    except Exception as e:  # it runs on this machine, so unreachable means it's down
-        return [Check("builds", "jenkins", FAIL, f"down: {e}")]
+    except Exception as e:
+        # No data, not a failed build: Jenkins runs on the cluster, and the
+        # cluster view already says when its pod or the cluster is down.
+        return [Check("builds", "jenkins", UNKNOWN, f"unreachable: {e}")]
 
     checks = []
     for job in sorted(jobs, key=lambda j: j["name"]):

@@ -1,0 +1,13 @@
+# ssh settings for Jenkins' jobs (baked into the image as
+# /etc/ssh/ssh_config.d/brick.conf). The key is Jenkins' own, authorized for
+# zaphod on each host, from the brick-jenkins Secret.
+Host *
+    User zaphod
+    IdentityFile /run/secrets/additional/ssh-key
+    BatchMode yes
+    ConnectTimeout 10
+    # known_hosts is on the Jenkins home volume, so it survives restarts. A
+    # reimaged host gets a new key; accept a host seen for the first time,
+    # refuse one that changed (remove its known_hosts line after a reimage).
+    UserKnownHostsFile /var/jenkins_home/.ssh/known_hosts
+    StrictHostKeyChecking accept-new

@@ -1,5 +1,5 @@
 # Baked into the image at build time (latest compatible then), never fetched
-# at start-up. Rebuild the image to change them.
+# at start-up. Change one by releasing a new image (jenkins/release).
 configuration-as-code
 job-dsl
 workflow-aggregator
@@ -7,3 +7,5 @@ generic-webhook-trigger
 matrix-auth
 prometheus
 timestamper
+# Agent pods for build and test jobs (values.yaml, agent:).
+kubernetes

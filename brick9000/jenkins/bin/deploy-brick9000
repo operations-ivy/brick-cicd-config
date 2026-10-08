@@ -1,9 +1,0 @@
-#!/bin/sh
-# Start brick9000's deploy (brick-deploy.service, normally run every 2 hours by
-# its timer) now. The deploy can rebuild and restart this Jenkins, which would
-# kill a build waiting on it, so only queue it; its result is in brick9000's
-# journal, not this build's log.
-set -eu
-. "$(dirname "$0")/lib.sh"
-ssh "$BRICK9000" systemctl --user start --no-block brick-deploy.service
-echo "Deploy started; follow it on brick9000 with: journalctl --user -fu brick-deploy"

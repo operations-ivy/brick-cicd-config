@@ -29,9 +29,9 @@ def _ints(value: str) -> list[int]:
 @dataclass
 class Settings:
     prometheus_url: str = "https://prometheus.brick.nozdormu.cloud"
-    # Jenkins runs on brick9000 itself (brick9000/jenkins); read as its
-    # read-only brick-status user, whose password setup puts in the env file.
-    jenkins_url: str = "http://127.0.0.1:8080"
+    # Jenkins runs on the cluster (jenkins/), through brick9000's own proxy;
+    # read as its read-only brick-status user, whose password is in the env file.
+    jenkins_url: str = "https://jenkins.brick.nozdormu.cloud"
     jenkins_user: str = "brick-status"
     jenkins_password: str = ""
     poll_seconds: float = 15.0

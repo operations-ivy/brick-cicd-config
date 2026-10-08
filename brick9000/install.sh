@@ -20,13 +20,19 @@ mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 topic=~/.config/brick-status/ntfy_topic
 [ -s "$topic" ] || (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
 cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
-    "$here/mdns-alias@.service" ~/.config/systemd/user/
+    "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
+    ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
 
-# Jenkins: secrets on first run, then build and start the container (Docker
-# restarts it on boot). Before brick-status starts, so its login is in the env file.
-"$here/jenkins/setup"
-"$here/jenkins/up"
+# Jenkins moved to the cluster (jenkins/, README "Jenkins"). Retire the
+# container it used to run in here; its home and secrets stay, as backups.
+if docker container inspect brick-jenkins >/dev/null 2>&1; then
+    docker rm -f brick-jenkins
+    docker image rm brick-jenkins:local || true
+fi
+if [ -f ~/.config/brick-status/env ] && ! grep -q '^BRICK_STATUS_JENKINS_PASSWORD=' ~/.config/brick-status/env; then
+    echo "Add BRICK_STATUS_JENKINS_PASSWORD (the brick-jenkins Secret's brick-status-password) to ~/.config/brick-status/env"
+fi
 # Ports 80 and 443: the apps at <name>.brick.nozdormu.cloud, and redirects
 # from the old names (README, "Ports 80 and 443").
 "$here/proxy/up"
@@ -35,5 +41,5 @@ systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-status
 systemctl --user restart brick-status
-systemctl --user enable --now brick-deploy.timer
+systemctl --user enable --now brick-deploy.timer brick-mirror.timer
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."

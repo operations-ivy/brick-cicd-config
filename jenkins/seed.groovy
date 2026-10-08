@@ -1,5 +1,6 @@
 // Job DSL: one pipeline job per jobs/<name>.groovy, run by configuration as
-// code at start-up and on every reload.
+// code at start-up (values.yaml). The image carries this file, the jobs and
+// their scripts under /usr/share/brick-jenkins.
 //
 // A job file starts with comment lines:
 //   // What the job does, in a sentence or two (becomes the description).
@@ -10,10 +11,11 @@
 // Every job can be started from the LAN with a webhook, parameters in the
 // query string:
 //   curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<name>-<secret>&NAME=value'
-// where <secret> is ~/.config/brick-jenkins/secrets/webhook_secret on brick9000.
+// where <secret> is the webhook-secret key of the brick-jenkins Secret (the
+// same value as ~/.config/brick-jenkins/secrets/webhook_secret on brick9000).
 
-def root = '/brick-cicd-config/brick9000/jenkins'
-def secret = new File('/run/secrets/webhook_secret').text.trim()
+def root = '/usr/share/brick-jenkins'
+def secret = new File('/run/secrets/additional/webhook-secret').text.trim()
 
 new File("${root}/jobs").listFiles().findAll { it.name.endsWith('.groovy') }.sort { it.name }.each { file ->
     def name = file.name - '.groovy'

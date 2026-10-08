@@ -1,7 +1,7 @@
 # Record an image build or deploy on brick9000 for brick-status' lights
 # (rainbow while an image builds, the buttons boiling while brick9000 deploys,
 # then green or red; see brick-status/brick_status/build.py). Sourced by
-# build-image, jenkins/up and deploy, which set $image and $ref first; deploy
+# build-image and deploy, which set $image and $ref first; deploy
 # also sets status_name=deploy for a file of its own.
 build_state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-build
 status_file=$build_state/${status_name:-status}.json
