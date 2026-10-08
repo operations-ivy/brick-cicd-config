@@ -9,7 +9,7 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 CHART_VERSION=5.9.68
-export KUBECONFIG=${KUBECONFIG:-$HOME/.kube/chuck-config}
+export KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}
 
 if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
     echo "release: commit the changes under jenkins/ first" >&2
