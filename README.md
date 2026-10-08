@@ -13,8 +13,9 @@ shows how that's going.
 | Where | What | Why there |
 | --- | --- | --- |
 | `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
-| `brick9000` (Docker) | Jenkins: bootstrap and maintenance jobs | Has to work when the cluster doesn't, and be able to rebuild it |
-| `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; Jenkins and the board stay reachable when the cluster is down |
+| `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
+| `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
+| cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
 
 ### brick9000 is not a cluster node
 
@@ -31,55 +32,85 @@ Picade. It deliberately does **not** join k3s:
 
 The cost: the cluster's node_exporter and Promtail DaemonSets don't cover it.
 brick-status reads brick9000's own vitals directly, and its logs stay in its
-own journal. The secrets it needs live in files on the host
-(`~/.config/brick-jenkins/secrets/`), never in git or a SealedSecret.
+own journal. The secrets it needs live in files on the host, never in git or
+a SealedSecret. `~/.config/brick-jenkins/secrets/` there also keeps the
+plaintext of Jenkins' secrets, which are sealed from it (below).
 
-## Jenkins (on brick9000)
+## Jenkins (on the cluster)
 
-brick9000 should be able to rebuild the whole brick homelab in an emergency,
-so the Jenkins that runs maintenance and bootstrap jobs can't live in the
-cluster it rebuilds. It runs on brick9000 in Docker (`brick9000/jenkins/`),
-at `https://jenkins.brick.nozdormu.cloud`, and jobs run on brick9000 itself (no agents). It
-listens only on `127.0.0.1:8080`; the proxy (below) is what serves the name.
+Jenkins runs on the cluster, a Helm release of the
+[jenkinsci chart](https://github.com/jenkinsci/helm-charts) in the `jenkins`
+namespace, pinned to brick2000 (`jenkins/values.yaml`). It's at
+`https://jenkins.brick.nozdormu.cloud`, through brick9000's proxy and the
+cluster's Traefik.
+
+It ran on brick9000 in Docker from 2026-09-30 to 2026-10-08, so it could
+rebuild the cluster from outside it. None of its jobs did, though: they all
+work on a running cluster (or on brick9000 over SSH), so it moved back. The
+offline repo copies, which a rebuild would need, stay on brick9000
+(`brick-mirror.timer`). A recovery procedure, when there is one, should be a
+script in git that runs from anywhere, not a Jenkins job.
 
 - **Nothing at start-up needs the internet.** The image
-  (`brick9000/jenkins/Dockerfile`) has the plugins (`plugins.txt`), `kubectl`,
-  `helm`, the Docker CLI, `ssh` and Python baked in; change one by rebuilding.
-- **Configuration is code.** `casc.yaml` (users, permissions) and
-  `seed.groovy` (the jobs) are read from brick9000's git clone, mounted
-  read-only into the container. deploy rebuilds the image when the
-  Dockerfile, plugins or compose file change, and otherwise reloads the
-  configuration when `casc.yaml`, `seed.groovy` or `jobs/` change. The job
-  scripts in `bin/` are read live. Changes made in the UI are overwritten.
+  (`jenkins/Dockerfile`, `whitepatrick/brick-jenkins` on Docker Hub) has the
+  plugins (`plugins.txt`), `kubectl`, `helm`, the Docker CLI, `ssh` and
+  Python baked in, and so do the jobs and their scripts. The chart's own
+  plugin download and config-reload sidecar are off. Agent pods
+  (`jenkins/inbound-agent`) are the one exception, and only build jobs use them.
+- **Configuration is code.** `values.yaml` holds the users, permissions and
+  configuration as code; `seed.groovy` turns `jobs/<name>.groovy` into jobs
+  at every start. Changes made in the UI are overwritten.
 - **One file per job.** `jobs/<name>.groovy` is a declarative pipeline whose
   header comments give its description, parameters and schedule (see
   `seed.groovy`); the pipeline calls a script in `bin/`, where the logic lives.
+  Maintenance jobs run on the controller (`agent { label 'built-in' }`), which
+  has the tools and secrets; the controller takes nothing else, so build and
+  test jobs get a throwaway agent pod on brick2000.
 - **Webhooks from the LAN.** Every job can be started with
   `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
   parameters in the query string (`&APPLY=true`). The secret is
-  `~/.config/brick-jenkins/secrets/webhook_secret` on brick9000.
-- **Cluster access per run.** Jobs reach the hosts with Jenkins' own SSH key
-  (authorized for `zaphod` on each host) and fetch a kubeconfig from brick420
-  over SSH for each run, so no cluster credentials are stored on brick9000.
+  `~/.config/brick-jenkins/secrets/webhook_secret` on brick9000, the same as
+  before the move, so existing webhook URLs still work.
+- **Cluster access.** Jobs act on the cluster as the `jenkins`
+  ServiceAccount, with Roles only in the namespaces they touch (`wigle`,
+  `chuck`; `extraObjects` in `values.yaml`). They reach the hosts with
+  Jenkins' own SSH key (authorized for `zaphod` on each host).
 - **Offline copies of the repos.** `mirror-repos` keeps clones of
-  brick-k8s-config, wigle-sync and chucks-wisdom every 2 hours; the other jobs
-  read manifests and scripts from those, so they work without GitHub.
+  brick-k8s-config, wigle-sync and chucks-wisdom in Jenkins' home every 2
+  hours; the other jobs read manifests and scripts from those, so they work
+  without GitHub. brick9000 keeps its own copies the same way
+  (`~/.local/share/brick-mirrors`).
+- **Metrics.** The chart's ServiceMonitor has Prometheus scrape Jenkins as
+  `job="jenkins"`, the same job name it had on brick9000.
 
 | Job | Does | Webhook parameters |
 | --- | --- | --- |
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
-| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 | `APPLY=true` to delete (dry run otherwise) |
+| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 (its Docker over SSH) | `APPLY=true` to delete (dry run otherwise) |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
-| `deploy-brick9000` | Starts brick9000's deploy now instead of at its 2-hourly timer (returns at once; the deploy logs to `journalctl --user -u brick-deploy` on brick9000) | |
+| `deploy-brick9000` | Starts brick9000's deploy now instead of at its 2-hourly timer (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | |
 | `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
-### Set up
+### Secrets
 
-`brick9000/install.sh` runs `brick9000/jenkins/setup` (generates the secrets:
-admin and brick-status passwords, the webhook secret, a config reload token
-and Jenkins' SSH key; reruns never replace one) and `brick9000/jenkins/up`
-(builds the image and starts the container; Docker restarts it on boot). Then,
-once, authorize Jenkins' key on each host, from a machine that can already
+The `brick-jenkins` Secret holds the admin and `brick-status` passwords, the
+webhook secret and Jenkins' SSH key; every key is a file in
+`/run/secrets/additional` in the pod. Its plaintext of record is
+`~/.config/brick-jenkins/secrets/` on brick9000 (save the admin password in
+KeePass too). `jenkins/seal-secrets`, run on the laptop, seals those files
+into `brick-k8s-secrets` at `jenkins/brick-jenkins-sealedsecret.yaml`:
+
+```bash
+jenkins/seal-secrets
+kubectl apply -f ~/code/brick-k8s-secrets/jenkins/brick-jenkins-sealedsecret.yaml
+```
+
+`prune-images` deletes Docker Hub tags only with an access token that has
+delete scope: put one in `dockerhub_token` in that directory and seal again.
+Without it, it prunes the nodes and brick9000, and only lists what it would
+delete on Hub.
+
+To authorize Jenkins' key on each host, from a machine that can already
 reach them:
 
 ```bash
@@ -90,10 +121,23 @@ done
 ```
 
 When reimaging a host, preload that key for `zaphod` (Raspberry Pi Imager can)
-so Jenkins can reach it again. Sign in as `admin` with the password in
-`~/.config/brick-jenkins/secrets/admin_password` (save it in KeePass). Logs:
-`journalctl CONTAINER_NAME=brick-jenkins`; `JENKINS_HOME` is
-`~/.local/share/brick-jenkins`.
+so Jenkins can reach it again.
+
+### Releasing
+
+Any change under `jenkins/` other than `values.yaml` changes the image, so
+bump `controller.image.tag` in `values.yaml` along with it (`<Jenkins
+version>-<n>`). After merging, from the laptop:
+
+```bash
+jenkins/release
+```
+
+It builds and pushes the tag on brick2000's BuildKit if Docker Hub doesn't
+have it (refusing a tag already built from different files), then runs
+`helm upgrade --install` with the chart version it pins. Configuration
+changes apply when the pod restarts, which the upgrade does. Logs:
+`kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
 
 ### Ports 80 and 443: the proxy
 
@@ -103,14 +147,13 @@ the front door for every web UI in the homelab, each at its own name under
 
 | Name | Goes to |
 | --- | --- |
-| `jenkins.brick.nozdormu.cloud` | Jenkins on `127.0.0.1:8080` |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
-| `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
+| `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
 Plain HTTP to any of them redirects to HTTPS. brick9000 is the front door
-rather than the cluster's Traefik so that Jenkins and the board still answer
-when the cluster is down. A node that stops answering is skipped for 30s.
+rather than the cluster's Traefik so that the board still answers when the
+cluster is down. A node that stops answering is skipped for 30s.
 Every app gets its own origin, so none of them needs to know it's behind a
 proxy.
 
@@ -139,10 +182,7 @@ The old names redirect (`308`, so a webhook's POST stays a POST, with
 `curl -L`): `http://jenkins.local` to Jenkins, and anything else on port 80
 (`brick-status.local`, `brick9000.local`, the bare address) to the board's
 mirror. brick9000 still announces them with `mdns-alias@<name>` user units
-(`jenkins`, `brick-status`) until they're retired. Port 80 also sends
-`/prometheus` to Jenkins, so the cluster's Prometheus can scrape Jenkins'
-metrics at `brick9000:80` (see brick-k8s-config's kube-prometheus-stack
-values).
+(`jenkins`, `brick-status`) until they're retired.
 
 `install.sh` starts it; deploy rebuilds the image (only when the `Dockerfile`
 changes does that take long) and reloads it when `brick9000/proxy/` changes.
@@ -153,9 +193,11 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 `brick-status/` is a small Python daemon (standard library plus
 `python3-evdev`) that runs as a systemd user service on brick9000:
 
-- Every 15s it asks Jenkins, on brick9000 itself, for each job's state (as the
-  read-only `brick-status` user), so the Builds view keeps working while the
-  cluster is down, which is when the bootstrap jobs run. The Builds tile shows
+- Every 15s it asks Jenkins, on the cluster, for each job's state (as the
+  read-only `brick-status` user, `BRICK_STATUS_JENKINS_PASSWORD` in the env
+  file). A passing build shows green, a running one amber, a failed one red.
+  When Jenkins can't be reached the Builds view shows no data (grey) rather
+  than a failure: the Cluster view says why. The Builds tile shows
   the pixel-art Jenkins, or the horned one in flames when a job has failed
   (artwork from [jenkins.io](https://jenkins.io/), CC BY-SA 3.0, credited on the
   Builds view; see `static/vendor/jenkins/`). The other tiles have our own
@@ -252,8 +294,7 @@ boils the buttons: each one swells in a random colour on its own beat and pops
 dark, a new colour each time. An image build alone flashes `image-building`
 rainbow. Either way, `image-pushed` then flashes bright green or `image-failed`
 pulses red for a minute (`BRICK_STATUS_BUILD_RESULT_SECONDS`). A deploy
-outranks the image builds it runs along the way (Jenkins, the proxy), so the
-buttons boil until the whole deploy is done.
+outranks an image build, so the buttons boil until the whole deploy is done.
 
 The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
