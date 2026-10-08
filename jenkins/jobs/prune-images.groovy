@@ -6,7 +6,17 @@ pipeline {
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 30, unit: 'MINUTES') }
     stages {
         stage('Prune') {
-            steps { sh '/usr/share/brick-jenkins/bin/prune-images' }
+            steps {
+                script {
+                    // 2: pruned everything but Docker Hub, for lack of credentials.
+                    def status = sh(script: '/usr/share/brick-jenkins/bin/prune-images', returnStatus: true)
+                    if (status == 2) {
+                        unstable('No Docker Hub credentials: Hub tags were only listed')
+                    } else if (status != 0) {
+                        error("prune-images exited ${status}")
+                    }
+                }
+            }
         }
     }
 }
