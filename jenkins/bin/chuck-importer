@@ -8,15 +8,21 @@ set -eu
 . "$(dirname "$0")/lib.sh"
 use_cluster
 manifest=$(mirror chucks-wisdom)/k8s_config/importer/importer-job.yaml
-kubectl -n chuck delete job importer --ignore-not-found --wait
+# Build the new Job before deleting the old one, so a failure here leaves it be.
+job=$(mktemp)
+trap 'rm -f "$job"' EXIT
 kubectl set env --local -f "$manifest" -o yaml \
     IMPORTER_QUERY="${QUERY:-}" \
     IMPORTER_CATEGORIES="${CATEGORIES:-}" \
     IMPORTER_JOKES="${JOKES:-1000}" \
     IMPORTER_TRIES_PER_CATEGORY="${TRIES_PER_CATEGORY:-1000}" \
     IMPORTER_MAX_DUPLICATES="${MAX_DUPLICATES:-50}" \
-    IMPORTER_SLEEP_SECONDS="${SLEEP_SECONDS:-60}" \
-    | kubectl apply -f -
+    IMPORTER_SLEEP_SECONDS="${SLEEP_SECONDS:-60}" >"$job"
+# set env prints nothing when no value differs from the manifest's (all the
+# defaults): then the manifest is already the Job to run.
+[ -s "$job" ] || cp "$manifest" "$job"
+kubectl -n chuck delete job importer --ignore-not-found --wait
+kubectl apply -f "$job"
 if [ "${WAIT:-false}" = true ]; then
     wait_for_job chuck importer
 else

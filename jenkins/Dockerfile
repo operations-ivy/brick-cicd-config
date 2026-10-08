@@ -27,8 +27,11 @@ RUN apt-get update \
     && darch=$([ "$arch" = arm64 ] && echo aarch64 || echo x86_64) \
     && curl -fsSL "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_VERSION}.tgz" | tar -xz \
     && install -m 755 docker/docker /usr/local/bin/docker \
-    && rm -rf /tmp/*
-COPY ssh_config /etc/ssh/ssh_config.d/brick.conf
+    && rm -rf /tmp/* \
+    && install -d -m 755 /usr/share/brick-jenkins
+# ssh refuses a config file anyone but root can write; COPY keeps the
+# checkout's mode, which can be group-writable.
+COPY --chmod=644 ssh_config /etc/ssh/ssh_config.d/brick.conf
 
 USER jenkins
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
@@ -36,6 +39,6 @@ RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 
 # Last, so a job change rebuilds only this layer. seed.groovy turns each
 # jobs/<name>.groovy into a job; the jobs run the scripts in bin/.
-COPY --chown=root:root seed.groovy /usr/share/brick-jenkins/seed.groovy
-COPY --chown=root:root jobs /usr/share/brick-jenkins/jobs
+COPY --chown=root:root --chmod=644 seed.groovy /usr/share/brick-jenkins/seed.groovy
+COPY --chown=root:root --chmod=755 jobs /usr/share/brick-jenkins/jobs
 COPY --chown=root:root --chmod=755 bin /usr/share/brick-jenkins/bin
