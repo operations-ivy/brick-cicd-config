@@ -1,0 +1,179 @@
+# Helm values for the cluster's Jenkins: the jenkinsci/jenkins chart, release
+# "jenkins" in the jenkins namespace. Install or upgrade with jenkins/release,
+# which pins the chart version and builds the image tag below if it isn't on
+# Docker Hub yet.
+#
+# Served at https://jenkins.brick.nozdormu.cloud: brick9000's proxy sends the
+# name to Traefik, which routes it to the Ingress below.
+
+controller:
+  # Our image (Dockerfile): plugins, tools, jobs and their scripts all baked
+  # in, so a start never needs the internet and the tag says exactly what
+  # runs. Bump the tag for any change under jenkins/ except this file.
+  image:
+    registry: docker.io
+    repository: whitepatrick/brick-jenkins
+    tag: "2.580.1-1"
+    pullPolicy: IfNotPresent
+  # The chart's own plugin download would need the internet on every start;
+  # the image has them instead. overwritePlugins clears the home's plugins on
+  # each start so the image's set (and versions) is exactly what loads.
+  installPlugins: false
+  overwritePlugins: true
+
+  # On the NVMe worker like Loki/Tempo/Prometheus: JENKINS_HOME churns
+  # (build logs, workspaces, repo mirrors), which wears SD cards out.
+  nodeSelector:
+    chuck.io/storage-node: "true"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  # Keep the heap well under the 2Gi limit, leaving room for metaspace and
+  # thread stacks so the JVM isn't OOM-killed.
+  javaOpts: "-Xms512m -Xmx1280m"
+  # A Pi takes a while to unpack the war and load plugins: allow 5 minutes.
+  probes:
+    startupProbe:
+      failureThreshold: 30
+
+  # The maintenance jobs run on the controller itself, where the tools and the
+  # Secret are, and only those that ask for the built-in node: EXCLUSIVE keeps
+  # anything else (build and test jobs) on agent pods.
+  numExecutors: 2
+  executorMode: EXCLUSIVE
+
+  jenkinsUrl: https://jenkins.brick.nozdormu.cloud/
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostName: jenkins.brick.nozdormu.cloud
+    path: /
+    pathType: Prefix
+
+  # A ServiceMonitor, which Prometheus picks up from any namespace. Its job
+  # label is "jenkins", as when Prometheus scraped brick9000's Jenkins, so the
+  # history carries on.
+  prometheus:
+    enabled: true
+
+  # Every key of the brick-jenkins Secret (a SealedSecret in
+  # brick-k8s-secrets, made by jenkins/seal-secrets) is a file in
+  # /run/secrets/additional: ${<key>} below, and read by seed.groovy and the
+  # job scripts.
+  existingSecret: brick-jenkins
+  admin:
+    createSecret: false
+
+  # The config-reload sidecar is an extra image to pull from the internet;
+  # without it, the configuration below applies when the pod restarts, which
+  # every helm upgrade that changes it does.
+  sidecars:
+    configAutoReload:
+      enabled: false
+
+  JCasC:
+    securityRealm: |-
+      local:
+        allowsSignup: false
+        users:
+          - id: admin
+            password: "${admin-password}"
+          # Read-only: brick-status polls job state for the board.
+          - id: brick-status
+            password: "${brick-status-password}"
+    authorizationStrategy: |-
+      globalMatrix:
+        entries:
+          - user:
+              name: admin
+              permissions:
+                - Overall/Administer
+          - user:
+              name: brick-status
+              permissions:
+                - Overall/Read
+                - Job/Read
+    configScripts:
+      brick: |
+        jenkins:
+          systemMessage: >-
+            Jenkins for the brick homelab, on the cluster. Configured from
+            brick-cicd-config/jenkins; changes made here are overwritten.
+        security:
+          # The seed script is ours, from the image; it reads the job files.
+          globalJobDslSecurityConfiguration:
+            useScriptSecurity: false
+        jobs:
+          - file: /usr/share/brick-jenkins/seed.groovy
+
+agent:
+  # Build and test pods also go on brick2000: more RAM, and workspaces on the
+  # NVMe. Only jobs that ask for an agent label get one (EXCLUSIVE).
+  nodeSelector:
+    chuck.io/storage-node: "true"
+  nodeUsageMode: EXCLUSIVE
+
+persistence:
+  size: 20Gi
+
+# What the maintenance jobs do to the cluster, as the jenkins ServiceAccount:
+# wigle-sync-now starts a Job from wigle-sync's CronJob, and chuck-importer
+# replaces the chucks-wisdom importer Job. Both wait on the Job and read its logs.
+extraObjects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: jenkins-jobs
+      namespace: wigle
+    rules:
+      - apiGroups: [batch]
+        resources: [cronjobs]
+        verbs: [get]
+      - apiGroups: [batch]
+        resources: [jobs]
+        verbs: [get, list, watch, create]
+      - apiGroups: [""]
+        resources: [pods, pods/log]
+        verbs: [get, list, watch]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: jenkins-jobs
+      namespace: wigle
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: jenkins-jobs
+    subjects:
+      - kind: ServiceAccount
+        name: jenkins
+        namespace: jenkins
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: jenkins-jobs
+      namespace: chuck
+    rules:
+      - apiGroups: [batch]
+        resources: [jobs]
+        verbs: [get, list, watch, create, patch, delete]
+      - apiGroups: [""]
+        resources: [pods, pods/log]
+        verbs: [get, list, watch]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: jenkins-jobs
+      namespace: chuck
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: jenkins-jobs
+    subjects:
+      - kind: ServiceAccount
+        name: jenkins
+        namespace: jenkins

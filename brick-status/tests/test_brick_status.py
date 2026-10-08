@@ -311,13 +311,26 @@ class ChecksTest(unittest.TestCase):
                                ("prune-images", "fail", "failed 2h ago"),
                                ("wigle-sync-now", "active", "running 90s")])
 
-    def test_jenkins_down_is_a_failure(self):
+    def test_jenkins_unreachable_is_no_data(self):
+        # Jenkins is on the cluster: when it can't be reached, the cluster view
+        # says why, and the builds themselves haven't failed.
         class Down:
             def jobs(self):
                 raise OSError("connection refused")
 
         [check] = checks.build_checks(Down())
-        self.assertEqual((check.name, check.state), ("jenkins", "fail"))
+        self.assertEqual((check.name, check.state), ("jenkins", "unknown"))
+        self.assertIn("unreachable", check.detail)
+
+    def test_passing_builds_on_the_cluster(self):
+        now = 10_000.0
+        jenkins = FakeJenkins([
+            {"name": "mirror-repos", "lastBuild": {"building": False},
+             "lastCompletedBuild": {"result": "SUCCESS", "timestamp": (now - 300) * 1000}},
+        ])
+        summary = checks.summarize(checks.build_checks(jenkins, now))
+        self.assertEqual(summary["groups"]["builds"]["state"], "ok")
+        self.assertEqual(summary["groups"]["builds"]["checks"][0]["detail"], "passed 5m ago")
 
     def test_jenkins_with_no_jobs(self):
         self.assertEqual(checks.build_checks(FakeJenkins([]))[0].detail, "up, no jobs yet")
@@ -748,7 +761,8 @@ class NtfyTest(unittest.TestCase):
         self.assertEqual(notify.read_topic("/nonexistent/topic"), "")
 
 
-JENKINS = Path(__file__).resolve().parents[2] / "brick9000" / "jenkins"
+JENKINS = Path(__file__).resolve().parents[2] / "jenkins"
+BRICK9000 = JENKINS.parent / "brick9000"
 
 
 class JenkinsJobsTest(unittest.TestCase):
@@ -769,17 +783,35 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertIn("pipeline {", job.read_text(), job.name)
             self.assertRegex(job.stem, r"^[a-z0-9-]+$")
 
+    def test_jobs_run_on_the_controller(self):
+        # The controller is EXCLUSIVE (values.yaml): a job that doesn't ask for
+        # the built-in node waits for an agent pod, which has none of the tools.
+        for job in (JENKINS / "jobs").glob("*.groovy"):
+            self.assertIn("agent { label 'built-in' }", job.read_text(), job.name)
+
     def test_job_scripts_parse(self):
-        scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("setup", "up", "reload")]
-                   + [JENKINS.parent / n for n in ("build-image", "build-status.sh", "deploy", "install.sh", "proxy/up")])
+        scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("release", "seal-secrets")]
+                   + [BRICK9000 / n for n in ("build-image", "build-status.sh", "deploy", "install.sh", "proxy/up")])
         for script in scripts:
             result = subprocess.run(["sh", "-n", str(script)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
 
     def test_jobs_call_scripts_that_exist(self):
         for job in (JENKINS / "jobs").glob("*.groovy"):
-            for path in re.findall(r"/brick-cicd-config/(brick9000/jenkins/bin/[\w-]+)", job.read_text()):
-                self.assertTrue((JENKINS.parents[1] / path).is_file(), f"{job.name}: {path} missing")
+            paths = re.findall(r"/usr/share/brick-jenkins/(bin/[\w-]+)", job.read_text())
+            self.assertTrue(paths, f"{job.name}: runs no script")
+            for path in paths:
+                self.assertTrue((JENKINS / path).is_file(), f"{job.name}: {path} missing")
+
+    def test_secret_keys_are_sealed(self):
+        # Every key Jenkins reads from the brick-jenkins Secret is one seal-secrets puts there.
+        sealed = set(re.findall(r"--from-file=([\w-]+)", (JENKINS / "seal-secrets").read_text()))
+        used = set(re.findall(r"\$\{([\w-]+)\}", (JENKINS / "values.yaml").read_text()))
+        for f in [JENKINS / "seed.groovy", JENKINS / "ssh_config", *(JENKINS / "bin").iterdir()]:
+            used |= set(re.findall(r"/run/secrets/additional/([\w-]+)", f.read_text()))
+            used |= set(re.findall(r'\$secrets/([\w-]+)', f.read_text()))
+        self.assertTrue(used)
+        self.assertLessEqual(used, sealed)
 
 
 if __name__ == "__main__":

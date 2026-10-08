@@ -30,11 +30,6 @@
 		}
 	}
 
-	# Jenkins (brick9000/jenkins), which listens only on localhost.
-	@jenkins host jenkins.brick.nozdormu.cloud
-	handle @jenkins {
-		reverse_proxy 127.0.0.1:8080
-	}
 	# The board's read-only mirror: brick-status sees the X-Forwarded-For Caddy
 	# adds and never starts a cmatrix of its own.
 	@status host status.brick.nozdormu.cloud
@@ -42,6 +37,11 @@
 		reverse_proxy 127.0.0.1:8765
 	}
 
+	# Jenkins runs on the cluster (brick-cicd-config/jenkins).
+	@jenkins host jenkins.brick.nozdormu.cloud
+	handle @jenkins {
+		import traefik
+	}
 	@grafana host grafana.brick.nozdormu.cloud
 	handle @grafana {
 		import traefik
@@ -92,14 +92,7 @@ http://jenkins.local {
 }
 
 # Everything else (brick-status.local, brick9000.local, the bare address)
-# redirects to the board's mirror. Except /prometheus, Jenkins' metrics, which
-# the cluster's Prometheus scrapes at brick9000:80 (see brick-k8s-config's
-# kube-prometheus-stack values).
+# redirects to the board's mirror.
 :80 {
-	handle /prometheus* {
-		reverse_proxy 127.0.0.1:8080
-	}
-	handle {
-		redir https://status.brick.nozdormu.cloud{uri} 308
-	}
+	redir https://status.brick.nozdormu.cloud{uri} 308
 }

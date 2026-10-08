@@ -1,0 +1,9 @@
+#!/bin/sh
+# Start brick9000's deploy (brick-deploy.service, normally run every 2 hours by
+# its timer) now. A deploy with tests and an image rebuild can take a while,
+# so only queue it; its result is in brick9000's journal and on its buttons,
+# not in this build's log.
+set -eu
+. "$(dirname "$0")/lib.sh"
+ssh "$BRICK9000" systemctl --user start --no-block brick-deploy.service
+echo "Deploy started; follow it on brick9000 with: journalctl _SYSTEMD_USER_UNIT=brick-deploy.service -f"

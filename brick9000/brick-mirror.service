@@ -1,0 +1,12 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Started by brick-mirror.timer. Keeps clones of the brick repos on brick9000,
+# outside the cluster, for rebuilding it without GitHub; the same script as
+# Jenkins' mirror-repos job (jenkins/bin/mirror-repos).
+[Unit]
+Description=Mirror the brick repos onto brick9000
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MIRRORS=%h/.local/share/brick-mirrors
+ExecStart=%h/brick-cicd-config/jenkins/bin/mirror-repos

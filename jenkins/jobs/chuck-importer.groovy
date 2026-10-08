@@ -9,11 +9,11 @@
 // param SLEEP_SECONDS=60 Pause after each random pull, to go easy on the API
 // param WAIT=false Wait for the import to finish (a random import takes hours)
 pipeline {
-    agent any
+    agent { label 'built-in' }
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 24, unit: 'HOURS') }
     stages {
         stage('Import') {
-            steps { sh '/brick-cicd-config/brick9000/jenkins/bin/chuck-importer' }
+            steps { sh '/usr/share/brick-jenkins/bin/chuck-importer' }
         }
     }
 }
