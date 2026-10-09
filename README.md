@@ -266,12 +266,13 @@ of the same button's release are ignored. The other cabinet keys (Start,
 Coin, joystick up/down) don't change the view but count as input.
 
 The quiet schedule is `BRICK_STATUS_QUIET` in the env file: daily windows
-(`00:00-06:00`) or weekly ones (`Mon 00:00-Fri 16:00`), `;`-separated entries
-each optionally starting on a date (`2026-10-09: ...`, from midnight). The
-latest entry that has started applies, so a schedule change can be set up
-ahead of time. brick9000's is off overnight (00:00-06:00) until 2026-10-09,
-then off through the work week, Monday 00:00 to Friday 16:00, and on all
-weekend. While it's quiet the cabinet keys do nothing except the side button
+(`00:00-06:00`) or weekly ones (`Mon 00:00-Fri 16:00`), several per entry
+separated by `,` (quiet inside any of them), and `;`-separated entries each
+optionally starting on a date (`2026-10-09: ...`, from midnight). The latest
+entry that has started applies, so a schedule change can be set up ahead of
+time. brick9000's is off overnight (00:00-06:00) until 2026-10-09. From then
+it's on weekday evenings, 16:00 to midnight, and all weekend from Friday 16:00
+to Monday 00:01: off Monday 00:01-16:00 and Tuesday to Friday 00:00-16:00. While it's quiet the cabinet keys do nothing except the side button
 (`KEY_ESC`): it turns everything on for 30 minutes
 (`BRICK_STATUS_WAKE_SECONDS`), and the header shows "Awake until ..." until
 then. Pressed while the board is already on, including during those 30

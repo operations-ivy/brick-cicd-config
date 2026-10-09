@@ -72,14 +72,15 @@ def parse_window(text: str) -> Window | None:
 
 
 class QuietSchedule:
-    """When the board is quiet: a window, optionally changing on given dates.
+    """When the board is quiet: windows, optionally changing on given dates.
 
     Entries are separated by ';', each optionally prefixed with the date it
-    takes effect from (at midnight); the latest one that has started applies:
-        00:00-06:00; 2026-10-09: Mon 00:00-Fri 16:00
+    takes effect from (at midnight); the latest one that has started applies.
+    An entry is one or more windows separated by ',', quiet inside any of them:
+        00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00
     """
 
-    def __init__(self, entries: list[tuple[date | None, Window | None]]):
+    def __init__(self, entries: list[tuple[date | None, tuple[Window, ...]]]):
         self.entries = sorted(entries, key=lambda e: e[0] or date.min)
 
     @classmethod
@@ -88,19 +89,19 @@ class QuietSchedule:
         for part in filter(None, (p.strip() for p in text.split(";"))):
             m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}):\s*(.+)", part)
             when = date.fromisoformat(m.group(1)) if m else None
-            entries.append((when, parse_window(m.group(2) if m else part)))
+            windows = (parse_window(w) for w in (m.group(2) if m else part).split(","))
+            entries.append((when, tuple(w for w in windows if w is not None)))
         return cls(entries)
 
-    def window(self, day: date) -> Window | None:
-        current = None
-        for when, window in self.entries:
+    def windows(self, day: date) -> tuple[Window, ...]:
+        current: tuple[Window, ...] = ()
+        for when, windows in self.entries:
             if when is None or when <= day:
-                current = window
+                current = windows
         return current
 
     def is_quiet(self, dt: datetime) -> bool:
-        window = self.window(dt.date())
-        return window is not None and window.contains(dt)
+        return any(w.contains(dt) for w in self.windows(dt.date()))
 
 
 class Board:

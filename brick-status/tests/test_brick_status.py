@@ -38,7 +38,8 @@ class QuietHoursTest(unittest.TestCase):
 
 
 class QuietScheduleTest(unittest.TestCase):
-    WORK = QuietSchedule.parse("00:00-06:00; 2026-10-09: Mon 00:00-Fri 16:00")
+    WORK = QuietSchedule.parse("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
+                               "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
     def quiet(self, when):
         return self.WORK.is_quiet(datetime.fromisoformat(when))
@@ -54,8 +55,15 @@ class QuietScheduleTest(unittest.TestCase):
         self.assertFalse(self.quiet("2026-10-09 16:00"))  # on all weekend, overnight too
         self.assertFalse(self.quiet("2026-10-10 03:00"))
         self.assertFalse(self.quiet("2026-10-11 23:59"))  # through the end of Sunday
-        self.assertTrue(self.quiet("2026-10-12 00:00"))   # off from Monday 00:00
+        self.assertFalse(self.quiet("2026-10-12 00:00"))  # and Monday's first minute
+        self.assertTrue(self.quiet("2026-10-12 00:01"))   # off from Monday 00:01
+        self.assertTrue(self.quiet("2026-10-12 15:59"))
+        self.assertFalse(self.quiet("2026-10-12 16:00"))  # weekday evenings on, 16:00 to midnight
+        self.assertFalse(self.quiet("2026-10-12 23:59"))
+        self.assertTrue(self.quiet("2026-10-13 00:00"))   # off again from Tuesday 00:00
         self.assertTrue(self.quiet("2026-10-14 12:00"))
+        self.assertFalse(self.quiet("2026-10-14 20:00"))
+        self.assertTrue(self.quiet("2026-10-16 09:00"))   # Friday morning off
         self.assertFalse(self.quiet("2026-10-16 17:00"))
 
     def test_window_across_the_end_of_the_week(self):
@@ -63,6 +71,13 @@ class QuietScheduleTest(unittest.TestCase):
         self.assertTrue(weekend.is_quiet(datetime(2026, 10, 11, 12)))  # Sunday
         self.assertTrue(weekend.is_quiet(datetime(2026, 10, 12, 5)))   # Monday 05:00
         self.assertFalse(weekend.is_quiet(datetime(2026, 10, 12, 6)))
+
+    def test_several_windows_in_one_entry(self):
+        s = QuietSchedule.parse("Mon 01:00-Mon 02:00, 03:00-04:00, none")
+        self.assertTrue(s.is_quiet(datetime(2026, 10, 12, 1, 30)))   # Monday window
+        self.assertFalse(s.is_quiet(datetime(2026, 10, 13, 1, 30)))  # not on Tuesday
+        self.assertTrue(s.is_quiet(datetime(2026, 10, 13, 3, 30)))   # daily window
+        self.assertFalse(s.is_quiet(datetime(2026, 10, 13, 5, 0)))
 
     def test_none_and_bad_input(self):
         self.assertFalse(QuietSchedule.parse("none").is_quiet(datetime(2026, 10, 1, 3)))
