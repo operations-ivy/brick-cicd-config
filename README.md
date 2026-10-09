@@ -294,7 +294,9 @@ boils the buttons: each one swells in a random colour on its own beat and pops
 dark, a new colour each time. An image build alone flashes `image-building`
 rainbow. Either way, `image-pushed` then flashes bright green or `image-failed`
 pulses red for a minute (`BRICK_STATUS_BUILD_RESULT_SECONDS`). A deploy
-outranks an image build, so the buttons boil until the whole deploy is done.
+outranks an image build, so the buttons boil until the whole deploy is done,
+and for at least 10 seconds (`BRICK_STATUS_DEPLOY_MIN_SECONDS`) so a deploy with
+nothing to rebuild is still seen; its result follows for the usual minute.
 
 The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
 startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at

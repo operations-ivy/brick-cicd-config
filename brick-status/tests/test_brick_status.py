@@ -189,6 +189,24 @@ class BuildLightsTest(unittest.TestCase):
         done = {**status, "state": "succeeded", "finished": 990}
         self.assertEqual(self.pattern(done, running="deploying"), "image-pushed")
 
+    def test_quick_deploy_boils_for_the_minimum(self):
+        # A 3-second deploy: started at 1000, finished at 1003.
+        done = {"state": "succeeded", "pid": 123, "started": 1000, "finished": 1003}
+        kw = {"running": "deploying", "min_running_seconds": 10}
+        self.assertEqual(self.pattern(done, now=1005, **kw), "deploying")
+        self.assertEqual(self.pattern(done, now=1011, **kw), "image-pushed")
+        self.assertEqual(self.pattern(done, now=1069, **kw), "image-pushed")
+        self.assertIsNone(self.pattern(done, now=1071, **kw))
+        failed = {**done, "state": "failed"}
+        self.assertEqual(self.pattern(failed, now=1005, **kw), "deploying")
+        self.assertEqual(self.pattern(failed, now=1011, **kw), "image-failed")
+
+    def test_long_deploy_result_counts_from_finish(self):
+        done = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
+        kw = {"running": "deploying", "min_running_seconds": 10}
+        self.assertEqual(self.pattern(done, now=1000, **kw), "image-pushed")
+        self.assertIsNone(self.pattern(done, now=1051, **kw))
+
     def test_result_shows_for_a_while_then_stops(self):
         ok = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
         self.assertEqual(self.pattern(ok), "image-pushed")
