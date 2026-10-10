@@ -89,7 +89,8 @@ script in git that runs from anywhere, not a Jenkins job.
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
 | `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 (its Docker over SSH) | `APPLY=true` to delete (dry run otherwise) |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
-| `deploy-brick9000` | Starts brick9000's deploy now instead of at its 2-hourly timer (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | |
+| `deploy-brick9000` | Points brick9000's deploy at a branch and starts it now instead of at its 2-hourly timer, which then keeps following that branch (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | `BRANCH=<branch>` to try a branch; without it, or empty, `main` |
+| `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |
 | `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
 ### Secrets
@@ -390,15 +391,11 @@ buttons boil (see the lights above); it records its progress in
 (units, autostart) still need `install.sh` rerun; the deploy log says so.
 
 brick9000 follows `main`. To try a branch on the real board before merging,
-set `BRICK_DEPLOY_BRANCH=<branch>` in the env file, then check now instead of
-waiting for the timer:
-
-```bash
-systemctl --user start brick-deploy.service
-```
-
-Run that again after each push to the branch. Set it back to `main` after
-merging (and run it once more). Deploy logs:
+run the `deploy-brick9000` Jenkins job with `BRANCH=<branch>` (or its
+webhook with `&BRANCH=<branch>`): it sets `BRICK_DEPLOY_BRANCH` in the env
+file and starts the deploy now instead of waiting for the timer. Run it again
+after each push to the branch, and once more with `BRANCH` empty (or the
+webhook without it) after merging, to go back to `main`. Deploy logs:
 `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service`.
 
 ### Image builds on brick9000

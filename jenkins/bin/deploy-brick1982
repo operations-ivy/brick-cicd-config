@@ -1,0 +1,7 @@
+#!/bin/sh
+# Point brick1982's deploy (brick-arena) at BRANCH (empty: main) and start it
+# now, instead of at its 2-hourly timer. Its result is in brick1982's journal,
+# not in this build's log. The timer keeps following the branch.
+set -eu
+. "$(dirname "$0")/lib.sh"
+start_deploy "$BRICK1982" .config/brick-arena/env "${BRANCH:-}"

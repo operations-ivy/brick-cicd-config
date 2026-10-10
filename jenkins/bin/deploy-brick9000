@@ -1,9 +1,8 @@
 #!/bin/sh
-# Start brick9000's deploy (brick-deploy.service, normally run every 2 hours by
-# its timer) now. A deploy with tests and an image rebuild can take a while,
-# so only queue it; its result is in brick9000's journal and on its buttons,
-# not in this build's log.
+# Point brick9000's deploy at BRANCH (empty: main) and start it now, instead
+# of at its 2-hourly timer. A deploy with tests and an image rebuild can take
+# a while, so only queue it; its result is in brick9000's journal and on its
+# buttons, not in this build's log. The timer keeps following the branch.
 set -eu
 . "$(dirname "$0")/lib.sh"
-ssh "$BRICK9000" systemctl --user start --no-block brick-deploy.service
-echo "Deploy started; follow it on brick9000 with: journalctl _SYSTEMD_USER_UNIT=brick-deploy.service -f"
+start_deploy "$BRICK9000" .config/brick-status/env "${BRANCH:-}"
