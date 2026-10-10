@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from brick_arena import collect
-from brick_arena.__main__ import State, art_file, home_from, is_kiosk
+from brick_arena.__main__ import State, art_file, is_kiosk
 from brick_arena.backlight import Backlight, in_window, parse_window
 
 
@@ -106,42 +106,6 @@ class WeatherTests(unittest.TestCase):
         prom = FakeProm({"node_network_receive_bytes_total": [({"instance": "a"}, 100.0), ({"instance": "b"}, 50.0)],
                          "coredns_dns_requests_total": [({}, 0.25)]})
         self.assertEqual(collect.weather(prom), {"wind_bps": 150, "rain_qps": 0.25, "forecast": "Calm, drizzle"})
-
-
-class RadarTests(unittest.TestCase):
-    HOME = (40.0, -75.0)
-
-    def write(self, rows):
-        d = tempfile.mkdtemp()
-        path = Path(d) / "radar.json"
-        path.write_text(json.dumps(rows))
-        return path
-
-    def test_bearing_and_range_from_home(self):
-        # About 1 km due north and 1 km due east of home.
-        path = self.write([{"lat": 40.009, "lon": -75.0, "seen": 0},
-                           {"lat": 40.0, "lon": -74.98826, "seen": 0},
-                           {"lat": 41.0, "lon": -75.0, "seen": 0}])
-        r = collect.radar_contacts(path, self.HOME, now=100)
-        self.assertTrue(r["feed"])
-        self.assertEqual(r["total"], 3)
-        north, east = r["contacts"]  # the one 111 km away is out of range
-        self.assertAlmostEqual(north["bearing"], 0, delta=0.5)
-        self.assertAlmostEqual(north["range"], 1 / 3, delta=0.01)
-        self.assertAlmostEqual(east["bearing"], 90, delta=0.5)
-        self.assertEqual(north["age"], 100)
-
-    def test_no_home_or_file_is_an_empty_scope(self):
-        self.assertFalse(collect.radar_contacts(Path("/nonexistent"), self.HOME, 0)["feed"])
-        self.assertFalse(collect.radar_contacts(self.write([]), None, 0)["feed"])
-
-    def test_bad_rows_are_skipped(self):
-        r = collect.radar_contacts(self.write([{"lat": "x"}, {"lon": 1}, {"lat": 40, "lon": -75}]), self.HOME, 0)
-        self.assertEqual(len(r["contacts"]), 1)
-
-    def test_home_parsing(self):
-        self.assertEqual(home_from("40.1, -75.2"), (40.1, -75.2))
-        self.assertIsNone(home_from(""))
 
 
 class BacklightTests(unittest.TestCase):

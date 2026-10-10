@@ -61,6 +61,11 @@
 	handle @wigle {
 		import traefik
 	}
+	# The wardrive radar: wigle-console's other page, on its own name.
+	@radar host radar.brick.nozdormu.cloud
+	handle @radar {
+		import traefik
+	}
 	@reader host reader.brick.nozdormu.cloud
 	handle @reader {
 		import traefik
