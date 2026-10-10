@@ -208,7 +208,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 - It asks Prometheus (`https://prometheus.brick.nozdormu.cloud`, through
   brick9000's own proxy to an Ingress defined in `brick-k8s-config`) about the cluster (node
   readiness, workloads short of replicas, crash-looping pods, down scrape
-  targets) and wigle-sync (Pushgateway metrics, plus a running CronJob pod
+  targets; only a NotReady node or the API being down makes the cluster
+  "Down", while an unhealthy workload makes it "Degraded") and wigle-sync (Pushgateway metrics, plus a running CronJob pod
   meaning "uploading"). The wigle-sync view has three rows: how the last sync
   with the Pi went (OK, failed, or waiting for internet), how many files it
   uploaded, and when the next one runs. It only alerts when every run for 2
@@ -217,8 +218,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   public DNS anycast addresses (1.1.1.1, 8.8.8.8, 9.9.9.9); any one answering
   means it's up. An ISP outage is outside our control, so it isn't a failure:
   the header shows an orange "Internet Down", pods stuck in
-  `ImagePullBackOff`/`ErrImagePull` (and the workloads they belong to) count
-  as degraded rather than down, and wigle-sync counts uploads it couldn't make
+  `ImagePullBackOff`/`ErrImagePull` (and the workloads they belong to) say
+  "internet down", and wigle-sync counts uploads it couldn't make
   as deferred, not failed.
 - It serves the board page on `127.0.0.1:8765`, which Chromium shows in
   kiosk mode (`brick9000/labwc-autostart`). The page polls it every second,
