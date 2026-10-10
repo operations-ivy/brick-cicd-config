@@ -22,6 +22,7 @@ from .backlight import Backlight, in_window, parse_window
 
 log = logging.getLogger("brick-arena")
 STATIC = (Path(__file__).parent / "static").resolve()
+VIEWS = ("arena", "weather", "radar")
 # The page reloads itself when this changes, so a deploy shows the new page.
 BOOT = str(time.time())
 
@@ -45,6 +46,9 @@ class State:
         self._snap: dict = {}
         self.updated = 0.0
         self.error = ""
+        # What the panel shows: reported by the kiosk's own browser, followed
+        # by every other browser (arena.brick.nozdormu.cloud).
+        self.screen = {"view": VIEWS[0], "at": 0.0}
 
     def set(self, snap: dict) -> None:
         with self._lock:
@@ -56,7 +60,21 @@ class State:
 
     def get(self) -> dict:
         with self._lock:
-            return {**self._snap, "updated": self.updated, "error": self.error}
+            return {**self._snap, "updated": self.updated, "error": self.error, "screen": dict(self.screen)}
+
+    def show(self, view: str) -> bool:
+        if view not in VIEWS:
+            return False
+        with self._lock:
+            if view != self.screen["view"]:
+                self.screen = {"view": view, "at": time.time()}
+        return True
+
+
+def is_kiosk(client_host: str, headers) -> bool:
+    """The panel's own Chromium: on the same host, not through a proxy.
+    Everyone else only watches."""
+    return client_host in ("127.0.0.1", "::1") and not headers.get("X-Forwarded-For")
 
 
 def poll(state: State) -> None:
@@ -82,12 +100,29 @@ def serve(state: State, host: str, port: int, rotate: int) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == "/api/state":
-                body = json.dumps({"boot": BOOT, "rotate": rotate, "now": time.time(), **state.get()})
+                body = json.dumps({"boot": BOOT, "rotate": rotate, "now": time.time(),
+                                   "kiosk": is_kiosk(self.client_address[0], self.headers), **state.get()})
                 self._send(200, "application/json", body.encode())
             elif self.path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", (STATIC / "index.html").read_bytes())
             else:
                 self._send(404, "text/plain", b"not found")
+
+        def do_POST(self):
+            # The kiosk says which view the panel is on; nobody else may.
+            if self.path != "/api/screen":
+                return self._send(404, "text/plain", b"not found")
+            if not is_kiosk(self.client_address[0], self.headers):
+                return self._send(403, "text/plain", b"only brick1982's own screen sets the view")
+            try:
+                length = max(0, min(int(self.headers.get("Content-Length", 0)), 1024))
+                view = json.loads(self.rfile.read(length) or b"{}").get("view")
+            except (ValueError, AttributeError):
+                view = None
+            if state.show(view):
+                self._send(204, "text/plain", b"")
+            else:
+                self._send(400, "text/plain", b"unknown view")
 
         def _send(self, code: int, ctype: str, body: bytes) -> None:
             self.send_response(code)
@@ -108,7 +143,8 @@ def main() -> None:
     state = State()
     threading.Thread(target=poll, args=(state,), daemon=True).start()
     # Every address, not just localhost: brick9000's proxy shows the same page
-    # at arena.brick.nozdormu.cloud. It only answers GETs and holds no secrets.
+    # at arena.brick.nozdormu.cloud. Only the kiosk itself can change the view
+    # (is_kiosk); it holds no secrets.
     serve(state, env("HTTP_HOST", "0.0.0.0"), int(env("HTTP_PORT", "8766")),
           int(env("ROTATE_SECONDS", "45")))
 

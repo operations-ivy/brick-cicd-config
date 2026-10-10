@@ -21,6 +21,9 @@ const FPS = 24;
 const cv = document.getElementById("c"), g = cv.getContext("2d");
 let W = 0, H = 0;
 let state = null, boot = null, view = 0, viewSince = performance.now(), pausedUntil = 0;
+// The kiosk (brick1982's own Chromium) rotates and reports its view; every
+// other browser just follows it. Until the first answer, assume a viewer.
+let kiosk = false;
 let seenEvents = new Set(), flights = [], flashes = [];
 
 function resize() {
@@ -30,9 +33,19 @@ function resize() {
 }
 window.addEventListener("resize", resize); resize();
 
-// A tap moves on to the next view and holds it for two minutes.
+function show(i) {
+  view = i; viewSince = performance.now();
+  if (kiosk) report();
+}
+function report() {
+  fetch("/api/screen", { method: "POST", body: JSON.stringify({ view: VIEWS[view] }) }).catch(() => {});
+}
+
+// On the panel, a tap moves on to the next view and holds it for two minutes.
 window.addEventListener("pointerdown", () => {
-  view = (view + 1) % VIEWS.length; viewSince = performance.now(); pausedUntil = performance.now() + 120000;
+  if (!kiosk) return;
+  pausedUntil = performance.now() + 120000;
+  show((view + 1) % VIEWS.length);
 });
 
 async function refresh() {
@@ -40,11 +53,19 @@ async function refresh() {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
     if (boot && s.boot !== boot) return location.reload();
     boot = s.boot;
+    kiosk = s.kiosk;
     absorbEvents(s);
     state = s;
+    if (kiosk) {
+      // Also after brick-arena restarts, when it has forgotten.
+      if (!s.screen || s.screen.view !== VIEWS[view]) report();
+    } else if (s.screen && VIEWS.includes(s.screen.view) && s.screen.view !== VIEWS[view]) {
+      show(VIEWS.indexOf(s.screen.view));
+    }
   } catch (e) { /* daemon restarting: keep the last picture */ }
 }
-setInterval(refresh, 3000); refresh();
+// Every second, so a viewer follows the panel within about a second.
+setInterval(refresh, 1000); refresh();
 
 function absorbEvents(s) {
   const first = state === null;
@@ -263,9 +284,11 @@ function frame(now) {
   if (now - last < 1000 / FPS) return;
   const dt = Math.min(.1, (now - last) / 1000); last = now;
   const rotate = ((state && state.rotate) || 45) * 1000;
-  if (now > pausedUntil && now - viewSince > rotate) { view = (view + 1) % VIEWS.length; viewSince = now; }
-  // A move takes over the screen: show it on the arena whatever's up.
-  if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") { view = 0; viewSince = now; }
+  if (kiosk) {
+    if (now > pausedUntil && now - viewSince > rotate) show((view + 1) % VIEWS.length);
+    // A move takes over the screen: show it on the arena whatever's up.
+    if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") show(0);
+  }
   const name = VIEWS[view];
   g.fillStyle = "#07080c"; g.fillRect(0, 0, W, H);
   if (name === "arena") drawArena(now);
