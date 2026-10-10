@@ -1,0 +1,33 @@
+# System unit: installed to /etc/systemd/system/ by install.sh. cage (a
+# single-window Wayland compositor) shows Chromium full screen on the 7"
+# DSI panel, on tty1 in place of the login prompt.
+[Unit]
+Description=brick-arena kiosk (cage + Chromium) on tty1
+After=systemd-user-sessions.service plymouth-quit-wait.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=zaphod
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+# Wait for brick-arena, so the first frame isn't Chromium's error page.
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf -o /dev/null http://127.0.0.1:8766/ && exit 0; sleep 1; done; exit 0'
+ExecStart=/usr/bin/cage -d -- /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars \
+  --no-first-run --disable-session-crashed-bubble --password-store=basic \
+  --ozone-platform=wayland --touch-events=enabled --disable-pinch --overscroll-history-navigation=0 \
+  http://127.0.0.1:8766
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brick-arena</title>
+<style>
+  :root { --bg: #07080c; --fg: #e8e6df; --dim: #7d7b74; --hot: #ff4f6d; --warn: #ffb547; --ok: #5fe3a1; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+               font-family: "DejaVu Sans Mono", monospace; cursor: none; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+const VIEWS = ["arena", "weather", "radar"];
+const TITLES = { arena: "THE ARENA", weather: "PACKET WEATHER", radar: "WARDRIVE RADAR" };
+const FPS = 24;
+const cv = document.getElementById("c"), g = cv.getContext("2d");
+let W = 0, H = 0;
+let state = null, boot = null, view = 0, viewSince = performance.now(), pausedUntil = 0;
+let seenEvents = new Set(), flights = [], flashes = [];
+
+function resize() {
+  const r = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * r; cv.height = H * r; g.setTransform(r, 0, 0, r, 0, 0);
+}
+window.addEventListener("resize", resize); resize();
+
+// A tap moves on to the next view and holds it for two minutes.
+window.addEventListener("pointerdown", () => {
+  view = (view + 1) % VIEWS.length; viewSince = performance.now(); pausedUntil = performance.now() + 120000;
+});
+
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/state", { cache: "no-store" })).json();
+    if (boot && s.boot !== boot) return location.reload();
+    boot = s.boot;
+    absorbEvents(s);
+    state = s;
+  } catch (e) { /* daemon restarting: keep the last picture */ }
+}
+setInterval(refresh, 3000); refresh();
+
+function absorbEvents(s) {
+  const first = state === null;
+  for (const e of s.events || []) {
+    const key = `${e.kind}|${e.workload}|${e.at}`;
+    if (seenEvents.has(key)) continue;
+    seenEvents.add(key);
+    if (first) continue;  // don't replay history after a reload
+    if (e.kind === "move") flights.push({ ...e, t0: performance.now() });
+    flashes.push({ ...e, t0: performance.now() });
+  }
+}
+
+// Each namespace keeps one colour.
+function hue(text) { let h = 0; for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; }
+function nsColor(ns, a = 1) { return `hsla(${hue(ns)}, 70%, 62%, ${a})`; }
+// Helm names repeat the release: alertmanager-kube-prometheus-stack-alertmanager-0
+// is just alertmanager on a 180px ring.
+function short(workload) { return workload.split("/").pop().replace(/@.*$/, "")
+  .replace(/-kube-prometheus-stack-[a-z]+-0$/, "").replace(/^kube-prometheus-stack-/, "")
+  .replace(/-opentelemetry-collector$/, "").replace(/-prometheus-pushgateway$/, "").replace(/-0$/, ""); }
+function fmtRate(bps) {
+  const b = bps * 8;
+  return b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mb/s` : `${(b / 1e3).toFixed(0)} kb/s`;
+}
+function text(s, x, y, size, color, align = "left", weight = "") {
+  g.font = `${weight} ${size}px "DejaVu Sans Mono", monospace`;
+  g.fillStyle = color; g.textAlign = align; g.textBaseline = "alphabetic"; g.fillText(s, x, y);
+}
+
+function header(name) {
+  text(TITLES[name], 14, 24, 16, "#fff", "left", "bold");
+  const now = new Date();
+  text(now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), W - 14, 24, 16, "#fff", "right", "bold");
+  VIEWS.forEach((v, i) => {
+    g.fillStyle = v === name ? "#fff" : "#3a3a40";
+    g.beginPath(); g.arc(W / 2 - 16 + i * 16, 18, 4, 0, 7); g.fill();
+  });
+  const stale = !state || state.error || (state.now - state.updated) > 60;
+  if (stale) text(state && state.error ? "NO DATA" : "STALE", W - 90, 24, 12, "#ffb547", "right", "bold");
+}
+
+/* ---------- arena ---------- */
+const ROLES = { brick420: "control plane", brick2000: "storage" };
+function columns() {
+  const nodes = (state && state.nodes) || [];
+  const top = 40, gap = 8, w = (W - gap * (nodes.length + 1)) / Math.max(1, nodes.length);
+  return nodes.map((n, i) => ({ ...n, x: gap + i * (w + gap), y: top, w, h: H - top - 46 }));
+}
+function podSlots(col, pods) {
+  const y0 = col.y + 70, rowH = 21;
+  return pods.map((p, i) => ({ p, x: col.x + 6, y: y0 + i * rowH, w: col.w - 12, h: rowH - 4 }));
+}
+function bar(x, y, w, label, pct, warnAt, failAt) {
+  const v = pct ?? 0;
+  const color = v >= failAt ? "#ff4f6d" : v >= warnAt ? "#ffb547" : "#5fe3a1";
+  text(label, x, y + 8, 10, "#7d7b74");
+  g.fillStyle = "#1c1d24"; g.fillRect(x + 30, y, w - 70, 9);
+  g.fillStyle = color; g.fillRect(x + 30, y, (w - 70) * Math.min(100, v) / 100, 9);
+  text(pct == null ? "—" : `${Math.round(v)}%`, x + w, y + 8, 10, "#e8e6df", "right");
+}
+function drawArena(now) {
+  const cols = columns(), byNode = {};
+  for (const p of (state && state.pods) || []) (byNode[p.node] ||= []).push(p);
+  const slotOf = {};
+  for (const c of cols) {
+    // The ring: ropes in the node's state colour.
+    const rope = c.ready ? "#2b2d38" : "#ff4f6d";
+    g.strokeStyle = rope; g.lineWidth = 2; g.strokeRect(c.x, c.y, c.w, c.h);
+    g.strokeStyle = c.ready ? "#1a1b22" : "#5a1f2a"; g.strokeRect(c.x + 3, c.y + 3, c.w - 6, c.h - 6);
+    text(c.node, c.x + 8, c.y + 18, 14, c.ready ? "#fff" : "#ff4f6d", "left", "bold");
+    text(ROLES[c.node] || (c.ready ? "worker" : "NOT READY"), c.x + c.w - 8, c.y + 18, 10, "#7d7b74", "right");
+    bar(c.x + 8, c.y + 28, c.w - 16, "cpu", c.cpu, 70, 90);
+    bar(c.x + 8, c.y + 41, c.w - 16, "mem", c.mem, 75, 90);
+    text(c.temp == null ? "" : `${Math.round(c.temp)}°C`, c.x + 8, c.y + 64, 10, c.temp > 75 ? "#ffb547" : "#7d7b74");
+    const pods = (byNode[c.node] || []).filter(p => p.kind !== "DaemonSet");
+    const ds = (byNode[c.node] || []).length - pods.length;
+    text(`${pods.length} pods + ${ds} ds`, c.x + c.w - 8, c.y + 64, 10, "#7d7b74", "right");
+    for (const s of podSlots(c, pods)) {
+      slotOf[s.p.workload] = s;
+      const landing = flights.find(f => f.workload === s.p.workload && now - f.t0 < 1800);
+      if (landing) continue;  // drawn in flight below
+      drawPod(s.p, s.x, s.y, s.w, s.h, 1);
+    }
+  }
+  // Moves: the pod flies from its old ring to its new one, then a banner.
+  const colOf = Object.fromEntries(cols.map(c => [c.node, c]));
+  flights = flights.filter(f => now - f.t0 < 6000);
+  for (const f of flights) {
+    const dst = slotOf[f.workload], src = colOf[f.src];
+    if (!dst || !src) continue;
+    const t = Math.min(1, (now - f.t0) / 1800), e = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    const sx = src.x + 6, sy = src.y + 70, x = sx + (dst.x - sx) * e, y = sy + (dst.y - sy) * e - Math.sin(e * Math.PI) * 60;
+    if (t < 1) {
+      g.strokeStyle = nsColor(f.workload.split("/")[0], .35); g.lineWidth = 3;
+      g.beginPath(); g.moveTo(sx + dst.w / 2, sy + 8); g.quadraticCurveTo((sx + dst.x) / 2 + dst.w / 2, Math.min(sy, dst.y) - 60, x + dst.w / 2, y + 8); g.stroke();
+      drawPod({ namespace: f.workload.split("/")[0], workload: f.workload, ready: true, restarts: 0 }, x, y, dst.w, dst.h, 1, true);
+    }
+  }
+  const recent = flights.filter(f => now - f.t0 < 6000).slice(-1)[0];
+  if (recent) {
+    const a = Math.min(1, (6000 - (now - recent.t0)) / 800);
+    g.fillStyle = `rgba(255, 79, 109, ${.92 * a})`; g.fillRect(0, H / 2 - 26, W, 52);
+    text(`${short(recent.workload).toUpperCase()}  ${recent.src} ➜ ${recent.dst}`, W / 2, H / 2 + 8, 22, `rgba(255,255,255,${a})`, "center", "bold");
+  }
+  ticker(now);
+}
+function drawPod(p, x, y, w, h, a, glow = false) {
+  g.fillStyle = nsColor(p.namespace, glow ? .9 : .22); g.fillRect(x, y, w, h);
+  g.fillStyle = nsColor(p.namespace, 1); g.fillRect(x, y, 3, h);
+  if (!p.ready) { g.strokeStyle = "#ff4f6d"; g.lineWidth = 2; g.strokeRect(x + 1, y + 1, w - 2, h - 2); }
+  g.save(); g.beginPath(); g.rect(x, y, w - 4, h); g.clip();
+  text(short(p.workload), x + 8, y + h - 5, 11, glow ? "#000" : "#e8e6df");
+  g.restore();
+  if (p.restarts) text(`↻${p.restarts}`, x + w - 4, y + h - 5, 10, "#ffb547", "right");
+}
+function ticker(now) {
+  const ev = ((state && state.events) || []).filter(e => e.kind !== "new").slice(-3).reverse();
+  const y = H - 30;
+  g.fillStyle = "#0d0e14"; g.fillRect(0, y - 4, W, 34);
+  if (!ev.length) return text("no moves or restarts in the last 10 min", 14, y + 16, 11, "#7d7b74");
+  ev.forEach((e, i) => {
+    const ago = Math.max(0, Math.round((state.now - e.at) / 60));
+    const what = e.kind === "move" ? `${short(e.workload)} ${e.src}➜${e.dst}` : `${short(e.workload)} restarted on ${e.dst}`;
+    text(`${ago}m ${what}`, 14 + i * (W / 3), y + 16, 11, e.kind === "move" ? "#ff8fa3" : "#ffb547");
+  });
+}
+
+/* ---------- weather ---------- */
+const drops = [], gusts = [];
+function drawWeather(now, dt) {
+  const w = (state && state.weather) || { wind_bps: 0, rain_qps: 0, forecast: "No data" };
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#0b1022"); sky.addColorStop(1, "#1b2440");
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  // Lightning: a restart or a new pod in the last second and a half.
+  const bolt = flashes.find(f => now - f.t0 < 1500);
+  if (bolt) {
+    const k = 1 - (now - bolt.t0) / 1500;
+    g.fillStyle = `rgba(220, 230, 255, ${.5 * k * (Math.random() < .5 ? 1 : .3)})`; g.fillRect(0, 0, W, H);
+  }
+  flashes = flashes.filter(f => now - f.t0 < 1500);
+  // Wind: streaks whose speed follows throughput on a log scale.
+  const speed = 40 + 120 * Math.log10(1 + w.wind_bps / 1e4);
+  while (gusts.length < 60) gusts.push({ x: Math.random() * W, y: 60 + Math.random() * (H - 140), l: 20 + Math.random() * 60 });
+  g.strokeStyle = "rgba(170, 200, 255, .25)"; g.lineWidth = 1.5;
+  for (const s of gusts) {
+    s.x += speed * dt * (s.l / 50);
+    if (s.x - s.l > W) { s.x = -s.l; s.y = 60 + Math.random() * (H - 140); }
+    g.beginPath(); g.moveTo(s.x - s.l, s.y); g.lineTo(s.x, s.y); g.stroke();
+  }
+  // Clouds: one per node, darker the busier it is.
+  const nodes = (state && state.nodes) || [];
+  nodes.forEach((n, i) => {
+    const cx = (i + .5) * W / nodes.length, cy = 92 + (i % 2) * 18, busy = Math.min(1, (n.cpu || 0) / 60);
+    const shade = Math.round(200 - 140 * busy);
+    g.fillStyle = n.ready ? `rgb(${shade},${shade + 6},${shade + 20})` : "#5a1f2a";
+    for (const [dx, dy, r] of [[-38, 8, 26], [-8, -8, 34], [28, 4, 28], [0, 14, 30]]) {
+      g.beginPath(); g.arc(cx + dx, cy + dy, r, 0, 7); g.fill();
+    }
+    text(n.node, cx, cy + 60, 12, "#c9d3ff", "center", "bold");
+  });
+  // Rain: DNS queries per second, a few drops each.
+  const want = Math.min(400, Math.round(w.rain_qps * 60));
+  while (drops.length < want) drops.push({ x: Math.random() * W, y: 120 + Math.random() * (H - 120), v: 220 + Math.random() * 120 });
+  drops.length = want;
+  g.strokeStyle = "rgba(140, 180, 255, .6)"; g.lineWidth = 1;
+  for (const d of drops) {
+    d.y += d.v * dt; d.x += speed * dt * .15;
+    if (d.y > H - 50) { d.y = 125; d.x = Math.random() * W; }
+    g.beginPath(); g.moveTo(d.x, d.y); g.lineTo(d.x - 2, d.y - 9); g.stroke();
+  }
+  g.fillStyle = "rgba(7, 8, 12, .85)"; g.fillRect(0, H - 50, W, 50);
+  text(w.forecast, 14, H - 20, 20, "#fff", "left", "bold");
+  text(`wind ${fmtRate(w.wind_bps)}  ·  rain ${w.rain_qps.toFixed(2)} dns q/s`, W - 14, H - 20, 12, "#9fb0d8", "right");
+}
+
+/* ---------- radar ---------- */
+function drawRadar(now) {
+  const r = (state && state.radar) || { contacts: [], feed: false, total: 0 };
+  const cx = W / 2, cy = (H + 30) / 2, R = Math.min(W, H - 60) / 2 - 10;
+  g.fillStyle = "#020a05"; g.fillRect(0, 34, W, H - 34);
+  g.strokeStyle = "rgba(60, 255, 140, .25)"; g.lineWidth = 1;
+  for (const k of [1 / 3, 2 / 3, 1]) { g.beginPath(); g.arc(cx, cy, R * k, 0, 7); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  text("1 km", cx + R / 3 + 4, cy - 4, 10, "rgba(60,255,140,.5)");
+  text("2 km", cx + 2 * R / 3 + 4, cy - 4, 10, "rgba(60,255,140,.5)");
+  const sweep = (now / 4000 * 2 * Math.PI) % (2 * Math.PI);
+  const grad = g.createConicGradient ? g.createConicGradient(sweep - Math.PI / 2 - .6, cx, cy) : null;
+  if (grad) {
+    grad.addColorStop(0, "rgba(60,255,140,0)"); grad.addColorStop(.095, "rgba(60,255,140,.28)"); grad.addColorStop(.1, "rgba(60,255,140,0)");
+    g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
+  }
+  for (const c of r.contacts) {
+    const a = c.bearing * Math.PI / 180, x = cx + Math.sin(a) * c.range * R, y = cy - Math.cos(a) * c.range * R;
+    // Brightest just after the sweep passes, fading until it comes round again.
+    const since = ((sweep - a) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    const fresh = c.age < 86400;
+    const glow = Math.max(.15, 1 - since / (2 * Math.PI));
+    g.fillStyle = fresh ? `rgba(255, 240, 120, ${glow})` : `rgba(60, 255, 140, ${glow * .8})`;
+    g.beginPath(); g.arc(x, y, fresh ? 3 : 2, 0, 7); g.fill();
+  }
+  g.fillStyle = "#3cff8c"; g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
+  if (!r.feed) {
+    text("NO FEED", cx, cy - 10, 22, "rgba(60,255,140,.8)", "center", "bold");
+    text("waiting for wardriving contacts", cx, cy + 14, 11, "rgba(60,255,140,.5)", "center");
+  } else {
+    text(`${r.contacts.length} contacts in range`, 14, H - 16, 12, "#3cff8c");
+    text(`${r.contacts.filter(c => c.age < 86400).length} new today`, W - 14, H - 16, 12, "#fff078", "right");
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (now - last < 1000 / FPS) return;
+  const dt = Math.min(.1, (now - last) / 1000); last = now;
+  const rotate = ((state && state.rotate) || 45) * 1000;
+  if (now > pausedUntil && now - viewSince > rotate) { view = (view + 1) % VIEWS.length; viewSince = now; }
+  // A move takes over the screen: show it on the arena whatever's up.
+  if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") { view = 0; viewSince = now; }
+  const name = VIEWS[view];
+  g.fillStyle = "#07080c"; g.fillRect(0, 0, W, H);
+  if (name === "arena") drawArena(now);
+  else if (name === "weather") drawWeather(now, dt);
+  else drawRadar(now);
+  g.fillStyle = "rgba(7, 8, 12, .7)"; g.fillRect(0, 0, W, 34);
+  header(name);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

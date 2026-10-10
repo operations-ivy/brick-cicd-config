@@ -1,0 +1,3 @@
+# Installed to /etc/udev/rules.d/ by install.sh: lets the video group (zaphod)
+# set the 7" panel's brightness, so brick-arena can dim it overnight.
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys%p/brightness", RUN+="/bin/chmod g+w /sys%p/brightness"

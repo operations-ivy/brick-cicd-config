@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the brick-status tests and print the results as a Markdown PR comment.
+"""Run the brick-status and brick-arena tests and print the results as a Markdown PR comment.
 
 One lit square per test, like the cabinet's buttons. Exits nonzero, with the
 usual unittest output on stderr, if anything fails; open-pr then stops.
@@ -45,11 +45,18 @@ def ms(seconds: float) -> str:
 
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    os.chdir(os.path.join(root, "brick-status"))
-    sys.path.insert(0, os.getcwd())
     commit = subprocess.check_output(["git", "-C", root, "rev-parse", "--short", "HEAD"], text=True).strip()
 
-    tests = unittest.defaultTestLoader.discover("tests", top_level_dir=".")
+    tests = unittest.TestSuite()
+    for pkg in ("brick-status", "brick-arena"):
+        # Both packages call their test package "tests": load each from its own
+        # directory, forgetting the previous one.
+        for name in [m for m in sys.modules if m == "tests" or m.startswith("tests.")]:
+            del sys.modules[name]
+        path = os.path.join(root, pkg)
+        sys.path.insert(0, path)
+        tests.addTests(unittest.defaultTestLoader.discover(os.path.join(path, "tests"), top_level_dir=path))
+        sys.path.remove(path)
     started = time.perf_counter()
     result = unittest.TextTestRunner(stream=sys.stderr, verbosity=0, resultclass=TimedResult).run(tests)
     elapsed = time.perf_counter() - started

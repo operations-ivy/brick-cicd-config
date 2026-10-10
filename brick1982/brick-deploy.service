@@ -1,0 +1,8 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Deploy brick-arena from GitHub
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/brick-cicd-config/brick1982/deploy
