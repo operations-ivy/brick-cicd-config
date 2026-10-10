@@ -1,6 +1,10 @@
+import importlib.machinery
+import importlib.util
 import json
+import struct
 import tempfile
 import unittest
+import unittest.mock
 from datetime import datetime
 from pathlib import Path
 
@@ -162,6 +166,25 @@ class BacklightTests(unittest.TestCase):
 
     def test_no_backlight_is_fine(self):
         Backlight(tempfile.mkdtemp()).set_fraction(1.0)
+
+
+class BlankCursorTests(unittest.TestCase):
+    def test_every_cursor_is_one_transparent_pixel(self):
+        path = Path(__file__).resolve().parents[2] / "brick1982" / "blank-cursors"
+        loader = importlib.machinery.SourceFileLoader("blank_cursors", str(path))
+        mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("blank_cursors", loader))
+        loader.exec_module(mod)
+        theme = Path(tempfile.mkdtemp()) / "default"
+        with unittest.mock.patch("sys.argv", ["blank-cursors", str(theme)]):
+            mod.main()
+        data = (theme / "cursors" / "default").read_bytes()
+        magic, header, _, ntoc = struct.unpack_from("<4sIII", data)
+        self.assertEqual((magic, header, ntoc), (b"Xcur", 16, 1))
+        _, _, pos = struct.unpack_from("<III", data, 16)
+        width, height = struct.unpack_from("<II", data, pos + 16)
+        self.assertEqual((width, height), (1, 1))
+        self.assertEqual(struct.unpack_from("<I", data, pos + 36)[0], 0)  # alpha 0
+        self.assertTrue((theme / "cursors" / "left_ptr").is_file())
 
 
 if __name__ == "__main__":
