@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from brick_arena import collect
-from brick_arena.__main__ import State, home_from, is_kiosk
+from brick_arena.__main__ import State, art_file, home_from, is_kiosk
 from brick_arena.backlight import Backlight, in_window, parse_window
 
 
@@ -179,7 +179,7 @@ class ScreenTests(unittest.TestCase):
 
     def test_viewers_see_what_the_kiosk_reported(self):
         state = State()
-        self.assertEqual(state.get()["screen"]["view"], "arena")
+        self.assertEqual(state.get()["screen"]["view"], "main")
         self.assertTrue(state.show("weather"))
         at = state.get()["screen"]["at"]
         self.assertEqual(state.get()["screen"]["view"], "weather")
@@ -188,6 +188,19 @@ class ScreenTests(unittest.TestCase):
         self.assertFalse(state.show("nonsense"))
         self.assertFalse(state.show(None))
         self.assertEqual(state.get()["screen"]["view"], "weather")
+
+
+class ArtTests(unittest.TestCase):
+    def test_serves_only_plain_png_names_in_art(self):
+        self.assertEqual(art_file("/art/earth.png").name, "earth.png")
+        for bad in ["/art/../index.html", "/art/..%2findex.html", "/art/README.md", "/art/missing.png",
+                    "/art/sub/earth.png", "/art/.png", "/art/Earth.PNG"]:
+            self.assertIsNone(art_file(bad), bad)
+
+    def test_earth_sheet_is_twenty_32px_frames(self):
+        path = art_file("/art/earth.png")
+        width, height = struct.unpack(">II", path.read_bytes()[16:24])
+        self.assertEqual((width, height), (32 * 20, 32))
 
 
 class BlankCursorTests(unittest.TestCase):

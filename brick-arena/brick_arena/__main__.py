@@ -11,6 +11,7 @@ node, with moves animated), weather (the network as weather) and radar
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -22,7 +23,8 @@ from .backlight import Backlight, in_window, parse_window
 
 log = logging.getLogger("brick-arena")
 STATIC = (Path(__file__).parent / "static").resolve()
-VIEWS = ("arena", "weather", "radar")
+VIEWS = ("main", "arena", "weather", "radar")
+ART = STATIC / "art"
 # The page reloads itself when this changes, so a deploy shows the new page.
 BOOT = str(time.time())
 
@@ -71,6 +73,16 @@ class State:
         return True
 
 
+def art_file(url_path: str) -> Path | None:
+    """The file under static/art/ that /art/<name> names, or None. Only plain
+    PNG names, so nothing outside that directory can be served."""
+    name = url_path.removeprefix("/art/")
+    if not re.fullmatch(r"[a-z0-9-]+\.png", name):
+        return None
+    path = ART / name
+    return path if path.is_file() else None
+
+
 def is_kiosk(client_host: str, headers) -> bool:
     """The panel's own Chromium: on the same host, not through a proxy.
     Everyone else only watches."""
@@ -105,6 +117,8 @@ def serve(state: State, host: str, port: int, rotate: int) -> None:
                 self._send(200, "application/json", body.encode())
             elif self.path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", (STATIC / "index.html").read_bytes())
+            elif self.path.startswith("/art/") and (art := art_file(self.path)):
+                self._send(200, "image/png", art.read_bytes())
             else:
                 self._send(404, "text/plain", b"not found")
 
