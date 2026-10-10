@@ -23,10 +23,13 @@ def _alive(pid: int) -> bool:
 
 
 def light_pattern(path: str, now: float, result_seconds: float, alive=_alive,
-                  running: str = "image-building") -> str | None:
+                  running: str = "image-building", min_running_seconds: float = 0.0) -> str | None:
     """The light pattern to show now, or None when nothing needs the lights.
 
-    `running` is the pattern while the build (or deploy) is still going.
+    `running` is the pattern while the build (or deploy) is still going. It
+    shows for at least `min_running_seconds` from the start, even once the
+    result is in, so a quick deploy is still seen; the result then shows for
+    `result_seconds` from the end of that.
     """
     try:
         with open(path) as f:
@@ -37,6 +40,14 @@ def light_pattern(path: str, now: float, result_seconds: float, alive=_alive,
     if state == BUILDING:
         # A build killed outright (SIGKILL, power cut) never writes its result.
         return running if alive(int(status.get("pid", 0))) else None
-    if state in (SUCCEEDED, FAILED) and now - status.get("finished", 0) < result_seconds:
+    if state not in (SUCCEEDED, FAILED):
+        return None
+    shown_from = status.get("finished", 0)
+    if min_running_seconds and "started" in status:
+        held_until = status["started"] + min_running_seconds
+        if now < held_until:
+            return running
+        shown_from = max(shown_from, held_until)
+    if now - shown_from < result_seconds:
         return "image-pushed" if state == SUCCEEDED else "image-failed"
     return None

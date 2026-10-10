@@ -145,7 +145,7 @@ def main() -> None:
         # brick9000 deploying itself boils the buttons; it outranks the image
         # builds it runs along the way.
         building = (build.light_pattern(settings.deploy_status, now, settings.build_result_seconds,
-                                        running="deploying")
+                                        running="deploying", min_running_seconds=settings.deploy_min_seconds)
                     or build.light_pattern(settings.build_status, now, settings.build_result_seconds))
 
         if mode == QUIET:

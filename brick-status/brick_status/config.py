@@ -61,6 +61,8 @@ class Settings:
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/deploy.json")
     # How long the lights show a finished build's result.
     build_result_seconds: float = 60.0
+    # The shortest a deploy boils the buttons, so a no-op deploy is still seen.
+    deploy_min_seconds: float = 10.0
     input_device_name: str = "gpio_keys"
     wlopm: str = "wlopm"
     # Phone pages (notify.py). The topic name is the only thing keeping others
@@ -92,6 +94,7 @@ class Settings:
         s.build_status = env("BRICK_STATUS_BUILD_STATUS", s.build_status)
         s.deploy_status = env("BRICK_STATUS_DEPLOY_STATUS", s.deploy_status)
         s.build_result_seconds = float(env("BRICK_STATUS_BUILD_RESULT_SECONDS", s.build_result_seconds))
+        s.deploy_min_seconds = float(env("BRICK_STATUS_DEPLOY_MIN_SECONDS", s.deploy_min_seconds))
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
