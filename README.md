@@ -436,8 +436,9 @@ DATA" when Prometheus stops answering.
 `brick-arena` (`brick-arena/`, standard library only) polls Prometheus every
 10s and serves a page on `127.0.0.1:8766`, which Chromium shows full screen
 under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
-prompt). The page rotates through three views every 45s; a tap moves on and
-holds that view for two minutes:
+prompt, with a transparent cursor theme from `brick1982/blank-cursors` so no
+arrow sits on the panel). The page rotates through three views every 45s; a
+tap moves on and holds that view for two minutes:
 
 - **The arena**: one ring per node with CPU, memory and temperature bars, and
   a block per pod, coloured by namespace (DaemonSet pods are counted, not

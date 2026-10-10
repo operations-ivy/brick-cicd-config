@@ -16,6 +16,7 @@ cp "$here/brick-arena.service" "$here/brick-deploy.service" "$here/brick-deploy.
 sudo cp "$here/90-backlight.rules" /etc/udev/rules.d/
 sudo udevadm trigger --subsystem-match=backlight --action=add
 sudo cp "$here/brick-kiosk.service" /etc/systemd/system/
+sudo python3 "$here/blank-cursors" /usr/local/share/brick-arena/cursors/default
 
 # User services run from boot with nobody logged in.
 sudo loginctl enable-linger "$USER"

@@ -20,6 +20,9 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland
+# A transparent cursor theme (brick1982/blank-cursors): the touchscreen counts
+# as a pointer, so cage would otherwise draw an arrow on the panel.
+Environment=XCURSOR_PATH=/usr/local/share/brick-arena/cursors XCURSOR_THEME=default
 # Wait for brick-arena, so the first frame isn't Chromium's error page.
 ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf -o /dev/null http://127.0.0.1:8766/ && exit 0; sleep 1; done; exit 0'
 ExecStart=/usr/bin/cage -d -- /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars \
