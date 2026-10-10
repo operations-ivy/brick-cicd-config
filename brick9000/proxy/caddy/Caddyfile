@@ -37,6 +37,13 @@
 		reverse_proxy 127.0.0.1:8765
 	}
 
+	# brick1982's touchscreen page (brick-arena), served on its LAN address. Read
+	# only: a tap here only changes the view in that browser.
+	@arena host arena.brick.nozdormu.cloud
+	handle @arena {
+		reverse_proxy 192.168.1.222:8766
+	}
+
 	# Jenkins runs on the cluster (brick-cicd-config/jenkins).
 	@jenkins host jenkins.brick.nozdormu.cloud
 	handle @jenkins {

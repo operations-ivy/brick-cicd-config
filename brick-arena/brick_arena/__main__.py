@@ -107,7 +107,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     state = State()
     threading.Thread(target=poll, args=(state,), daemon=True).start()
-    serve(state, env("HTTP_HOST", "127.0.0.1"), int(env("HTTP_PORT", "8766")),
+    # Every address, not just localhost: brick9000's proxy shows the same page
+    # at arena.brick.nozdormu.cloud. It only answers GETs and holds no secrets.
+    serve(state, env("HTTP_HOST", "0.0.0.0"), int(env("HTTP_PORT", "8766")),
           int(env("ROTATE_SECONDS", "45")))
 
 
