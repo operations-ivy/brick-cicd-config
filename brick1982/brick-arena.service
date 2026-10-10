@@ -1,0 +1,16 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Runs at boot without a login (install.sh enables linger for zaphod).
+[Unit]
+Description=brick-arena display daemon
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/brick-cicd-config/brick-arena
+ExecStart=/usr/bin/python3 -m brick_arena
+EnvironmentFile=-%h/.config/brick-arena/env
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

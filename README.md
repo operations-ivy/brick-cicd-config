@@ -16,6 +16,7 @@ shows how that's going.
 | `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
+| `brick1982` (host, also a k3s worker) | 7" touchscreen kiosk, `brick-arena` daemon | Needs the screen; an ambient display, so it's fine for it to share the cluster's fate |
 
 ### brick9000 is not a cluster node
 
@@ -422,6 +423,57 @@ Tests (standard library `unittest`, no hardware needed):
 
 ```bash
 scripts/test
+```
+
+## brick-arena (the touchscreen on brick1982)
+
+`brick1982` (192.168.1.222, static lease) is a Raspberry Pi 4 8GB with the
+official 7" DSI touchscreen (800x480). Unlike brick9000 it **is** a k3s worker:
+it's an ambient display rather than the place to find out the cluster is
+down, so it doesn't need to outlive the cluster. Its page shows "STALE" or "NO
+DATA" when Prometheus stops answering.
+
+`brick-arena` (`brick-arena/`, standard library only) polls Prometheus every
+10s and serves a page on `127.0.0.1:8766`, which Chromium shows full screen
+under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
+prompt). The page rotates through three views every 45s; a tap moves on and
+holds that view for two minutes:
+
+- **The arena**: one ring per node with CPU, memory and temperature bars, and
+  a block per pod, coloured by namespace (DaemonSet pods are counted, not
+  drawn). When a workload's new pod lands on another node, the block flies
+  from the old ring to the new one and a banner names the move. A move takes
+  over the screen whatever view is up. The ticker lists the last moves and
+  restarts (10 minutes).
+- **Packet weather**: wind is the nodes' combined network throughput, rain is
+  CoreDNS queries per second, a cloud per node darkens with its CPU, and
+  lightning strikes when a pod restarts or a new one starts. The caption is a
+  one-line forecast ("Light breeze, drizzle").
+- **Wardrive radar**: contacts plotted by bearing and distance (3 km scope)
+  around home, newest (under a day old) in yellow. It reads a JSON list of
+  `{"lat", "lon", "seen", "kind"}` from `BRICK_ARENA_RADAR_FILE`, centred on
+  `BRICK_ARENA_HOME_LATLON`; both stay on brick1982, never in the repo. No
+  network names are shown. Until something writes that file it shows "NO FEED".
+
+The panel dims to 8% from 23:00 to 07:00 (`BRICK_ARENA_DIM`), through
+`/sys/class/backlight`, which `brick1982/90-backlight.rules` makes writable by
+the video group.
+
+Set up, once, on brick1982:
+
+```bash
+git clone https://github.com/operations-ivy/brick-cicd-config.git ~/brick-cicd-config
+~/brick-cicd-config/brick1982/install.sh
+```
+
+After that `brick-deploy.timer` follows `BRICK_DEPLOY_BRANCH` in
+`~/.config/brick-arena/env` like brick9000 does (`brick1982/deploy`: test
+in a scratch worktree, switch only if the tests pass, restart `brick-arena`).
+Changes under `brick1982/` need `install.sh` run again. To see what the
+panel shows from elsewhere:
+
+```bash
+ssh zaphod@brick1982 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim -' > arena.png
 ```
 
 ## Making changes

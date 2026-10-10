@@ -1,5 +1,8 @@
 #!/bin/sh
-# Run the brick-status unit tests. Used by the pre-push hook and open-pr.
+# Run the brick-status and brick-arena unit tests. Used by the pre-push hook,
+# open-pr and both deploy scripts.
 set -eu
-cd "$(dirname "$0")/../brick-status"
-exec python3 -m unittest discover -s tests -t . -v
+root=$(cd "$(dirname "$0")/.." && pwd)
+for pkg in brick-status brick-arena; do
+    (cd "$root/$pkg" && python3 -m unittest discover -s tests -t . -v)
+done

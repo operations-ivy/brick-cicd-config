@@ -1,0 +1,44 @@
+#!/bin/sh
+# Deploy brick-arena from GitHub. Run every 2 hours by brick-deploy.timer,
+# or now with: systemctl --user start brick-deploy.service
+#
+# Same as brick9000/deploy, without the board lights or the proxy: if the
+# branch brick1982 follows (BRICK_DEPLOY_BRANCH in the env file, main by
+# default) has moved, test the new commit in a scratch worktree, switch to it
+# only if the tests pass, then restart brick-arena (the page reloads itself).
+set -eu
+repo=$(cd "$(dirname "$0")/.." && pwd)
+env_file=$HOME/.config/brick-arena/env
+state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-deploy
+mkdir -p "$state"
+
+branch=$(sed -n 's/^BRICK_DEPLOY_BRANCH=//p' "$env_file" 2>/dev/null | tail -n 1)
+branch=${branch:-main}
+
+cd "$repo"
+git fetch --quiet --prune origin
+if ! target=$(git rev-parse --verify --quiet "origin/$branch^{commit}"); then
+    echo "deploy: no branch '$branch' on GitHub; staying on $(git rev-parse --short HEAD)" >&2
+    exit 1
+fi
+current=$(git rev-parse HEAD)
+[ "$target" != "$current" ] || exit 0
+[ "$target" != "$(cat "$state/failed" 2>/dev/null)" ] || exit 0
+
+scratch=$(mktemp -d)
+trap 'git worktree remove --force "$scratch/tree" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+git worktree add --quiet --detach "$scratch/tree" "$target"
+if ! "$scratch/tree/scripts/test" >"$scratch/log" 2>&1; then
+    cat "$scratch/log" >&2
+    echo "$target" >"$state/failed"
+    echo "deploy: tests failed on $branch @ $(git rev-parse --short "$target"); staying on $(git rev-parse --short "$current")" >&2
+    exit 1
+fi
+
+git checkout --quiet --force --detach "$target"
+rm -f "$state/failed"
+echo "deploy: $branch @ $(git rev-parse --short "$target") (was $(git rev-parse --short "$current"))"
+if ! git diff --quiet "$current" "$target" -- brick1982/; then
+    echo "deploy: brick1982/ changed; run brick1982/install.sh to apply it" >&2
+fi
+systemctl --user restart brick-arena
