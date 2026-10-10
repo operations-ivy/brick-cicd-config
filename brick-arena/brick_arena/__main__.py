@@ -50,7 +50,7 @@ class State:
         self.error = ""
         # What the panel shows: reported by the kiosk's own browser, followed
         # by every other browser (arena.brick.nozdormu.cloud).
-        self.screen = {"view": VIEWS[0], "at": 0.0}
+        self.screen = {"view": VIEWS[0], "body": 0, "at": 0.0}
 
     def set(self, snap: dict) -> None:
         with self._lock:
@@ -64,12 +64,14 @@ class State:
         with self._lock:
             return {**self._snap, "updated": self.updated, "error": self.error, "screen": dict(self.screen)}
 
-    def show(self, view: str) -> bool:
-        if view not in VIEWS:
+    def show(self, view: str, body: int = 0) -> bool:
+        """The kiosk's view, and which planet the main view has up (an index
+        into the page's list of bodies)."""
+        if view not in VIEWS or type(body) is not int or not 0 <= body < 100:
             return False
         with self._lock:
-            if view != self.screen["view"]:
-                self.screen = {"view": view, "at": time.time()}
+            if (view, body) != (self.screen["view"], self.screen["body"]):
+                self.screen = {"view": view, "body": body, "at": time.time()}
         return True
 
 
@@ -130,10 +132,11 @@ def serve(state: State, host: str, port: int, rotate: int) -> None:
                 return self._send(403, "text/plain", b"only brick1982's own screen sets the view")
             try:
                 length = max(0, min(int(self.headers.get("Content-Length", 0)), 1024))
-                view = json.loads(self.rfile.read(length) or b"{}").get("view")
+                report = json.loads(self.rfile.read(length) or b"{}")
+                view, body = report.get("view"), report.get("body", 0)
             except (ValueError, AttributeError):
-                view = None
-            if state.show(view):
+                view, body = None, 0
+            if state.show(view, body):
                 self._send(204, "text/plain", b"")
             else:
                 self._send(400, "text/plain", b"unknown view")

@@ -42,10 +42,12 @@ function show(i) {
 }
 // The kiosk's next view in SEQUENCE (or a given step of it).
 function advance(to = (seq + 1) % SEQUENCE.length) {
-  seq = to; show(VIEWS.indexOf(SEQUENCE[seq]));
+  seq = to;
+  if (SEQUENCE[seq] === "main") body = (body + 1) % BODIES.length;
+  show(VIEWS.indexOf(SEQUENCE[seq]));
 }
 function report() {
-  fetch("/api/screen", { method: "POST", body: JSON.stringify({ view: VIEWS[view] }) }).catch(() => {});
+  fetch("/api/screen", { method: "POST", body: JSON.stringify({ view: VIEWS[view], body }) }).catch(() => {});
 }
 
 // On the panel, a tap moves on to the next view and holds it for two minutes.
@@ -65,9 +67,10 @@ async function refresh() {
     state = s;
     if (kiosk) {
       // Also after brick-arena restarts, when it has forgotten.
-      if (!s.screen || s.screen.view !== VIEWS[view]) report();
-    } else if (s.screen && VIEWS.includes(s.screen.view) && s.screen.view !== VIEWS[view]) {
-      show(VIEWS.indexOf(s.screen.view));
+      if (!s.screen || s.screen.view !== VIEWS[view] || s.screen.body !== body) report();
+    } else if (s.screen) {
+      if (Number.isInteger(s.screen.body) && s.screen.body < BODIES.length) body = s.screen.body;
+      if (VIEWS.includes(s.screen.view) && s.screen.view !== VIEWS[view]) show(VIEWS.indexOf(s.screen.view));
     }
   } catch (e) { /* daemon restarting: keep the last picture */ }
 }
@@ -286,10 +289,22 @@ function drawRadar(now) {
 }
 
 /* ---------- main ---------- */
-// "Pixel Earth Animation" by Slime Games Studios, CC0 (static/art/README.md):
-// 20 frames of 32x32 side by side, one full turn.
-const earth = new Image(); earth.src = "/art/earth.png";
-const EARTH_PX = 32, EARTH_FRAMES = 20, EARTH_MS = 150;
+// The planets the main view shows, the next one each time it comes round
+// (static/art/README.md): "Pixel Earth Animation" by Slime Games Studios and
+// "N64 Planets" by n64guy, both CC0. Each sheet is its frames side by side,
+// one full turn.
+const N64 = ["alien", "candy", "city", "desert", "forest", "gas", "ice", "ocean", "rock", "terran"];
+const BODIES = [
+  { name: "EARTH", art: "earth", px: 32, frames: 20, ms: 150 },
+  ...N64.map(n => ({ name: n.toUpperCase(), art: `n64-${n}`, px: 64, frames: 30, ms: 100 })),
+  ...N64.map(n => ({ name: `${n.toUpperCase()} · RINGED`, art: `n64-${n}-ringed`, px: 64, frames: 30, ms: 100 })),
+];
+const sheets = {};
+function sheet(b) {
+  if (!sheets[b.art]) { sheets[b.art] = new Image(); sheets[b.art].src = `/art/${b.art}.png`; }
+  return sheets[b.art];
+}
+let body = 0;
 // Seeded, so the panel and every viewer draw the same sky.
 const sky = (() => {
   let x = 1982; const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
@@ -303,13 +318,17 @@ function drawMain(now) {
     g.fillRect(Math.round(st.x * W), Math.round(34 + st.y * (H - 34)), st.s * 2, st.s * 2);
   }
   // Whole-number scaling with smoothing off keeps every pixel square.
-  const scale = Math.max(1, Math.floor(Math.min(W, H - 90) / EARTH_PX));
-  const size = EARTH_PX * scale, x = Math.round((W - size) / 2), y = Math.round((H - size) / 2) + 6;
-  if (earth.complete && earth.naturalWidth) {
+  const b = BODIES[body] || BODIES[0], img = sheet(b);
+  // Preload the next one, so it doesn't pop in when its turn comes.
+  sheet(BODIES[(body + 1) % BODIES.length]);
+  const scale = Math.max(1, Math.floor(Math.min(W, H - 100) / b.px));
+  const size = b.px * scale, x = Math.round((W - size) / 2), y = Math.round((H - size) / 2) - 4;
+  if (img.complete && img.naturalWidth) {
     g.imageSmoothingEnabled = false;
-    const f = Math.floor(now / EARTH_MS) % EARTH_FRAMES;
-    g.drawImage(earth, f * EARTH_PX, 0, EARTH_PX, EARTH_PX, x, y, size, size);
+    const f = Math.floor(now / b.ms) % b.frames;
+    g.drawImage(img, f * b.px, 0, b.px, b.px, x, y, size, size);
   }
+  text(b.name, W / 2, H - 36, 14, "#ffffff", "center", "bold");
   const nodes = (state && state.nodes) || [], pods = ((state && state.pods) || []).filter(p => p.kind !== "DaemonSet");
   const w = state && state.weather;
   const line = nodes.length ? `${nodes.filter(n => n.ready).length}/${nodes.length} nodes ready  ·  ${pods.length} pods${w ? "  ·  " + w.forecast : ""}` : "";

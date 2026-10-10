@@ -185,6 +185,11 @@ class ScreenTests(unittest.TestCase):
         self.assertEqual(state.get()["screen"]["view"], "weather")
         state.show("weather")  # unchanged: keeps when it switched
         self.assertEqual(state.get()["screen"]["at"], at)
+        self.assertTrue(state.show("main", 7))
+        self.assertEqual((state.get()["screen"]["view"], state.get()["screen"]["body"]), ("main", 7))
+        for bad_body in (-1, 100, "3", 2.5, True, None):
+            self.assertFalse(state.show("main", bad_body), bad_body)
+        state.show("weather")
         self.assertFalse(state.show("nonsense"))
         self.assertFalse(state.show(None))
         self.assertEqual(state.get()["screen"]["view"], "weather")
@@ -201,6 +206,13 @@ class ArtTests(unittest.TestCase):
         path = art_file("/art/earth.png")
         width, height = struct.unpack(">II", path.read_bytes()[16:24])
         self.assertEqual((width, height), (32 * 20, 32))
+
+    def test_every_n64_planet_has_a_30_frame_64px_sheet(self):
+        for name in ["alien", "candy", "city", "desert", "forest", "gas", "ice", "ocean", "rock", "terran"]:
+            for ringed in ("", "-ringed"):
+                path = art_file(f"/art/n64-{name}{ringed}.png")
+                self.assertIsNotNone(path, name + ringed)
+                self.assertEqual(struct.unpack(">II", path.read_bytes()[16:24]), (64 * 30, 64))
 
 
 class BlankCursorTests(unittest.TestCase):
