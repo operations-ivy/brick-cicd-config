@@ -439,10 +439,13 @@ arrow sits on the panel). The page changes view every 45s, coming back to
 the main view between each of the others (main, arena, main, weather, main,
 radar); a tap moves on and holds that view for two minutes:
 
-- **Main**: a pixel-art Earth turning over a twinkling starfield, with a
-  one-line cluster summary under it. The art is "Pixel Earth Animation" by
-  Slime Games Studios (CC0; `brick-arena/brick_arena/static/art/README.md`),
-  scaled by a whole number with smoothing off so the pixels stay square.
+- **Main**: a pixel-art planet turning over a twinkling starfield, its name,
+  and a one-line cluster summary. Each time the view comes round it's the
+  next of 21: the Earth ("Pixel Earth Animation" by Slime Games Studios), then
+  the twenty "N64 Planets" by n64guy, plain and ringed (both CC0;
+  `brick-arena/brick_arena/static/art/README.md`). Scaled by a whole number
+  with smoothing off, so the pixels stay square. Viewers follow the panel's
+  planet as well as its view.
 - **The arena**: one ring per node with CPU, memory and temperature bars, and
   a block per pod, coloured by namespace (DaemonSet pods are counted, not
   drawn). When a workload's new pod lands on another node, the block flies
