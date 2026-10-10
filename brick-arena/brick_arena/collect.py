@@ -1,23 +1,19 @@
 """Turn Prometheus results into what brick1982's screen draws.
 
-Three views share one snapshot:
+Two views share one snapshot:
 - arena: every node with its vitals, and the pods running on it. A pod that
   comes back on another node (same workload, new pod) is a move, kept for a
   while so the page can animate it and list it.
 - weather: the network as weather. Wind is the nodes' Wi-Fi throughput, rain
   is CoreDNS queries, and lightning is a pod restarting or a new pod starting.
-- radar: wardriving contacts from a local JSON file (radar_contacts), plotted
-  around home.
 """
 
 import json
-import math
 import re
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 # How long a move or a lightning strike stays in the snapshot.
 EVENT_SECONDS = 600
@@ -193,41 +189,7 @@ def forecast(wind_bps: float, rain_qps: float) -> str:
     return f"{wind}, {rain}"
 
 
-def radar_contacts(path: Path, home: tuple[float, float] | None, now: float,
-                   radius_m: float = 3000) -> dict:
-    """Contacts from a JSON list of {"lat", "lon", "seen", "kind"}, as bearing
-    (degrees from north) and distance (0..1 of radius_m) from home.
-
-    Nothing about a contact but where and when is kept: the screen doesn't
-    show network names. Without home or the file there's an empty scope.
-    """
-    if home is None or not path.is_file():
-        return {"contacts": [], "total": 0, "feed": False}
-    try:
-        rows = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {"contacts": [], "total": 0, "feed": False}
-    lat0, lon0 = map(math.radians, home)
-    contacts = []
-    for r in rows:
-        try:
-            lat, lon = math.radians(float(r["lat"])), math.radians(float(r["lon"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-        # Equirectangular is plenty at a few km.
-        x = (lon - lon0) * math.cos((lat + lat0) / 2) * 6371000
-        y = (lat - lat0) * 6371000
-        dist = math.hypot(x, y)
-        if dist > radius_m:
-            continue
-        contacts.append({"bearing": round(math.degrees(math.atan2(x, y)) % 360, 1),
-                         "range": round(dist / radius_m, 3),
-                         "age": max(0, round(now - float(r.get("seen", now)))),
-                         "kind": r.get("kind", "wifi")})
-    return {"contacts": contacts, "total": len(rows), "feed": True}
-
-
-def snapshot(prom, tracker: Tracker, radar_file: Path, home, now: float | None = None) -> dict:
+def snapshot(prom, tracker: Tracker, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     current = pods(prom)
     tracker.update(current, now)
@@ -236,5 +198,4 @@ def snapshot(prom, tracker: Tracker, radar_file: Path, home, now: float | None =
         "pods": [asdict(p) for p in current],
         "events": [asdict(e) for e in tracker.events],
         "weather": weather(prom),
-        "radar": radar_contacts(radar_file, home, now),
     }

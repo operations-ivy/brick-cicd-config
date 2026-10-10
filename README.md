@@ -151,7 +151,7 @@ the front door for every web UI in the homelab, each at its own name under
 | --- | --- |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
 | `arena.brick.nozdormu.cloud` | brick1982's touchscreen page (brick-arena) on `192.168.1.222:8766` |
-| `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
+| `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `radar.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
 Plain HTTP to any of them redirects to HTTPS. brick9000 is the front door
@@ -436,8 +436,8 @@ DATA" when Prometheus stops answering.
 under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
 prompt, with a transparent cursor theme from `brick1982/blank-cursors` so no
 arrow sits on the panel). The page changes view every 45s, coming back to
-the main view between each of the others (main, arena, main, weather, main,
-radar); a tap moves on and holds that view for two minutes:
+the main view between each of the others (main, arena, main, weather); a
+tap moves on and holds that view for two minutes:
 
 - **Main**: a pixel-art planet turning over a twinkling starfield, its name,
   and a one-line cluster summary. Each time the view comes round it's the
@@ -456,11 +456,8 @@ radar); a tap moves on and holds that view for two minutes:
   CoreDNS queries per second, a cloud per node darkens with its CPU, and
   lightning strikes when a pod restarts or a new one starts. The caption is a
   one-line forecast ("Light breeze, drizzle").
-- **Wardrive radar**: contacts plotted by bearing and distance (3 km scope)
-  around home, newest (under a day old) in yellow. It reads a JSON list of
-  `{"lat", "lon", "seen", "kind"}` from `BRICK_ARENA_RADAR_FILE`, centred on
-  `BRICK_ARENA_HOME_LATLON`; both stay on brick1982, never in the repo. No
-  network names are shown. Until something writes that file it shows "NO FEED".
+- The wardrive radar that used to be a view here lives in wigle-console now,
+  full screen at `https://radar.brick.nozdormu.cloud` (wigle-sync's README).
 
 The panel dims to 8% from 23:00 to 07:00 (`BRICK_ARENA_DIM`), through
 `/sys/class/backlight`, which `brick1982/90-backlight.rules` makes writable by

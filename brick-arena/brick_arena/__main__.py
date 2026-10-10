@@ -1,9 +1,10 @@
 """brick-arena: the display daemon on brick1982's 7" touchscreen.
 
 Polls Prometheus, serves the page Chromium shows in cage, and dims the panel
-overnight. The page rotates through three views: arena (the cluster's pods by
-node, with moves animated), weather (the network as weather) and radar
-(wardriving contacts around home). A tap moves to the next view.
+overnight. The page rotates through its views, coming back to main (a turning
+pixel-art planet) between arena (the cluster's pods by node, with moves
+animated) and weather (the network as weather). A tap moves to the next view.
+The wardrive radar moved to wigle-console (radar.brick.nozdormu.cloud).
 
     python3 -m brick_arena
 """
@@ -23,7 +24,7 @@ from .backlight import Backlight, in_window, parse_window
 
 log = logging.getLogger("brick-arena")
 STATIC = (Path(__file__).parent / "static").resolve()
-VIEWS = ("main", "arena", "weather", "radar")
+VIEWS = ("main", "arena", "weather")
 ART = STATIC / "art"
 # The page reloads itself when this changes, so a deploy shows the new page.
 BOOT = str(time.time())
@@ -31,15 +32,6 @@ BOOT = str(time.time())
 
 def env(name: str, default: str) -> str:
     return os.environ.get(f"BRICK_ARENA_{name}", default)
-
-
-def home_from(text: str) -> tuple[float, float] | None:
-    """"lat,lon" of home, the radar's centre. Kept in the env file only."""
-    try:
-        lat, lon = (float(v) for v in text.split(","))
-        return lat, lon
-    except ValueError:
-        return None
 
 
 class State:
@@ -94,15 +86,13 @@ def is_kiosk(client_host: str, headers) -> bool:
 def poll(state: State) -> None:
     prom = collect.Prometheus(env("PROMETHEUS_URL", "https://prometheus.brick.nozdormu.cloud"))
     tracker = collect.Tracker()
-    radar_file = Path(os.path.expanduser(env("RADAR_FILE", "~/.local/share/brick-arena/radar.json")))
-    home = home_from(env("HOME_LATLON", ""))
     seconds = float(env("POLL_SECONDS", "10"))
     dim_window = parse_window(env("DIM", "23:00-07:00"))
     dim_level, day_level = float(env("DIM_LEVEL", "0.08")), float(env("DAY_LEVEL", "1.0"))
     light = Backlight()
     while True:
         try:
-            state.set(collect.snapshot(prom, tracker, radar_file, home))
+            state.set(collect.snapshot(prom, tracker))
         except Exception as e:  # network errors, bad responses: keep the last picture
             log.warning("poll failed: %s", e)
             state.fail(str(e))
