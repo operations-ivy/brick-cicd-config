@@ -15,12 +15,17 @@
 <canvas id="c"></canvas>
 <script>
 "use strict";
-const VIEWS = ["arena", "weather", "radar"];
-const TITLES = { arena: "THE ARENA", weather: "PACKET WEATHER", radar: "WARDRIVE RADAR" };
+const VIEWS = ["main", "arena", "weather", "radar"];
+const TITLES = { main: "BRICK HOMELAB", arena: "THE ARENA", weather: "PACKET WEATHER", radar: "WARDRIVE RADAR" };
+// The main view comes back between each of the others.
+const SEQUENCE = ["main", "arena", "main", "weather", "main", "radar"];
 const FPS = 24;
 const cv = document.getElementById("c"), g = cv.getContext("2d");
 let W = 0, H = 0;
 let state = null, boot = null, view = 0, viewSince = performance.now(), pausedUntil = 0;
+// The kiosk (brick1982's own Chromium) rotates and reports its view; every
+// other browser just follows it. Until the first answer, assume a viewer.
+let kiosk = false;
 let seenEvents = new Set(), flights = [], flashes = [];
 
 function resize() {
@@ -30,9 +35,24 @@ function resize() {
 }
 window.addEventListener("resize", resize); resize();
 
-// A tap moves on to the next view and holds it for two minutes.
+let seq = 0;
+function show(i) {
+  view = i; viewSince = performance.now();
+  if (kiosk) report();
+}
+// The kiosk's next view in SEQUENCE (or a given step of it).
+function advance(to = (seq + 1) % SEQUENCE.length) {
+  seq = to; show(VIEWS.indexOf(SEQUENCE[seq]));
+}
+function report() {
+  fetch("/api/screen", { method: "POST", body: JSON.stringify({ view: VIEWS[view] }) }).catch(() => {});
+}
+
+// On the panel, a tap moves on to the next view and holds it for two minutes.
 window.addEventListener("pointerdown", () => {
-  view = (view + 1) % VIEWS.length; viewSince = performance.now(); pausedUntil = performance.now() + 120000;
+  if (!kiosk) return;
+  pausedUntil = performance.now() + 120000;
+  advance();
 });
 
 async function refresh() {
@@ -40,11 +60,19 @@ async function refresh() {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
     if (boot && s.boot !== boot) return location.reload();
     boot = s.boot;
+    kiosk = s.kiosk;
     absorbEvents(s);
     state = s;
+    if (kiosk) {
+      // Also after brick-arena restarts, when it has forgotten.
+      if (!s.screen || s.screen.view !== VIEWS[view]) report();
+    } else if (s.screen && VIEWS.includes(s.screen.view) && s.screen.view !== VIEWS[view]) {
+      show(VIEWS.indexOf(s.screen.view));
+    }
   } catch (e) { /* daemon restarting: keep the last picture */ }
 }
-setInterval(refresh, 3000); refresh();
+// Every second, so a viewer follows the panel within about a second.
+setInterval(refresh, 1000); refresh();
 
 function absorbEvents(s) {
   const first = state === null;
@@ -257,18 +285,52 @@ function drawRadar(now) {
   }
 }
 
+/* ---------- main ---------- */
+// "Pixel Earth Animation" by Slime Games Studios, CC0 (static/art/README.md):
+// 20 frames of 32x32 side by side, one full turn.
+const earth = new Image(); earth.src = "/art/earth.png";
+const EARTH_PX = 32, EARTH_FRAMES = 20, EARTH_MS = 150;
+// Seeded, so the panel and every viewer draw the same sky.
+const sky = (() => {
+  let x = 1982; const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: 110 }, () => ({ x: rnd(), y: rnd(), s: rnd() < .2 ? 2 : 1, v: .5 + rnd() * 2, p: rnd() * 6 }));
+})();
+function drawMain(now) {
+  g.fillStyle = "#04050a"; g.fillRect(0, 0, W, H);
+  for (const st of sky) {
+    const a = .25 + .75 * Math.abs(Math.sin(now / 1000 * st.v + st.p));
+    g.fillStyle = `rgba(220, 230, 255, ${a.toFixed(2)})`;
+    g.fillRect(Math.round(st.x * W), Math.round(34 + st.y * (H - 34)), st.s * 2, st.s * 2);
+  }
+  // Whole-number scaling with smoothing off keeps every pixel square.
+  const scale = Math.max(1, Math.floor(Math.min(W, H - 90) / EARTH_PX));
+  const size = EARTH_PX * scale, x = Math.round((W - size) / 2), y = Math.round((H - size) / 2) + 6;
+  if (earth.complete && earth.naturalWidth) {
+    g.imageSmoothingEnabled = false;
+    const f = Math.floor(now / EARTH_MS) % EARTH_FRAMES;
+    g.drawImage(earth, f * EARTH_PX, 0, EARTH_PX, EARTH_PX, x, y, size, size);
+  }
+  const nodes = (state && state.nodes) || [], pods = ((state && state.pods) || []).filter(p => p.kind !== "DaemonSet");
+  const w = state && state.weather;
+  const line = nodes.length ? `${nodes.filter(n => n.ready).length}/${nodes.length} nodes ready  ·  ${pods.length} pods${w ? "  ·  " + w.forecast : ""}` : "";
+  text(line, W / 2, H - 14, 13, "#9fb0d8", "center");
+}
+
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   if (now - last < 1000 / FPS) return;
   const dt = Math.min(.1, (now - last) / 1000); last = now;
   const rotate = ((state && state.rotate) || 45) * 1000;
-  if (now > pausedUntil && now - viewSince > rotate) { view = (view + 1) % VIEWS.length; viewSince = now; }
-  // A move takes over the screen: show it on the arena whatever's up.
-  if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") { view = 0; viewSince = now; }
+  if (kiosk) {
+    if (now > pausedUntil && now - viewSince > rotate) advance();
+    // A move takes over the screen: show it on the arena whatever's up.
+    if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") advance(SEQUENCE.indexOf("arena"));
+  }
   const name = VIEWS[view];
   g.fillStyle = "#07080c"; g.fillRect(0, 0, W, H);
-  if (name === "arena") drawArena(now);
+  if (name === "main") drawMain(now);
+  else if (name === "arena") drawArena(now);
   else if (name === "weather") drawWeather(now, dt);
   else drawRadar(now);
   g.fillStyle = "rgba(7, 8, 12, .7)"; g.fillRect(0, 0, W, 34);

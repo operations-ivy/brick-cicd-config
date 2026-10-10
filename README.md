@@ -435,9 +435,14 @@ DATA" when Prometheus stops answering.
 10s and serves a page on port 8766, which Chromium shows full screen
 under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
 prompt, with a transparent cursor theme from `brick1982/blank-cursors` so no
-arrow sits on the panel). The page rotates through three views every 45s; a
-tap moves on and holds that view for two minutes:
+arrow sits on the panel). The page changes view every 45s, coming back to
+the main view between each of the others (main, arena, main, weather, main,
+radar); a tap moves on and holds that view for two minutes:
 
+- **Main**: a pixel-art Earth turning over a twinkling starfield, with a
+  one-line cluster summary under it. The art is "Pixel Earth Animation" by
+  Slime Games Studios (CC0; `brick-arena/brick_arena/static/art/README.md`),
+  scaled by a whole number with smoothing off so the pixels stay square.
 - **The arena**: one ring per node with CPU, memory and temperature bars, and
   a block per pod, coloured by namespace (DaemonSet pods are counted, not
   drawn). When a workload's new pod lands on another node, the block flies
