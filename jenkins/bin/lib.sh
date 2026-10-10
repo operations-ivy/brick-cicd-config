@@ -4,6 +4,9 @@
 BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
 # brick9000, the status board, outside the cluster (reached over SSH).
 BRICK9000=${BRICK9000:-192.168.1.221}
+# brick1982, the touchscreen (brick-arena); a k3s worker, but its display
+# runs on the host, so it's reached over SSH too.
+BRICK1982=${BRICK1982:-192.168.1.222}
 # The local clones mirror-repos keeps: in Jenkins' home, or wherever the
 # caller says (brick9000's brick-mirror.timer keeps its own).
 MIRRORS=${MIRRORS:-${JENKINS_HOME:-/var/jenkins_home}/mirrors}
@@ -47,4 +50,29 @@ wait_for_job() {  # <namespace> <job>
     done
     kubectl -n "$1" logs "job/$2" --all-containers --tail=200 || true
     return $result
+}
+
+# Point a host's deploy (brick9000/deploy, brick1982/deploy) at a branch of
+# brick-cicd-config and start it. An empty branch means main.
+start_deploy() {  # <host> <env file on the host> <branch>
+    branch=${3:-main}
+    case $branch in
+        -*|*[!A-Za-z0-9._/-]*) echo "not a branch name: $branch" >&2; return 1 ;;
+    esac
+    if ! git ls-remote --exit-code --heads "$GITHUB/brick-cicd-config" "$branch" >/dev/null; then
+        echo "no branch $branch on GitHub (push it first)" >&2
+        return 1
+    fi
+    # Replace the BRICK_DEPLOY_BRANCH line, or add one.
+    ssh "$1" sh -s -- "$2" "$branch" <<'REMOTE'
+set -eu
+env_file=$HOME/$1
+if grep -q '^BRICK_DEPLOY_BRANCH=' "$env_file"; then
+    sed -i "s|^BRICK_DEPLOY_BRANCH=.*|BRICK_DEPLOY_BRANCH=$2|" "$env_file"
+else
+    echo "BRICK_DEPLOY_BRANCH=$2" >>"$env_file"
+fi
+systemctl --user start --no-block brick-deploy.service
+REMOTE
+    echo "Deploying $branch; follow it on the host with: journalctl _SYSTEMD_USER_UNIT=brick-deploy.service -f"
 }
