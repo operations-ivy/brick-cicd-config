@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Post-deploy smoke check: is everything brick9000 and brick1982 serve up?
+
+    scripts/smoke            # from the laptop or Jenkins, read-only
+
+- every *.brick.nozdormu.cloud name answers through brick9000's proxy
+- brick-status and the proxy on brick9000, and brick-arena and the kiosk on
+  brick1982, are running (over SSH)
+- the board's and the arena's data is fresh (polled in the last minute)
+
+Exits 1 if anything is down.
+"""
+
+import json
+import ssl
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# name -> the statuses that mean "up" (logins redirect or refuse)
+NAMES = {"status": {200}, "arena": {200}, "radar": {200}, "wigle": {200}, "reader": {200},
+         "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403}, "dashboard": {200}}
+SERVICES = {"brick9000": [("--user", "brick-status"), ("", "docker")],
+            "brick1982": [("--user", "brick-arena"), ("", "brick-kiosk")]}
+FRESH = {"status": "/api/state", "arena": "/api/state"}
+
+
+def status(url: str) -> int:
+    req = urllib.request.Request(url, method="GET")
+    try:
+        return urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()).status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except OSError:
+        return 0
+
+
+def main() -> int:
+    problems = []
+    for name, ok in NAMES.items():
+        code = status(f"https://{name}.brick.nozdormu.cloud/")
+        print(f"{'ok  ' if code in ok else 'DOWN'} {name}.brick.nozdormu.cloud ({code or 'no answer'})")
+        if code not in ok:
+            problems.append(name)
+    for host, units in SERVICES.items():
+        for scope, unit in units:
+            out = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"zaphod@{host}",
+                                  f"systemctl {scope} is-active {unit}"], capture_output=True, text=True)
+            state = out.stdout.strip() or "unreachable"
+            print(f"{'ok  ' if state == 'active' else 'DOWN'} {host} {unit} ({state})")
+            if state != "active":
+                problems.append(f"{host}/{unit}")
+    for name, path in FRESH.items():
+        try:
+            s = json.load(urllib.request.urlopen(f"https://{name}.brick.nozdormu.cloud{path}", timeout=10))
+            age = time.time() - s.get("updated", 0)
+        except (OSError, ValueError):
+            age = float("inf")
+        print(f"{'ok  ' if age < 60 else 'STALE'} {name} data ({'never' if age == float('inf') else f'{age:.0f}s old'})")
+        if age >= 60:
+            problems.append(f"{name} data")
+    print(f"\n{'all up' if not problems else 'problems: ' + ', '.join(problems)}")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
