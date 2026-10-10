@@ -391,7 +391,7 @@ class ChecksTest(unittest.TestCase):
         brief = self.wigle_prom(metrics, stuck=[({}, 0)])
         self.assertEqual([c.state for c in checks.wigle_checks(brief, 200)], ["warn", "ok"])
 
-    def test_image_pulls_while_internet_down_are_degraded_not_down(self):
+    def test_unhealthy_workloads_are_degraded_not_down(self):
         prom = FakeProm({
             "waiting_reason": [({"namespace": "kubernetes-dashboard", "pod": "kubernetes-dashboard-566cd-ph8cq",
                                  "reason": "ImagePullBackOff"}, 1),
@@ -399,15 +399,22 @@ class ChecksTest(unittest.TestCase):
             "replicas_unavailable": [({"namespace": "kubernetes-dashboard", "deployment": "kubernetes-dashboard"}, 1),
                                      ({"namespace": "chuck", "deployment": "reader"}, 1)],
         })
-        online = {c.name: c.state for c in checks.cluster_checks(prom, internet=True)}
-        self.assertEqual(set(online.values()), {"fail"})
+        online = checks.cluster_checks(prom, internet=True)
+        self.assertEqual({c.state for c in online}, {"warn"})
+        self.assertEqual(checks.summarize(online)["groups"]["cluster"]["state"], "warn")
 
-        offline = {c.name: c.state for c in checks.cluster_checks(prom, internet=False)}
-        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard"], "warn")
-        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard-566cd-ph8cq"], "warn")
-        # A crash loop is the cluster's problem whatever the internet is doing.
-        self.assertEqual(offline["chuck/reader"], "fail")
-        self.assertEqual(offline["chuck/reader-68-wrd2h"], "fail")
+        offline = {c.name: c.detail for c in checks.cluster_checks(prom, internet=False)}
+        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard"], "1 not ready, internet down")
+        self.assertEqual(offline["kubernetes-dashboard/kubernetes-dashboard-566cd-ph8cq"],
+                         "ImagePullBackOff, internet down")
+        # A crash loop isn't the internet's fault, so it doesn't say so.
+        self.assertEqual(offline["chuck/reader"], "1 not ready")
+        self.assertEqual(offline["chuck/reader-68-wrd2h"], "CrashLoopBackOff")
+
+    def test_node_not_ready_is_down(self):
+        prom = FakeProm({"kube_node_status_condition": [({"node": "brick666"}, 0)]})
+        [node] = checks.cluster_checks(prom)[:1]
+        self.assertEqual((node.name, node.state, node.detail), ("brick666", "fail", "NotReady"))
 
     def test_control_plane_from_the_apiserver_scrape(self):
         down = FakeProm({'up{job="apiserver"}': [({"job": "apiserver"}, 0)]})

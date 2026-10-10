@@ -26,7 +26,7 @@ JENKINS_RESULTS = {"SUCCESS": (OK, "passed"), "UNSTABLE": (WARN, "unstable"),
 WIGLE_ERROR_WINDOW = "2h"
 
 # Waiting reasons that only mean "couldn't reach the registry". While the
-# internet is down that's the ISP, not the cluster, so they're degraded, not down.
+# internet is down the board says so on those rows.
 IMAGE_PULL_REASONS = {"ImagePullBackOff", "ErrImagePull"}
 
 
@@ -69,6 +69,8 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         checks.append(Check("cluster", "control plane", OK if v == 1 else FAIL,
                             "API up" if v == 1 else "API down"))
 
+    # Workload problems below are degraded, never down: one unhealthy service
+    # isn't the cluster being down. Down is a NotReady node or the API above.
     stuck = prom.query('sum by (namespace, pod, reason) (kube_pod_container_status_waiting_reason'
                        '{reason=~"CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError"}) > 0')
     # Pods that can't start only because the registry is out of reach.
@@ -82,18 +84,17 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         name = m.get("deployment") or m.get("statefulset")
         # A workload's pods are named <workload>-<suffix>.
         if any(ns == m["namespace"] and pod.startswith(f"{name}-") for ns, pod in offline):
-            checks.append(Check("cluster", f"{m['namespace']}/{name}", WARN,
-                                f"{int(v)} not ready, internet down"))
+            detail = f"{int(v)} not ready, internet down"
         else:
-            checks.append(Check("cluster", f"{m['namespace']}/{name}", FAIL, f"{int(v)} not ready"))
+            detail = f"{int(v)} not ready"
+        checks.append(Check("cluster", f"{m['namespace']}/{name}", WARN, detail))
     if not unavailable and not unready_sts:
         checks.append(Check("cluster", "workloads", OK, "all replicas ready"))
 
     for m, _ in stuck:
-        if (m["namespace"], m["pod"]) in offline:
-            checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", WARN, f"{m['reason']}, internet down"))
-        else:
-            checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", FAIL, m["reason"]))
+        offline_pod = (m["namespace"], m["pod"]) in offline
+        checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", WARN,
+                            f"{m['reason']}, internet down" if offline_pod else m["reason"]))
 
     # A finished Job's pod (the chuck importer) stays behind until the Job is
     # deleted, and Prometheus keeps trying to scrape it; it isn't down, it's done.
