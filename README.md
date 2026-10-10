@@ -150,6 +150,7 @@ the front door for every web UI in the homelab, each at its own name under
 | Name | Goes to |
 | --- | --- |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
+| `arena.brick.nozdormu.cloud` | brick1982's touchscreen page (brick-arena) on `192.168.1.222:8766` |
 | `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `reader.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
@@ -431,7 +432,7 @@ down, so it doesn't need to outlive the cluster. Its page shows "STALE" or "NO
 DATA" when Prometheus stops answering.
 
 `brick-arena` (`brick-arena/`, standard library only) polls Prometheus every
-10s and serves a page on `127.0.0.1:8766`, which Chromium shows full screen
+10s and serves a page on port 8766, which Chromium shows full screen
 under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
 prompt, with a transparent cursor theme from `brick1982/blank-cursors` so no
 arrow sits on the panel). The page rotates through three views every 45s; a
@@ -456,6 +457,10 @@ tap moves on and holds that view for two minutes:
 The panel dims to 8% from 23:00 to 07:00 (`BRICK_ARENA_DIM`), through
 `/sys/class/backlight`, which `brick1982/90-backlight.rules` makes writable by
 the video group.
+
+The same page, read only, is at `https://arena.brick.nozdormu.cloud` (through
+brick9000's proxy), for watching from a laptop. Each browser rotates and
+animates on its own, and a tap there only changes that browser's view.
 
 Set up, once, on brick1982:
 
