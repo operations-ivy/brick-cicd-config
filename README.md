@@ -423,6 +423,20 @@ Tests (standard library `unittest`, no hardware needed):
 scripts/test
 ```
 
+It runs brick-status' and brick-arena's unit tests, then the functional
+tests in `functional/`, which run the real things against stubs: brick-arena's
+HTTP server against a stub Prometheus over real HTTP (who may set the view,
+what `/art/` serves), both deploy scripts against throwaway git repos (a
+passing commit deploys, a failing one is refused and not retried, branches
+are followed and left, brick9000's lights and proxy step), and Jenkins'
+`start_deploy` with `ssh` and `git ls-remote` faked (no bad branch name reaches
+a host).
+
+After a deploy, `scripts/smoke` checks the live result, read-only: every
+`*.brick.nozdormu.cloud` name answers through the proxy, the services on
+brick9000 and brick1982 are running, and the board's and the arena's data is
+fresh. It exits 1 if anything is down.
+
 ## brick-arena (the touchscreen on brick1982)
 
 `brick1982` (192.168.1.222, static lease) is a Raspberry Pi 4 8GB with the
