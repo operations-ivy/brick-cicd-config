@@ -139,7 +139,7 @@ IDLE = {
 # lights in idle and active mode alike; a deploy outranks an image build.
 BUILD = {
     "deploying": lambda: boil(2.0),
-    "image-building": lambda: rainbow(1.5),
+    "image-building": lambda: rainbow(0.75),
     "image-pushed": lambda: flash(GREEN, 0.5),
     "image-failed": lambda: pulse(RED, 0.8, 0.0),
 }

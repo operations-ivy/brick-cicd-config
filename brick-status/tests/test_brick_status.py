@@ -238,6 +238,8 @@ class BuildLightsTest(unittest.TestCase):
             self.assertIn(name, patterns.BUILD)
 
     def test_rainbow_and_flash_colours(self):
+        # One full turn of the rainbow every 0.75s.
+        self.assertEqual(len(patterns.BUILD["image-building"]()), int(0.75 * patterns.FPS))
         hues = {px for frame in patterns.BUILD["image-building"]() for px in frame}
         self.assertTrue(any(r > 200 for r, _, _ in hues) and any(g > 200 for _, g, _ in hues)
                         and any(b > 200 for _, _, b in hues))
