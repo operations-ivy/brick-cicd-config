@@ -1,11 +1,21 @@
-"""Dim the panel overnight through /sys/class/backlight (writable by the video
-group once brick1982/90-backlight.rules is installed)."""
+"""Dim the panel overnight, and turn it off on brick9000's quiet schedule,
+through /sys/class/backlight (writable by the video group once
+brick1982/90-backlight.rules is installed)."""
 
 import logging
+import sys
 from datetime import datetime, time as dtime
 from pathlib import Path
 
+# The quiet schedule's format and brick9000's default come from brick-status,
+# in the same checkout, so both screens sleep the same way.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "brick-status"))
+from brick_status.board import QuietSchedule  # noqa: E402
+from brick_status.config import DEFAULT_QUIET  # noqa: E402
+
 log = logging.getLogger(__name__)
+
+__all__ = ["Backlight", "DEFAULT_QUIET", "QuietSchedule", "in_window", "parse_window"]
 
 
 def parse_window(text: str) -> tuple[dtime, dtime] | None:
@@ -33,9 +43,15 @@ class Backlight:
         self.current: int | None = None
 
     def set_fraction(self, fraction: float) -> None:
+        """Lit at this fraction of full; never fully dark (that's off())."""
+        self._write(max(1, round(self.max * fraction)))
+
+    def off(self) -> None:
+        self._write(0)
+
+    def _write(self, level: int) -> None:
         if self.path is None:
             return
-        level = max(1, round(self.max * fraction))
         if level == self.current:
             return
         try:

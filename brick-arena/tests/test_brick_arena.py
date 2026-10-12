@@ -9,8 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 from brick_arena import collect
-from brick_arena.__main__ import State, art_file, is_kiosk
-from brick_arena.backlight import Backlight, in_window, parse_window
+from brick_arena.__main__ import Panel, State, art_file, is_kiosk
+from brick_arena.backlight import DEFAULT_QUIET, Backlight, QuietSchedule, in_window, parse_window
 
 
 class FakeProm:
@@ -130,6 +130,74 @@ class BacklightTests(unittest.TestCase):
 
     def test_no_backlight_is_fine(self):
         Backlight(tempfile.mkdtemp()).set_fraction(1.0)
+        Backlight(tempfile.mkdtemp()).off()
+
+    def test_off_writes_zero_and_back_on(self):
+        d = Path(tempfile.mkdtemp()) / "10-0045"
+        d.mkdir()
+        (d / "max_brightness").write_text("255\n")
+        (d / "brightness").write_text("255\n")
+        light = Backlight(str(d.parent))
+        light.off()
+        self.assertEqual((d / "brightness").read_text(), "0")
+        light.set_fraction(0.0)  # dimmest lit level, not off
+        self.assertEqual((d / "brightness").read_text(), "1")
+
+    def test_default_quiet_mirrors_brick9000(self):
+        q = QuietSchedule.parse(DEFAULT_QUIET)
+        # 2026-10-12 is a Monday; 2026-10-17 a Saturday.
+        self.assertTrue(q.is_quiet(datetime(2026, 10, 12, 9, 0)))
+        self.assertTrue(q.is_quiet(datetime(2026, 10, 16, 15, 59)))
+        self.assertFalse(q.is_quiet(datetime(2026, 10, 12, 16, 0)))
+        self.assertFalse(q.is_quiet(datetime(2026, 10, 16, 23, 59)))
+        self.assertFalse(q.is_quiet(datetime(2026, 10, 17, 3, 0)))
+        self.assertFalse(q.is_quiet(datetime(2026, 10, 18, 23, 59)))
+
+
+class FakeLight:
+    def __init__(self):
+        self.level = None
+
+    def off(self):
+        self.level = 0
+
+    def set_fraction(self, fraction):
+        self.level = fraction
+
+
+class PanelTests(unittest.TestCase):
+    def setUp(self):
+        self.light = FakeLight()
+        self.panel = Panel(self.light, QuietSchedule.parse(DEFAULT_QUIET), parse_window("23:00-07:00"),
+                           0.08, 1.0, 1800)
+
+    @staticmethod
+    def at(*args):
+        return datetime(*args).timestamp()
+
+    def test_off_in_quiet_hours_dim_and_day_otherwise(self):
+        self.panel.update(self.at(2026, 10, 12, 9, 0))  # Monday morning
+        self.assertEqual(self.light.level, 0)
+        self.panel.update(self.at(2026, 10, 12, 20, 0))
+        self.assertEqual(self.light.level, 1.0)
+        self.panel.update(self.at(2026, 10, 17, 23, 30))  # Saturday night
+        self.assertEqual(self.light.level, 0.08)
+
+    def test_tap_wakes_for_wake_seconds_from_the_last_tap(self):
+        t = self.at(2026, 10, 12, 9, 0)
+        self.panel.wake(t)
+        self.assertEqual(self.light.level, 1.0)
+        self.assertFalse(self.panel.asleep(t + 1700))
+        self.panel.wake(t + 1700)
+        self.panel.update(t + 1800 + 60)
+        self.assertEqual(self.light.level, 1.0)
+        self.panel.update(t + 1700 + 1800)
+        self.assertEqual(self.light.level, 0)
+
+    def test_tap_outside_quiet_hours_leaves_nothing_behind(self):
+        evening = self.at(2026, 10, 12, 20, 0)
+        self.panel.wake(evening)
+        self.assertTrue(self.panel.asleep(self.at(2026, 10, 13, 0, 30)))
 
 
 class ScreenTests(unittest.TestCase):

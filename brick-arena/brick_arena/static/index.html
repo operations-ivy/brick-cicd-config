@@ -52,8 +52,12 @@ function report() {
 }
 
 // On the panel, a tap moves on to the next view and holds it for two minutes.
+// Every tap also tells brick-arena, which wakes the panel during quiet hours;
+// the tap that wakes it doesn't move on.
 window.addEventListener("pointerdown", () => {
   if (!kiosk) return;
+  fetch("/api/wake", { method: "POST" }).catch(() => {});
+  if (state && state.asleep) { state.asleep = false; return; }
   pausedUntil = performance.now() + 120000;
   advance();
 });
