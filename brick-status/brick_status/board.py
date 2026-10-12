@@ -152,6 +152,11 @@ class Board:
             self._view = (self._view + delta) % len(self.views)
             self._last_press = now
 
+    def keep_awake(self, now: float, seconds: float) -> None:
+        """Stay on for at least `seconds` more, whatever the schedule (a game is open)."""
+        with self._lock:
+            self._awake_until = max(self._awake_until or 0.0, now + seconds)
+
     def awake_until(self, now: float) -> float | None:
         """When a side-button wake ends, while one is keeping the board on."""
         with self._lock:

@@ -21,8 +21,48 @@ topic=~/.config/brick-status/ntfy_topic
 [ -s "$topic" ] || (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
 cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
+    "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
     ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
+# A full-screen game handed straight to the display (direct scanout) makes
+# the vc4 HDMI output re-sync every few seconds: black screen, the panel's
+# HDMI badge. Always composite instead (labwc reads this at login).
+grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/null ||
+    echo 'WLR_SCENE_DISABLE_DIRECT_SCANOUT=1' >>~/.config/labwc/environment
+
+# brick-retro: NES and SNES over the board with a Bluetooth controller
+# (README, "Games").
+sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x rsync
+# Raspberry Pi OS starts every radio blocked (rfkill default_state=0) and
+# NetworkManager only unblocks Wi-Fi; systemd-rfkill keeps this across reboots.
+for r in /sys/class/rfkill/rfkill*; do
+    [ "$(cat "$r/type")" = bluetooth ] && echo 0 | sudo tee "$r/soft" >/dev/null
+done
+# A paired controller reconnects faster.
+if ! grep -q '^FastConnectable *= *true' /etc/bluetooth/main.conf; then
+    sudo sed -i 's/^#*FastConnectable *=.*/FastConnectable = true/' /etc/bluetooth/main.conf
+    sudo systemctl restart bluetooth
+fi
+mkdir -p ~/games/roms ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
+for f in "$here"/retroarch/autoconfig/*.cfg; do
+    [ -f "$f" ] && cp "$f" ~/.config/retroarch/autoconfig/
+done
+[ -f ~/.config/brick-retro/env ] || cp "$here/brick-retro.env.example" ~/.config/brick-retro/env
+# The Picade's speaker is very loud: start quiet, once (WirePlumber keeps
+# whatever Home + D-pad sets after that).
+volume_set=~/.local/state/brick-retro/volume-set
+if [ ! -f "$volume_set" ]; then
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.15 && mkdir -p "$(dirname "$volume_set")" && touch "$volume_set"
+fi
+# The key brick-roms copies ROMs with. brick2000 must let it read only the ROMs.
+[ -f ~/.ssh/brick-roms ] || ssh-keygen -q -t ed25519 -N '' -C brick9000-roms -f ~/.ssh/brick-roms
+roms_host=$(sed -n 's/^BRICK_ROMS_SOURCE=.*@//p' ~/.config/brick-retro/env | tail -n 1)
+roms_host=${roms_host:-brick2000}
+ssh-keygen -F "$roms_host" >/dev/null || ssh-keyscan -t ed25519 "$roms_host" >>~/.ssh/known_hosts 2>/dev/null
+if ! ssh -i ~/.ssh/brick-roms -o BatchMode=yes "zaphod@$roms_host" true 2>/dev/null; then
+    echo "On $roms_host, add this line to ~/.ssh/authorized_keys, then run: systemctl --user start brick-roms"
+    echo "  command=\"rrsync -ro /extra/games/roms\",restrict $(cat ~/.ssh/brick-roms.pub)"
+fi
 
 # Jenkins moved to the cluster (jenkins/, README "Jenkins"). Retire the
 # container it used to run in here; its home and secrets stay, as backups.
@@ -41,5 +81,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-status
 systemctl --user restart brick-status
-systemctl --user enable --now brick-deploy.timer brick-mirror.timer
+systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer
+systemctl --user enable brick-retro
+systemctl --user restart brick-retro
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."

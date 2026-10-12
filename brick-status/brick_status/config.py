@@ -63,6 +63,8 @@ class Settings:
     build_result_seconds: float = 60.0
     # The shortest a deploy boils the buttons, so a no-op deploy is still seen.
     deploy_min_seconds: float = 10.0
+    # brick-retro keeps this file while RetroArch is open: the screen stays on.
+    retro_flag: str = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "brick-retro.playing")
     input_device_name: str = "gpio_keys"
     wlopm: str = "wlopm"
     # Phone pages (notify.py). The topic name is the only thing keeping others
@@ -96,6 +98,7 @@ class Settings:
         s.build_result_seconds = float(env("BRICK_STATUS_BUILD_RESULT_SECONDS", s.build_result_seconds))
         s.deploy_min_seconds = float(env("BRICK_STATUS_DEPLOY_MIN_SECONDS", s.deploy_min_seconds))
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
+        s.retro_flag = env("BRICK_STATUS_RETRO_FLAG", s.retro_flag)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
         if v := env("BRICK_STATUS_QUIET"):

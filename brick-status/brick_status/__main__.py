@@ -10,6 +10,7 @@ pages a phone about problems that need a person (notify.py).
 
 import argparse
 import logging
+import os
 import socket
 import threading
 import time
@@ -138,6 +139,8 @@ def main() -> None:
         wake.wait(timeout=1.0)
         wake.clear()
         now = time.time()
+        if os.path.exists(settings.retro_flag):  # a game is open over the board
+            board.keep_awake(now, 60)
         mode = board.mode(now)
         summary = status.get()
         screen.set(mode != QUIET)
