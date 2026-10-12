@@ -4,8 +4,8 @@
     python3 -m brick_retro games      # rewrite the playlists, import old saves
 
 Turning a paired controller on opens RetroArch's game list over the board;
-quitting RetroArch shows the board again. Home held + D-pad up/down sets the
-volume. While RetroArch runs, brick-status keeps the screen on (the flag file).
+quitting RetroArch, or holding Home for 3 seconds, shows the board again.
+Home held + D-pad up/down sets the volume. While RetroArch runs, brick-status keeps the screen on (the flag file).
 """
 
 import logging
@@ -50,6 +50,16 @@ def start_retroarch() -> None:
 def stop_retroarch() -> None:
     log.info("no controller for a while: closing RetroArch (it saves a state first)")
     subprocess.run(["pkill", "-TERM", "-x", "retroarch"])
+
+
+def force_quit_retroarch() -> None:
+    log.info("Home held: closing RetroArch")
+    subprocess.run(["pkill", "-TERM", "-x", "retroarch"])
+    for _ in range(10):
+        if not retroarch_running():
+            return
+        time.sleep(0.5)
+    subprocess.run(["pkill", "-KILL", "-x", "retroarch"])
 
 
 def trusted_pads() -> list[str]:
@@ -118,7 +128,7 @@ def daemon() -> None:
             try:
                 for e in d.read():
                     if e.type == evdev.ecodes.EV_KEY:
-                        home |= volume.key(e.code, e.value)
+                        home |= volume.key(e.code, e.value, time.time())
                     elif e.type == evdev.ecodes.EV_ABS and e.code == ABS_HAT0Y:
                         volume.hat(e.value)
             except OSError:
@@ -135,6 +145,9 @@ def daemon() -> None:
         for path in set(pads) - set(current):
             pads[path].close()
         pads = current
+        if volume.held(time.time()) and retroarch_running():
+            force_quit_retroarch()
+            launcher.known = set(pads)  # and don't reopen it for the same pad
         launcher.tick(set(pads), home)
         set_flag(retroarch_running())
 

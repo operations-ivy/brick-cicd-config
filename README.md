@@ -444,7 +444,8 @@ Nestopia and Snes9x cores).
 
 - **Playing:** turn a paired controller on and RetroArch's game list opens
   over the board. Start + Select opens RetroArch's menu; quitting RetroArch
-  (Quit, twice) shows the board again. With the controller already on, Home
+  (Quit, twice), or holding Home for 3 seconds (always works, even when
+  RetroArch has lost the pad), shows the board again. With the controller already on, Home
   opens the games.
 - **Volume:** hold Home and press the D-pad up or down. Ten notches up to
   `BRICK_RETRO_MAX_VOLUME` (half the DAC's range: the Picade's speaker is very

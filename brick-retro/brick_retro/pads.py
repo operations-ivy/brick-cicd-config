@@ -19,18 +19,22 @@ def is_pad(name: str, keys: set[int]) -> bool:
 
 
 class Volume:
-    """Home held + D-pad up/down steps the volume (Home alone opens the games)."""
+    """Home held + D-pad up/down steps the volume; Home alone opens the games;
+    Home held for hold_seconds closes RetroArch, whatever state it's in (the
+    way out when RetroArch doesn't see the pad)."""
 
-    def __init__(self, change: Callable[[int], None]):
-        self.change = change
+    def __init__(self, change: Callable[[int], None], hold_seconds: float = 3):
+        self.change, self.hold_seconds = change, hold_seconds
         self.home_down = False
-        self.used = False  # Home was used for volume, so its release isn't a launch
+        self.home_since = 0.0
+        self.used = False  # Home was used for volume or a hold, so its release isn't a launch
 
-    def key(self, code: int, value: int) -> bool:
+    def key(self, code: int, value: int, now: float | None = None) -> bool:
         """A key event; True when it's a bare Home press-and-release."""
         if code == BTN_MODE:
             if value == 1:
                 self.home_down, self.used = True, False
+                self.home_since = time.time() if now is None else now
                 return False
             if value == 0:
                 bare = self.home_down and not self.used
@@ -40,6 +44,13 @@ class Volume:
         if self.home_down and value == 1 and code in (BTN_DPAD_UP, BTN_DPAD_DOWN):
             self.used = True
             self.change(1 if code == BTN_DPAD_UP else -1)
+        return False
+
+    def held(self, now: float) -> bool:
+        """True once when Home has been held alone for hold_seconds."""
+        if self.home_down and not self.used and now - self.home_since >= self.hold_seconds:
+            self.used = True
+            return True
         return False
 
     def hat(self, value: int) -> None:

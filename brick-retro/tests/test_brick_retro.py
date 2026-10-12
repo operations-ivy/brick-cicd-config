@@ -113,6 +113,18 @@ class VolumeTests(unittest.TestCase):
         self.assertFalse(self.volume.key(BTN_MODE, 0))
         self.assertEqual(self.steps, [1, -1, 1])
 
+    def test_holding_home_alone_is_a_close_once_not_a_launch(self):
+        self.volume.key(BTN_MODE, 1, now=0)
+        self.assertFalse(self.volume.held(2.9))
+        self.assertTrue(self.volume.held(3.0))
+        self.assertFalse(self.volume.held(4.0))
+        self.assertFalse(self.volume.key(BTN_MODE, 0, now=4))
+
+    def test_volume_presses_mean_holding_home_is_not_a_close(self):
+        self.volume.key(BTN_MODE, 1, now=0)
+        self.volume.key(BTN_DPAD_UP, 1, now=1)
+        self.assertFalse(self.volume.held(5))
+
     def test_bare_home_is_a_launch_and_dpad_alone_does_nothing(self):
         self.volume.key(BTN_DPAD_UP, 1)
         self.volume.hat(1)
