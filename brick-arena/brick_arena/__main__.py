@@ -5,6 +5,8 @@ overnight and turns it off on brick9000's quiet schedule (a tap wakes it). The p
 pixel-art planet) between arena (the cluster's pods by node, with moves
 animated) and weather (the network as weather). A tap moves to the next view.
 The wardrive radar moved to wigle-console (radar.brick.nozdormu.cloud).
+Sentry (sentry.py) watches Bluetooth for trackers and gadgets, and its alerts
+take over the screen.
 
     python3 -m brick_arena
 """
@@ -19,12 +21,12 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect
+from . import collect, sentry
 from .backlight import DEFAULT_QUIET, Backlight, QuietSchedule, in_window, parse_window
 
 log = logging.getLogger("brick-arena")
 STATIC = (Path(__file__).parent / "static").resolve()
-VIEWS = ("main", "arena", "weather")
+VIEWS = ("main", "arena", "weather", "sentry")
 ART = STATIC / "art"
 # The page reloads itself when this changes, so a deploy shows the new page.
 BOOT = str(time.time())
@@ -133,14 +135,16 @@ def poll(state: State, panel: Panel) -> None:
         time.sleep(seconds)
 
 
-def serve(state: State, host: str, port: int, rotate: int, panel: Panel | None = None) -> None:
+def serve(state: State, host: str, port: int, rotate: int, panel: Panel | None = None,
+          watch: "sentry.Watch | None" = None) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == "/api/state":
                 now = time.time()
                 body = json.dumps({"boot": BOOT, "rotate": rotate, "now": now,
                                    "kiosk": is_kiosk(self.client_address[0], self.headers),
-                                   "asleep": bool(panel and panel.asleep(now)), **state.get()})
+                                   "asleep": bool(panel and panel.asleep(now)),
+                                   "sentry": watch.get(now) if watch else None, **state.get()})
                 self._send(200, "application/json", body.encode())
             elif self.path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", (STATIC / "index.html").read_bytes())
@@ -189,11 +193,15 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     state, panel = State(), panel_from_env()
     threading.Thread(target=poll, args=(state, panel), daemon=True).start()
+    watch = None
+    if env("SENTRY", "on") == "on":
+        watch = sentry.Watch(learn_seconds=float(env("SENTRY_LEARN_SECONDS", "600")))
+        threading.Thread(target=sentry.run, args=(watch,), daemon=True).start()
     # Every address, not just localhost: brick9000's proxy shows the same page
     # at arena.brick.nozdormu.cloud. Only the kiosk itself can change the view
     # (is_kiosk); it holds no secrets.
     serve(state, env("HTTP_HOST", "0.0.0.0"), int(env("HTTP_PORT", "8766")),
-          int(env("ROTATE_SECONDS", "45")), panel)
+          int(env("ROTATE_SECONDS", "45")), panel, watch)
 
 
 if __name__ == "__main__":

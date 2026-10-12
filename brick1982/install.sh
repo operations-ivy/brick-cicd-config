@@ -9,6 +9,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 # Lite install. grim takes screenshots of the panel for checking it remotely.
 sudo apt-get install -y --no-install-recommends cage chromium grim fonts-dejavu-core
 
+# Sentry (brick-arena's Bluetooth watch): bleak, and the radio unblocked.
+# Raspberry Pi OS starts every radio blocked; systemd-rfkill keeps this.
+sudo apt-get install -y --no-install-recommends python3-bleak
+for r in /sys/class/rfkill/rfkill*; do
+    [ "$(cat "$r/type")" = bluetooth ] && echo 0 | sudo tee "$r/soft" >/dev/null
+done
+
 mkdir -p ~/.config/brick-arena ~/.config/systemd/user ~/.local/share/brick-arena
 [ -f ~/.config/brick-arena/env ] || cp "$here/brick-arena.env.example" ~/.config/brick-arena/env
 cp "$here/brick-arena.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" ~/.config/systemd/user/

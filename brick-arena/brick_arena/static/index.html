@@ -15,11 +15,11 @@
 <canvas id="c"></canvas>
 <script>
 "use strict";
-const VIEWS = ["main", "arena", "weather"];
-const TITLES = { main: "BRICK HOMELAB", arena: "THE ARENA", weather: "PACKET WEATHER" };
+const VIEWS = ["main", "arena", "weather", "sentry"];
+const TITLES = { main: "BRICK HOMELAB", arena: "THE ARENA", weather: "PACKET WEATHER", sentry: "SENTRY" };
 // The main view comes back between each of the others. (The wardrive radar
 // moved to wigle-console, radar.brick.nozdormu.cloud.)
-const SEQUENCE = ["main", "arena", "main", "weather"];
+const SEQUENCE = ["main", "arena", "main", "weather", "main", "sentry"];
 const FPS = 24;
 const cv = document.getElementById("c"), g = cv.getContext("2d");
 let W = 0, H = 0;
@@ -27,7 +27,7 @@ let state = null, boot = null, view = 0, viewSince = performance.now(), pausedUn
 // The kiosk (brick1982's own Chromium) rotates and reports its view; every
 // other browser just follows it. Until the first answer, assume a viewer.
 let kiosk = false;
-let seenEvents = new Set(), flights = [], flashes = [];
+let seenEvents = new Set(), flights = [], flashes = [], seenAlerts = new Set(), sirens = [];
 
 function resize() {
   const r = window.devicePixelRatio || 1;
@@ -84,6 +84,12 @@ setInterval(refresh, 1000); refresh();
 
 function absorbEvents(s) {
   const first = state === null;
+  for (const a of (s.sentry && s.sentry.alerts) || []) {
+    const key = `${a.kind}|${a.at}`;
+    if (seenAlerts.has(key)) continue;
+    seenAlerts.add(key);
+    if (!first) sirens.push({ ...a, t0: performance.now() });
+  }
   for (const e of s.events || []) {
     const key = `${e.kind}|${e.workload}|${e.at}`;
     if (seenEvents.has(key)) continue;
@@ -258,6 +264,65 @@ function drawWeather(now, dt) {
   text(`wind ${fmtRate(w.wind_bps)}  ·  rain ${w.rain_qps.toFixed(2)} dns q/s`, W - 14, H - 20, 12, "#9fb0d8", "right");
 }
 
+/* ---------- sentry ---------- */
+// A radar over the house: one blip per tracker or gadget heard, nearer the
+// middle the stronger its signal, at an angle fixed by its (salted) id.
+const KIND_COLORS = { findmy: "#e8e6df", smarttag: "#7fb2ff", tile: "#5fe3a1", googletag: "#ffd166",
+  meta: "#4f8bff", flipper: "#ff8a3d", flipperish: "#b07a4f", skimmer: "#ff4f6d" };
+const KIND_ICON = { findmy: "◉", smarttag: "◆", tile: "■", googletag: "▲", meta: "◐", flipper: "🐬", flipperish: "◇", skimmer: "▣" };
+function drawSentry(now) {
+  const s = state && state.sentry;
+  g.fillStyle = "#03080a"; g.fillRect(0, 0, W, H);
+  const cx = W * .36, cy = (H + 34) / 2, R = Math.min(cx - 20, (H - 60) / 2);
+  g.strokeStyle = "rgba(95, 227, 161, .25)"; g.lineWidth = 1;
+  for (const k of [1, .66, .33]) { g.beginPath(); g.arc(cx, cy, R * k, 0, 7); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  // The sweep: a fading wedge, one turn every four seconds.
+  const a0 = (now / 4000 % 1) * Math.PI * 2;
+  for (let i = 0; i < 24; i++) {
+    g.fillStyle = `rgba(95, 227, 161, ${(.18 * (1 - i / 24)).toFixed(3)})`;
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0 - (i + 1) * .03, a0 - i * .03); g.fill();
+  }
+  text("brick1982", cx, cy + 4, 10, "rgba(95,227,161,.7)", "center");
+  if (!s) return text("no sentry data", cx, cy + R + 20, 12, "#7d7b74", "center");
+  for (const b of s.blips) {
+    const ang = (parseInt(b.id.slice(0, 6), 16) / 0xffffff) * Math.PI * 2;
+    const r = R * Math.min(1, Math.max(.12, (-b.rssi - 35) / 65));  // -35 dBm close, -100 at the edge
+    const x = cx + Math.cos(ang) * r, y = cy + Math.sin(ang) * r;
+    // Lit as the sweep passes, then fading.
+    const since = ((a0 - ang) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const glow = .35 + .65 * Math.max(0, 1 - since / 2.5);
+    g.globalAlpha = glow;
+    text(KIND_ICON[b.kind] || "•", x, y + 6, 16, KIND_COLORS[b.kind] || "#fff", "center", "bold");
+    g.globalAlpha = 1;
+  }
+  // The side panel: what's around, against what's normal here.
+  const px = W * .7, top = 70;
+  if (s.error) text(s.error.toUpperCase(), px, top - 20, 13, "#ffb547", "left", "bold");
+  else if (s.learning > 0) text(`LEARNING THE HOUSE · ${Math.ceil(s.learning / 60)}m`, px, top - 20, 12, "#ffb547", "left", "bold");
+  else text("WATCHING", px, top - 20, 12, "#5fe3a1", "left", "bold");
+  if (!s.kinds.length) text("nothing of interest nearby", px, top + 10, 12, "#7d7b74");
+  s.kinds.forEach((k, i) => {
+    const y = top + 10 + i * 40, over = k.count > k.normal && k.confidence !== "low";
+    text(`${KIND_ICON[k.kind] || "•"} ${k.label}`, px, y, 13, KIND_COLORS[k.kind] || "#fff", "left", "bold");
+    text(`${k.count} nearby · usually ${k.normal} · ${k.confidence}`, px + 18, y + 16, 11, over ? "#ff8fa3" : "#7d7b74");
+  });
+  const recent = s.alerts.slice(-3).reverse();
+  recent.forEach((a, i) => {
+    const ago = Math.max(0, Math.round((state.now - a.at) / 60));
+    text(`${ago}m ago: ${a.label} (${a.count}, usually ${a.normal})`, px, H - 70 + i * 16, 11, "#ff8fa3");
+  });
+  // A fresh alert flashes a banner across the top for a minute.
+  const siren = sirens.find(x => now - x.t0 < 60000);
+  if (siren) {
+    const on = Math.floor((now - siren.t0) / 500) % 2 === 0;
+    g.fillStyle = on ? "rgba(255, 79, 109, .92)" : "rgba(120, 20, 40, .92)";
+    g.fillRect(0, 40, W, 44);
+    text(`⚠ ${siren.label.toUpperCase()} NEARBY`, W / 2, 68, 20, "#fff", "center", "bold");
+    text(`${siren.count} around, usually ${siren.normal} · ${siren.rssi} dBm · ${siren.confidence} confidence`, W / 2, 81, 11, "#ffe0e6", "center");
+  }
+}
+
 /* ---------- main ---------- */
 // The planets the main view shows, the next one each time it comes round
 // (static/art/README.md): "Pixel Earth Animation" by Slime Games Studios and
@@ -315,11 +380,16 @@ function frame(now) {
     if (now > pausedUntil && now - viewSince > rotate) advance();
     // A move takes over the screen: show it on the arena whatever's up.
     if (flights.some(f => now - f.t0 < 300) && VIEWS[view] !== "arena") advance(SEQUENCE.indexOf("arena"));
+    // So does a sentry alert, on the sentry view, held for its minute.
+    if (sirens.some(x => now - x.t0 < 300) && VIEWS[view] !== "sentry") {
+      advance(SEQUENCE.indexOf("sentry")); pausedUntil = now + 60000;
+    }
   }
   const name = VIEWS[view];
   g.fillStyle = "#07080c"; g.fillRect(0, 0, W, H);
   if (name === "main") drawMain(now);
   else if (name === "arena") drawArena(now);
+  else if (name === "sentry") drawSentry(now);
   else drawWeather(now, dt);
   g.fillStyle = "rgba(7, 8, 12, .7)"; g.fillRect(0, 0, W, 34);
   header(name);

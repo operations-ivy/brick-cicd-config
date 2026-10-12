@@ -106,4 +106,4 @@ class ArenaOverHttp(unittest.TestCase):
 
     def test_the_page_itself(self):
         page = self.get("/").read().decode()
-        self.assertIn('const SEQUENCE = ["main", "arena", "main", "weather"]', page)
+        self.assertIn('const SEQUENCE = ["main", "arena", "main", "weather", "main", "sentry"]', page)
