@@ -1,7 +1,7 @@
 """brick-arena: the display daemon on brick1982's 7" touchscreen.
 
-Polls Prometheus, serves the page Chromium shows in cage, and dims the panel
-overnight. The page rotates through its views, coming back to main (a turning
+Polls Prometheus, serves the page Chromium shows in cage, dims the panel
+overnight and turns it off on brick9000's quiet schedule. The page rotates through its views, coming back to main (a turning
 pixel-art planet) between arena (the cluster's pods by node, with moves
 animated) and weather (the network as weather). A tap moves to the next view.
 The wardrive radar moved to wigle-console (radar.brick.nozdormu.cloud).
@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import collect
-from .backlight import Backlight, in_window, parse_window
+from .backlight import DEFAULT_QUIET, Backlight, QuietSchedule, in_window, parse_window
 
 log = logging.getLogger("brick-arena")
 STATIC = (Path(__file__).parent / "static").resolve()
@@ -89,6 +89,7 @@ def poll(state: State) -> None:
     seconds = float(env("POLL_SECONDS", "10"))
     dim_window = parse_window(env("DIM", "23:00-07:00"))
     dim_level, day_level = float(env("DIM_LEVEL", "0.08")), float(env("DAY_LEVEL", "1.0"))
+    quiet = QuietSchedule.parse(env("QUIET", DEFAULT_QUIET))
     light = Backlight()
     while True:
         try:
@@ -96,7 +97,11 @@ def poll(state: State) -> None:
         except Exception as e:  # network errors, bad responses: keep the last picture
             log.warning("poll failed: %s", e)
             state.fail(str(e))
-        light.set_fraction(dim_level if in_window(dim_window, datetime.now()) else day_level)
+        now = datetime.now()
+        if quiet.is_quiet(now):
+            light.off()
+        else:
+            light.set_fraction(dim_level if in_window(dim_window, now) else day_level)
         time.sleep(seconds)
 
 
