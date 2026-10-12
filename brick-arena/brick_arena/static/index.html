@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>brick-arena</title>
+<!-- The sentry view borrows wigle-console's and the chuck reader's fonts; without
+     them it falls back to DejaVu. -->
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #07080c; --fg: #e8e6df; --dim: #7d7b74; --hot: #ff4f6d; --warn: #ffb547; --ok: #5fe3a1; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
@@ -112,8 +115,8 @@ function fmtRate(bps) {
   const b = bps * 8;
   return b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mb/s` : `${(b / 1e3).toFixed(0)} kb/s`;
 }
-function text(s, x, y, size, color, align = "left", weight = "") {
-  g.font = `${weight} ${size}px "DejaVu Sans Mono", monospace`;
+function text(s, x, y, size, color, align = "left", weight = "", family = '"DejaVu Sans Mono", monospace') {
+  g.font = `${weight} ${size}px ${family}`;
   g.fillStyle = color; g.textAlign = align; g.textBaseline = "alphabetic"; g.fillText(s, x, y);
 }
 
@@ -265,62 +268,125 @@ function drawWeather(now, dt) {
 }
 
 /* ---------- sentry ---------- */
-// A radar over the house: one blip per tracker or gadget heard, nearer the
-// middle the stronger its signal, at an angle fixed by its (salted) id.
-const KIND_COLORS = { findmy: "#e8e6df", smarttag: "#7fb2ff", tile: "#5fe3a1", googletag: "#ffd166",
-  meta: "#4f8bff", flipper: "#ff8a3d", flipperish: "#b07a4f", skimmer: "#ff4f6d" };
-const KIND_ICON = { findmy: "◉", smarttag: "◆", tile: "■", googletag: "▲", meta: "◐", flipper: "🐬", flipperish: "◇", skimmer: "▣" };
+// Dressed like wigle-console and the chuck reader (same palette and fonts):
+// the state in one word, counts in tiles, then what's around and the recent
+// alerts as plain rows. Readable across the room, no decoding.
+const NEON = { bg: "#07050f", panel: "#0e0a1e", panel2: "#120d24", line: "#241a44", text: "#e7e3ff",
+  dim: "#8b84b8", faint: "#5c5488", magenta: "#ff2a6d", cyan: "#05d9e8", amber: "#f9c80e",
+  violet: "#9d4edd", acid: "#39ff88", danger: "#ff3860" };
+const DISPLAY = 'Orbitron, "DejaVu Sans", sans-serif', UI = 'Rajdhani, "DejaVu Sans", sans-serif',
+  MONO = '"Share Tech Mono", "DejaVu Sans Mono", monospace';
+function nearness(rssi) { return rssi >= -60 ? "very close" : rssi >= -75 ? "close" : "far off"; }
+function minsAgo(seconds) { const m = Math.round(seconds / 60); return m < 1 ? "just now" : `${m} min ago`; }
+function fit(s, w, size, family, weight = "") {
+  g.font = `${weight} ${size}px ${family}`;
+  if (g.measureText(s).width <= w) return s;
+  while (s.length > 1 && g.measureText(s + "…").width > w) s = s.slice(0, -1);
+  return s + "…";
+}
+function panel(x, y, w, h, title, meta) {
+  const grad = g.createLinearGradient(x, y, x + w * .3, y + h);
+  grad.addColorStop(0, NEON.panel); grad.addColorStop(1, NEON.panel2);
+  g.fillStyle = grad; g.beginPath(); g.roundRect(x, y, w, h, 6); g.fill();
+  g.strokeStyle = NEON.line; g.lineWidth = 1; g.stroke();
+  if (title) text(title, x + 14, y + 22, 13, NEON.text, "left", "", MONO);
+  if (meta) text(meta, x + w - 14, y + 22, 11, NEON.faint, "right", "", MONO);
+}
+function tile(x, y, w, h, n, label, color) {
+  g.fillStyle = "rgba(255,255,255,.02)"; g.strokeStyle = NEON.line;
+  g.beginPath(); g.roundRect(x, y, w, h, 4); g.fill(); g.stroke();
+  g.shadowColor = color; g.shadowBlur = n ? 12 : 0;
+  text(String(n), x + 12, y + 36, 28, n ? color : NEON.faint, "left", "bold", DISPLAY);
+  g.shadowBlur = 0;
+  text(label, x + 12, y + h - 10, 10, NEON.faint, "left", "", MONO);
+}
+// Right-aligned at x on the baseline y, like the consoles' verdicts.
+function verdict(s, x, y, color) {
+  g.font = `11px ${MONO}`;
+  const w = g.measureText(s).width + 12;
+  g.strokeStyle = color; g.lineWidth = 1; g.beginPath(); g.roundRect(x - w, y - 12, w, 17, 3); g.stroke();
+  text(s, x - 6, y, 11, color, "right", "", MONO);
+}
 function drawSentry(now) {
-  const s = state && state.sentry;
-  g.fillStyle = "#03080a"; g.fillRect(0, 0, W, H);
-  const cx = W * .36, cy = (H + 34) / 2, R = Math.min(cx - 20, (H - 60) / 2);
-  g.strokeStyle = "rgba(95, 227, 161, .25)"; g.lineWidth = 1;
-  for (const k of [1, .66, .33]) { g.beginPath(); g.arc(cx, cy, R * k, 0, 7); g.stroke(); }
-  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
-  // The sweep: a fading wedge, one turn every four seconds.
-  const a0 = (now / 4000 % 1) * Math.PI * 2;
-  for (let i = 0; i < 24; i++) {
-    g.fillStyle = `rgba(95, 227, 161, ${(.18 * (1 - i / 24)).toFixed(3)})`;
-    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0 - (i + 1) * .03, a0 - i * .03); g.fill();
-  }
-  text("brick1982", cx, cy + 4, 10, "rgba(95,227,161,.7)", "center");
-  if (!s) return text("no sentry data", cx, cy + R + 20, 12, "#7d7b74", "center");
-  for (const b of s.blips) {
-    const ang = (parseInt(b.id.slice(0, 6), 16) / 0xffffff) * Math.PI * 2;
-    const r = R * Math.min(1, Math.max(.12, (-b.rssi - 35) / 65));  // -35 dBm close, -100 at the edge
-    const x = cx + Math.cos(ang) * r, y = cy + Math.sin(ang) * r;
-    // Lit as the sweep passes, then fading.
-    const since = ((a0 - ang) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-    const glow = .35 + .65 * Math.max(0, 1 - since / 2.5);
-    g.globalAlpha = glow;
-    text(KIND_ICON[b.kind] || "•", x, y + 6, 16, KIND_COLORS[b.kind] || "#fff", "center", "bold");
-    g.globalAlpha = 1;
-  }
-  // The side panel: what's around, against what's normal here.
-  const px = W * .7, top = 70;
-  if (s.error) text(s.error.toUpperCase(), px, top - 20, 13, "#ffb547", "left", "bold");
-  else if (s.learning > 0) text(`LEARNING THE HOUSE · ${Math.ceil(s.learning / 60)}m`, px, top - 20, 12, "#ffb547", "left", "bold");
-  else text("WATCHING", px, top - 20, 12, "#5fe3a1", "left", "bold");
-  if (!s.kinds.length) text("nothing of interest nearby", px, top + 10, 12, "#7d7b74");
-  s.kinds.forEach((k, i) => {
-    const y = top + 10 + i * 40, over = k.count > k.normal && k.confidence !== "low";
-    text(`${KIND_ICON[k.kind] || "•"} ${k.label}`, px, y, 13, KIND_COLORS[k.kind] || "#fff", "left", "bold");
-    text(`${k.count} nearby · usually ${k.normal} · ${k.confidence}`, px + 18, y + 16, 11, over ? "#ff8fa3" : "#7d7b74");
-  });
-  const recent = s.alerts.slice(-3).reverse();
-  recent.forEach((a, i) => {
-    const ago = Math.max(0, Math.round((state.now - a.at) / 60));
-    text(`${ago}m ago: ${a.label} (${a.count}, usually ${a.normal})`, px, H - 70 + i * 16, 11, "#ff8fa3");
-  });
-  // A fresh alert flashes a banner across the top for a minute.
+  const s = state && state.sentry, kinds = (s && s.kinds) || [], alerts = ((s && s.alerts) || []).slice().reverse();
+  const learning = s && s.learning > 0;
+  const above = kinds.filter(k => !learning && k.confidence !== "low" && k.count > k.normal);
+  const fresh = alerts.find(a => state.now - a.at < 300);
+  g.fillStyle = NEON.bg; g.fillRect(0, 0, W, H);
+
+  // The headline: one word and one sentence.
+  let word, color, line;
+  if (!state) [word, color, line] = ["WAITING", NEON.faint, "Waiting for brick-arena…"];
+  else if (!s) [word, color, line] = ["OFF", NEON.faint, "Sentry is turned off (BRICK_ARENA_SENTRY=off)."];
+  else if (s.error) [word, color, line] = ["SCANNER DOWN", NEON.danger, `${s.error}; trying again every 30 s.`];
+  else if (fresh) [word, color, line] = ["ALERT", NEON.danger, `${fresh.count} × ${fresh.label}, usually ${fresh.normal} (${minsAgo(state.now - fresh.at)})`];
+  else if (above.length) [word, color, line] = ["HEADS UP", NEON.amber, above.map(k => `${k.count} × ${k.label}, usually ${k.normal}`).join(" · ")];
+  else if (learning) [word, color, line] = ["LEARNING", NEON.amber, `Learning what's normal here: ${Math.ceil(s.learning / 60)} min left.`];
+  else [word, color, line] = ["ALL CLEAR", NEON.acid, kinds.length ? "Only the usual devices nearby." : "Nothing of interest nearby."];
+
+  const m = 12, top = 44, hudH = 96, hudW = W - 2 * m;
+  panel(m, top, hudW, hudH);
+  // The consoles' sweeping top edge.
+  const off = (now / 6000 % 1) * hudW, sweep = g.createLinearGradient(m - off, 0, m - off + 2 * hudW, 0);
+  [NEON.magenta, NEON.cyan, NEON.violet, NEON.magenta, NEON.cyan, NEON.violet, NEON.magenta]
+    .forEach((c, i, all) => sweep.addColorStop(i / (all.length - 1), c));
+  g.fillStyle = sweep; g.fillRect(m + 3, top, hudW - 6, 2);
+  const tileW = Math.min(118, (hudW - 40) * .16), tilesX = m + hudW - 14 - 3 * tileW - 20, textW = tilesX - m - 30;
+  g.shadowColor = color; g.shadowBlur = 18;
+  text(fit(word, textW, 32, DISPLAY, "bold"), m + 18, top + 50, 32, color, "left", "bold", DISPLAY);
+  g.shadowBlur = 0;
+  text(fit(line, textW, 15, MONO), m + 18, top + 78, 15, NEON.dim, "left", "", MONO);
+  const count = pick => kinds.filter(pick).reduce((n, k) => n + k.count, 0);
+  tile(tilesX, top + 16, tileW, 64, count(k => k.tracker), "TRACKERS", NEON.cyan);
+  tile(tilesX + tileW + 10, top + 16, tileW, 64, count(k => !k.tracker), "GADGETS", NEON.magenta);
+  tile(tilesX + 2 * (tileW + 10), top + 16, tileW, 64, alerts.length, "ALERTS 30M", alerts.length ? NEON.danger : NEON.acid);
+
+  // A fresh alert flashes the headline red for its minute.
   const siren = sirens.find(x => now - x.t0 < 60000);
   if (siren) {
     const on = Math.floor((now - siren.t0) / 500) % 2 === 0;
-    g.fillStyle = on ? "rgba(255, 79, 109, .92)" : "rgba(120, 20, 40, .92)";
-    g.fillRect(0, 40, W, 44);
-    text(`⚠ ${siren.label.toUpperCase()} NEARBY`, W / 2, 68, 20, "#fff", "center", "bold");
-    text(`${siren.count} around, usually ${siren.normal} · ${siren.rssi} dBm · ${siren.confidence} confidence`, W / 2, 81, 11, "#ffe0e6", "center");
+    g.fillStyle = on ? "#ff3860" : "#6e1028";
+    g.beginPath(); g.roundRect(m, top, hudW, hudH, 6); g.fill();
+    text(fit(`⚠ ${siren.label.toUpperCase()} NEARBY`, hudW - 36, 26, DISPLAY, "bold"), W / 2, top + 48, 26, "#fff", "center", "bold", DISPLAY);
+    text(`${siren.count} around, usually ${siren.normal} · ${nearness(siren.rssi)} (${siren.rssi} dBm) · ${siren.confidence} confidence`,
+         W / 2, top + 76, 14, "#ffe0e6", "center", "", MONO);
   }
+
+  // Below: what's around, and the last half hour's alerts.
+  const y0 = top + hudH + 10, h = H - y0 - 28, gap = 10, lw = Math.round((hudW - gap) * .6), rw = hudW - gap - lw;
+  const nx = m, ax = m + lw + gap;
+  panel(nx, y0, lw, h, "NEARBY", s && !s.error ? "Bluetooth LE · last 2 min" : "");
+  text("WHAT", nx + 14, y0 + 44, 10, NEON.faint, "left", "", MONO);
+  text("HERE", nx + lw - 172, y0 + 44, 10, NEON.faint, "right", "", MONO);
+  text("USUAL", nx + lw - 122, y0 + 44, 10, NEON.faint, "right", "", MONO);
+  const rowH = 42, rows = Math.max(1, Math.floor((h - 52) / rowH));
+  const order = kinds.slice().sort((a, b) => above.includes(b) - above.includes(a) || b.count - a.count);
+  if (!order.length) text(s && !s.error ? "Nothing of interest nearby." : "—", nx + 14, y0 + 74, 14, NEON.faint, "left", "", MONO);
+  order.slice(0, order.length > rows ? rows - 1 : rows).forEach((k, i) => {
+    const y = y0 + 52 + i * rowH, hot = above.includes(k);
+    g.strokeStyle = NEON.line; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(nx + 14, y); g.lineTo(nx + lw - 14, y); g.stroke(); g.setLineDash([]);
+    text(fit(k.label, lw - 200, 18, UI, "bold"), nx + 14, y + 20, 18, NEON.text, "left", "bold", UI);
+    text(`${k.confidence} confidence · closest ${nearness(k.closest)}`, nx + 14, y + 35, 11, NEON.dim, "left", "", MONO);
+    text(String(k.count), nx + lw - 172, y + 25, 24, hot ? NEON.amber : NEON.text, "right", "bold", UI);
+    text(learning ? "…" : String(k.normal), nx + lw - 122, y + 25, 20, NEON.dim, "right", "bold", UI);
+    const [v, c] = learning ? ["LEARNING", NEON.amber] : k.confidence === "low" ? ["UNSURE", NEON.violet]
+      : hot ? ["ABOVE USUAL", NEON.danger] : ["USUAL", NEON.acid];
+    verdict(v, nx + lw - 14, y + 25, c);
+  });
+  if (order.length > rows) text(`+ ${order.length - rows + 1} more`, nx + 14, y0 + 52 + (rows - 1) * rowH + 24, 12, NEON.faint, "left", "", MONO);
+
+  panel(ax, y0, rw, h, "ALERTS", "last 30 min");
+  if (!alerts.length) text("None.", ax + 14, y0 + 52, 14, NEON.faint, "left", "", MONO);
+  alerts.slice(0, Math.max(1, Math.floor((h - 40) / 48))).forEach((a, i) => {
+    const y = y0 + 36 + i * 48;
+    g.fillStyle = "rgba(255, 56, 96, .05)"; g.fillRect(ax + 14, y, rw - 28, 40);
+    g.fillStyle = NEON.danger; g.fillRect(ax + 14, y, 3, 40);
+    text(fit(a.label, rw - 130, 16, UI, "bold"), ax + 26, y + 17, 16, NEON.text, "left", "bold", UI);
+    text(minsAgo(state.now - a.at), ax + rw - 22, y + 17, 11, NEON.faint, "right", "", MONO);
+    text(fit(`${a.count} around, usually ${a.normal} · ${nearness(a.rssi)}`, rw - 50, 11, MONO), ax + 26, y + 33, 11, NEON.dim, "left", "", MONO);
+  });
+  text("addresses are never stored or shown", W / 2, H - 10, 11, NEON.faint, "center", "", MONO);
 }
 
 /* ---------- main ---------- */

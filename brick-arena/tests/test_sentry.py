@@ -66,15 +66,22 @@ class WatchTests(unittest.TestCase):
 
     def test_devices_drop_off_after_gone_seconds(self):
         self.heard(0, "AA")
-        self.assertEqual(len(self.w.get(now=100)["blips"]), 1)
-        self.assertEqual(self.w.get(now=121)["blips"], [])
+        self.assertEqual(self.w.get(now=100)["kinds"][0]["count"], 1)
+        self.assertEqual(self.w.get(now=121)["kinds"], [])
+
+    def test_each_kind_reports_its_closest_device(self):
+        self.w.advert("AA", "findmy", -80, now=0)
+        self.w.advert("BB", "findmy", -55, now=0)
+        self.w.advert("CC", "flipper", -70, now=0)
+        kinds = {k["kind"]: k for k in self.w.get(now=1)["kinds"]}
+        self.assertEqual((kinds["findmy"]["count"], kinds["findmy"]["closest"]), (2, -55))
+        self.assertTrue(kinds["findmy"]["tracker"])
+        self.assertFalse(kinds["flipper"]["tracker"])
 
     def test_no_address_reaches_the_state(self):
         self.heard(0, "F0:12:34:56:78:9A", rssi=-70)
         state = json.dumps(self.w.get(now=1))
         self.assertNotIn("F0:12", state)
         self.assertNotIn("56:78", state)
-        # And the ids differ between starts (a new salt each time).
-        other = Watch(started=0)
-        other.advert("F0:12:34:56:78:9A", "findmy", -70, now=0)
-        self.assertNotEqual(other.get(now=1)["blips"][0]["id"], self.w.get(now=1)["blips"][0]["id"])
+        # Nor even the salted id: only counts per kind.
+        self.assertNotIn(self.w._key("F0:12:34:56:78:9A"), state)

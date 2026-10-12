@@ -483,18 +483,21 @@ together. A tap while it's off turns it on for 30 minutes from the last tap
 (`BRICK_ARENA_WAKE_SECONDS`), like brick9000's side button; that tap doesn't
 change the view.
 
-**Sentry** (proof of concept, wigle-sync#35): brick1982 listens to
-Bluetooth LE adverts for trackers (Apple Find My, Samsung SmartTag, Tile,
-Google Find My) and gadgets (Meta glasses, Flipper Zero, serial modules
-skimmers use), each graded high, medium or low confidence
-(`brick-arena/brick_arena/sentry.py`). The sentry view is a radar: one blip
-per device, nearer the middle the stronger its signal. Households are full
-of trackers, so for 10 minutes after each start it learns the normal count
-of each kind; after that, a high or medium kind above its normal for two
-minutes takes over the screen with a banner for a minute. No phone pages.
-Addresses never leave brick-arena: each is hashed with a per-start salt, and
-only kinds, signal strengths and ages reach `/api/state`; nothing is stored.
-`BRICK_ARENA_SENTRY=off` turns it off.
+**Sentry** (proof of concept, wigle-sync#35): brick1982 listens to Bluetooth
+LE adverts for trackers (Apple Find My, Samsung SmartTag, Tile, Google Find
+My) and gadgets (Meta glasses, Flipper Zero, serial modules skimmers use),
+each graded high, medium or low confidence
+(`brick-arena/brick_arena/sentry.py`). The sentry view is laid out like
+wigle-console and the chuck reader (same palette and fonts): the state in
+one word (all clear, learning, heads up, alert, scanner down), tiles
+counting trackers, gadgets and alerts, then each kind nearby with its count,
+its usual count and how close the nearest one is, and the last half hour's
+alerts. Households are full of trackers, so for 10 minutes after each start
+it learns the normal count of each kind; after that, a high or medium kind
+above its normal for two minutes takes over the screen with a banner for a
+minute. No phone pages. Addresses never leave brick-arena: each is hashed
+with a per-start salt, and only counts and signal strengths per kind reach
+`/api/state`; nothing is stored. `BRICK_ARENA_SENTRY=off` turns it off.
 
 The same page, read only, is at `https://arena.brick.nozdormu.cloud` (through
 brick9000's proxy), for watching from a laptop. Each browser rotates and

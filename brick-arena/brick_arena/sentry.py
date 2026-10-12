@@ -7,13 +7,13 @@ SquachWatch-CYD's list, but no data is copied from it. Each has a confidence:
 only high and medium ones raise alerts.
 
 Privacy: device addresses never leave this process. Each one is hashed with a
-per-start salt, and only kinds, signal strengths and ages reach /api/state.
+per-start salt, and only counts and signal strengths per kind reach /api/state.
 Nothing is written to disk.
 
 Households are full of trackers, so the first `learn_seconds` learn the
 normal count of each kind; an alert is a kind above its normal count for
 `linger_seconds`. Alerts count only devices heard in the last
-`present_seconds`; the radar keeps showing one for `gone_seconds`.
+`present_seconds`; the view keeps counting one for `gone_seconds`.
 """
 
 import asyncio
@@ -49,6 +49,7 @@ KINDS = {k.key: k for k in (
     Kind("skimmer", "Serial BT module (skimmer?)", "low"),
 )}
 
+TRACKERS = ("findmy", "smarttag", "tile", "googletag")  # the rest are gadgets
 APPLE, FINDMY_TYPE = 0x004C, 0x12
 SKIMMER_NAMES = ("HC-05", "HC-06", "HC-08", "BT04-A", "RNBT-")
 
@@ -161,10 +162,9 @@ class Watch:
                 "learning": max(0, round(self.learn_seconds - (now - self.started))),
                 "error": self.error,
                 "kinds": [{"kind": k, "label": KINDS[k].label, "confidence": KINDS[k].confidence,
-                           "count": len(v), "normal": self.normal.get(k, 0)}
+                           "tracker": k in TRACKERS, "count": len(v), "normal": self.normal.get(k, 0),
+                           "closest": max(s.rssi for _, s in v)}
                           for k, v in sorted(nearby.items())],
-                "blips": [{"id": key, "kind": s.kind, "rssi": s.rssi, "age": round(now - s.first)}
-                          for devs in nearby.values() for key, s in devs],
                 "alerts": list(self.alerts),
             }
 
