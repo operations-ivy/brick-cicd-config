@@ -24,6 +24,11 @@ cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
     ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
+# A full-screen game handed straight to the display (direct scanout) makes
+# the vc4 HDMI output re-sync every few seconds: black screen, the panel's
+# HDMI badge. Always composite instead (labwc reads this at login).
+grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/null ||
+    echo 'WLR_SCENE_DISABLE_DIRECT_SCANOUT=1' >>~/.config/labwc/environment
 
 # brick-retro: NES and SNES over the board with a Bluetooth controller
 # (README, "Games").

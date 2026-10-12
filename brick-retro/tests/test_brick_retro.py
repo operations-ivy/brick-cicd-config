@@ -29,7 +29,8 @@ class FakeRetroArch:
 
         def redial():
             self.redials += 1
-        return Launcher(lambda: self.up, start, stop, redial, idle_exit_seconds=900, redial_seconds=30, **kw)
+        return Launcher(lambda: self.up, start, stop, redial, idle_exit_seconds=900, redial_seconds=30,
+                        settle_seconds=3, **kw)
 
 
 class LauncherTests(unittest.TestCase):
@@ -39,9 +40,19 @@ class LauncherTests(unittest.TestCase):
         launcher.tick(set(), now=0)
         self.assertEqual(ra.starts, 0)
         launcher.tick({"/dev/input/event5"}, now=1)
+        self.assertEqual(ra.starts, 0)  # udev is still setting it up
+        launcher.tick({"/dev/input/event5"}, now=4)
         self.assertEqual(ra.starts, 1)
-        launcher.tick({"/dev/input/event5"}, now=2)
+        launcher.tick({"/dev/input/event5"}, now=5)
         self.assertEqual(ra.starts, 1)
+
+    def test_a_pad_that_drops_while_settling_starts_nothing(self):
+        ra = FakeRetroArch()
+        launcher = ra.launcher()
+        launcher.tick({"p"}, now=0)
+        launcher.tick(set(), now=1)
+        launcher.tick(set(), now=5)
+        self.assertEqual(ra.starts, 0)
 
     def test_a_pad_there_at_startup_does_not_but_home_does(self):
         ra = FakeRetroArch()
@@ -55,14 +66,17 @@ class LauncherTests(unittest.TestCase):
         ra = FakeRetroArch()
         launcher = ra.launcher()
         launcher.tick({"p"}, now=0)
+        launcher.tick({"p"}, now=3)
         ra.up = False  # quit from the menu
-        launcher.tick({"p"}, now=1)
+        launcher.tick({"p"}, now=4)
+        launcher.tick({"p"}, now=10)
         self.assertEqual(ra.starts, 1)
 
     def test_a_drop_redials_and_a_reconnect_keeps_the_game(self):
         ra = FakeRetroArch()
         launcher = ra.launcher()
         launcher.tick({"p"}, now=0)
+        launcher.tick({"p"}, now=3)
         launcher.tick(set(), now=100)
         self.assertEqual(ra.redials, 1)
         launcher.tick(set(), now=110)
@@ -76,6 +90,7 @@ class LauncherTests(unittest.TestCase):
         ra = FakeRetroArch()
         launcher = ra.launcher()
         launcher.tick({"p"}, now=0)
+        launcher.tick({"p"}, now=3)
         launcher.tick(set(), now=10)
         launcher.tick(set(), now=10 + 899)
         self.assertTrue(ra.up)

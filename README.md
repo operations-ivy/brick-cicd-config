@@ -467,8 +467,9 @@ Nestopia and Snes9x cores).
   `brick9000/retroarch/retroarch.cfg`. The pairing itself lives in BlueZ
   (`/var/lib/bluetooth`) and survives reboots.
 
-Pair a controller once (8BitDo: hold Start + Y for Switch mode, or see its
-manual, then hold Pair):
+The 8BitDo SF30 Pro is paired in D-input mode: turn it on with **Start + B**
+(other modes show up as a different device, with no mapping). Pair a
+controller once (hold its Pair button until the lights flash fast):
 
 ```bash
 bluetoothctl

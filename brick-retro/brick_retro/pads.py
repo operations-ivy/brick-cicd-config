@@ -53,6 +53,8 @@ class Launcher:
     """One tick a second with the pads connected now.
 
     - A pad connecting, or a bare Home press, opens RetroArch if it's closed.
+      After a connect it waits settle_seconds first: udev is still setting the
+      new device up, and RetroArch started too early never sees the pad.
     - A pad dropping while RetroArch is open changes nothing (RetroArch pauses
       the game); every redial_seconds the trusted pads are asked to reconnect.
     - No pad for idle_exit_seconds: RetroArch is told to quit (it saves a
@@ -61,12 +63,14 @@ class Launcher:
 
     def __init__(self, running: Callable[[], bool], start: Callable[[], None], stop: Callable[[], None],
                  redial: Callable[[], None], idle_exit_seconds: float = 900, redial_seconds: float = 30,
-                 known: set[str] | None = None):
+                 known: set[str] | None = None, settle_seconds: float = 3):
         self.running, self.start, self.stop, self.redial = running, start, stop, redial
         self.idle_exit_seconds, self.redial_seconds = idle_exit_seconds, redial_seconds
         self.known = set(known or ())  # pads already there at startup don't launch anything
+        self.settle_seconds = settle_seconds
         self.lost_since: float | None = None
         self.last_redial = 0.0
+        self.start_at: float | None = None  # a pad arrived: start RetroArch then
 
     def tick(self, pads: set[str], home: bool = False, now: float | None = None) -> None:
         now = time.time() if now is None else now
@@ -74,9 +78,17 @@ class Launcher:
         self.known = set(pads)
         if not self.running():
             self.lost_since = None
-            if arrived or home:
+            if home:
+                self.start_at = now
+            elif arrived:
+                self.start_at = now + self.settle_seconds
+            if self.start_at is not None and now >= self.start_at and pads:
+                self.start_at = None
                 self.start()
+            elif not pads:
+                self.start_at = None
             return
+        self.start_at = None
         if pads:
             self.lost_since = None
             return
