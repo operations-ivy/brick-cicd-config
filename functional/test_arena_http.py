@@ -13,7 +13,8 @@ from functional.helpers import ROOT, StubPrometheus, free_port
 
 sys.path.insert(0, str(ROOT / "brick-arena"))
 from brick_arena import collect  # noqa: E402
-from brick_arena.__main__ import State, serve  # noqa: E402
+from brick_arena.__main__ import Panel, State, serve  # noqa: E402
+from brick_arena.backlight import QuietSchedule  # noqa: E402
 
 RESULTS = {
     'kube_node_status_condition': [({"node": "brick420"}, 1), ({"node": "brick1982"}, 1)],
@@ -33,7 +34,15 @@ class ArenaOverHttp(unittest.TestCase):
         state = State()
         state.set(collect.snapshot(collect.Prometheus(cls.prom.url), collect.Tracker()))
         cls.port = free_port()
-        threading.Thread(target=serve, args=(state, "127.0.0.1", cls.port, 45), daemon=True).start()
+
+        class Light:
+            level = None
+            def off(self): self.level = 0
+            def set_fraction(self, f): self.level = f
+        cls.light = Light()
+        # Quiet around the clock, so the panel starts asleep.
+        cls.panel = Panel(cls.light, QuietSchedule.parse("00:00-23:59"), None, 0.08, 1.0, 1800)
+        threading.Thread(target=serve, args=(state, "127.0.0.1", cls.port, 45, cls.panel), daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.port}"
         for _ in range(50):
             try:
@@ -72,6 +81,21 @@ class ArenaOverHttp(unittest.TestCase):
         viewer = json.load(self.get("/api/state", {"X-Forwarded-For": "192.0.2.7"}))
         self.assertFalse(viewer["kiosk"])
         self.assertEqual(viewer["screen"]["view"], "weather")
+
+    def test_only_the_kiosk_wakes_the_panel(self):
+        def wake(headers=None):
+            req = urllib.request.Request(self.base + "/api/wake", data=b"", headers=headers or {}, method="POST")
+            try:
+                return urllib.request.urlopen(req, timeout=5).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        self.assertEqual(wake({"X-Forwarded-For": "192.0.2.7"}), 403)
+        if time.localtime().tm_hour == 23 and time.localtime().tm_min == 59:
+            self.skipTest("outside the always-quiet test schedule for this minute")
+        self.assertTrue(json.load(self.get("/api/state"))["asleep"])
+        self.assertEqual(wake(), 204)
+        self.assertEqual(self.light.level, 1.0)
+        self.assertFalse(json.load(self.get("/api/state"))["asleep"])
 
     def test_art_is_served_and_nothing_else(self):
         self.assertEqual(self.get("/art/earth.png").headers["Content-Type"], "image/png")

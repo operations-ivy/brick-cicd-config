@@ -479,7 +479,9 @@ the video group. It turns off on brick9000's quiet schedule: the same format
 and, unless `BRICK_ARENA_QUIET` is set, the same default as brick-status
 (`DEFAULT_QUIET` in `brick-status/brick_status/config.py`): off Monday to
 Friday until 16:00, on through the evening and all weekend. Change the two
-together. Touch does nothing visible while it's off.
+together. A tap while it's off turns it on for 30 minutes from the last tap
+(`BRICK_ARENA_WAKE_SECONDS`), like brick9000's side button; that tap doesn't
+change the view.
 
 The same page, read only, is at `https://arena.brick.nozdormu.cloud` (through
 brick9000's proxy), for watching from a laptop. Each browser rotates and

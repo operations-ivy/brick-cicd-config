@@ -1,7 +1,7 @@
 """brick-arena: the display daemon on brick1982's 7" touchscreen.
 
 Polls Prometheus, serves the page Chromium shows in cage, dims the panel
-overnight and turns it off on brick9000's quiet schedule. The page rotates through its views, coming back to main (a turning
+overnight and turns it off on brick9000's quiet schedule (a tap wakes it). The page rotates through its views, coming back to main (a turning
 pixel-art planet) between arena (the cluster's pods by node, with moves
 animated) and weather (the network as weather). A tap moves to the next view.
 The wardrive radar moved to wigle-console (radar.brick.nozdormu.cloud).
@@ -83,34 +83,64 @@ def is_kiosk(client_host: str, headers) -> bool:
     return client_host in ("127.0.0.1", "::1") and not headers.get("X-Forwarded-For")
 
 
-def poll(state: State) -> None:
+class Panel:
+    """The backlight: off on the quiet schedule unless a tap woke it, dimmed
+    overnight, otherwise at the day level. Like brick9000's side button, a
+    tap during quiet hours keeps it on for wake_seconds (from the last tap)."""
+
+    def __init__(self, light: Backlight, quiet: QuietSchedule, dim_window, dim_level: float,
+                 day_level: float, wake_seconds: float):
+        self.light, self.quiet, self.dim_window = light, quiet, dim_window
+        self.dim_level, self.day_level, self.wake_seconds = dim_level, day_level, wake_seconds
+        self._awake_until = 0.0
+        self._lock = threading.Lock()
+
+    def asleep(self, now: float) -> bool:
+        return now >= self._awake_until and self.quiet.is_quiet(datetime.fromtimestamp(now))
+
+    def wake(self, now: float) -> None:
+        with self._lock:
+            if self.quiet.is_quiet(datetime.fromtimestamp(now)):
+                self._awake_until = now + self.wake_seconds
+        self.update(now)
+
+    def update(self, now: float) -> None:
+        with self._lock:
+            if self.asleep(now):
+                self.light.off()
+            else:
+                dim = in_window(self.dim_window, datetime.fromtimestamp(now))
+                self.light.set_fraction(self.dim_level if dim else self.day_level)
+
+
+def panel_from_env() -> Panel:
+    return Panel(Backlight(), QuietSchedule.parse(env("QUIET", DEFAULT_QUIET)),
+                 parse_window(env("DIM", "23:00-07:00")), float(env("DIM_LEVEL", "0.08")),
+                 float(env("DAY_LEVEL", "1.0")), float(env("WAKE_SECONDS", "1800")))
+
+
+def poll(state: State, panel: Panel) -> None:
     prom = collect.Prometheus(env("PROMETHEUS_URL", "https://prometheus.brick.nozdormu.cloud"))
     tracker = collect.Tracker()
     seconds = float(env("POLL_SECONDS", "10"))
-    dim_window = parse_window(env("DIM", "23:00-07:00"))
-    dim_level, day_level = float(env("DIM_LEVEL", "0.08")), float(env("DAY_LEVEL", "1.0"))
-    quiet = QuietSchedule.parse(env("QUIET", DEFAULT_QUIET))
-    light = Backlight()
     while True:
         try:
             state.set(collect.snapshot(prom, tracker))
         except Exception as e:  # network errors, bad responses: keep the last picture
             log.warning("poll failed: %s", e)
             state.fail(str(e))
-        now = datetime.now()
-        if quiet.is_quiet(now):
-            light.off()
-        else:
-            light.set_fraction(dim_level if in_window(dim_window, now) else day_level)
+        panel.update(time.time())
         time.sleep(seconds)
 
 
-def serve(state: State, host: str, port: int, rotate: int) -> None:
+def serve(state: State, host: str, port: int, rotate: int, panel: Panel | None = None) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == "/api/state":
-                body = json.dumps({"boot": BOOT, "rotate": rotate, "now": time.time(),
-                                   "kiosk": is_kiosk(self.client_address[0], self.headers), **state.get()})
+                now = time.time()
+                body = json.dumps({"boot": BOOT, "rotate": rotate, "now": now,
+                                   "kiosk": is_kiosk(self.client_address[0], self.headers),
+                                   "asleep": bool(panel and panel.asleep(now)), **state.get()})
                 self._send(200, "application/json", body.encode())
             elif self.path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", (STATIC / "index.html").read_bytes())
@@ -120,11 +150,16 @@ def serve(state: State, host: str, port: int, rotate: int) -> None:
                 self._send(404, "text/plain", b"not found")
 
         def do_POST(self):
-            # The kiosk says which view the panel is on; nobody else may.
-            if self.path != "/api/screen":
+            # The kiosk says which view the panel is on, and wakes it with a
+            # tap; nobody else may.
+            if self.path not in ("/api/screen", "/api/wake"):
                 return self._send(404, "text/plain", b"not found")
             if not is_kiosk(self.client_address[0], self.headers):
                 return self._send(403, "text/plain", b"only brick1982's own screen sets the view")
+            if self.path == "/api/wake":
+                if panel:
+                    panel.wake(time.time())
+                return self._send(204, "text/plain", b"")
             try:
                 length = max(0, min(int(self.headers.get("Content-Length", 0)), 1024))
                 report = json.loads(self.rfile.read(length) or b"{}")
@@ -152,13 +187,13 @@ def serve(state: State, host: str, port: int, rotate: int) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    state = State()
-    threading.Thread(target=poll, args=(state,), daemon=True).start()
+    state, panel = State(), panel_from_env()
+    threading.Thread(target=poll, args=(state, panel), daemon=True).start()
     # Every address, not just localhost: brick9000's proxy shows the same page
     # at arena.brick.nozdormu.cloud. Only the kiosk itself can change the view
     # (is_kiosk); it holds no secrets.
     serve(state, env("HTTP_HOST", "0.0.0.0"), int(env("HTTP_PORT", "8766")),
-          int(env("ROTATE_SECONDS", "45")))
+          int(env("ROTATE_SECONDS", "45")), panel)
 
 
 if __name__ == "__main__":
