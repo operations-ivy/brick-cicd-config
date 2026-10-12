@@ -437,6 +437,47 @@ After a deploy, `scripts/smoke` checks the live result, read-only: every
 brick9000 and brick1982 are running, and the board's and the arena's data is
 fresh. It exits 1 if anything is down.
 
+## Games (brick-retro, on brick9000)
+
+NES and SNES over the board with a Bluetooth controller (RetroArch with the
+Nestopia and Snes9x cores).
+
+- **Playing:** turn a paired controller on and RetroArch's game list opens
+  over the board. Start + Select opens RetroArch's menu; quitting RetroArch
+  (Quit, twice) shows the board again. With the controller already on, Home
+  opens the games.
+- **Volume:** hold Home and press the D-pad up or down. Ten notches up to
+  `BRICK_RETRO_MAX_VOLUME` (half the DAC's range: the Picade's speaker is very
+  loud); it starts at 15% and WirePlumber remembers it.
+- **Bluetooth drops:** the game pauses, and brick-retro asks the controller to
+  reconnect every 30 seconds. Battery saves are written every 10 seconds, and
+  a state is saved on quit and loaded on start. After 15 minutes with no
+  controller, RetroArch closes so the board isn't hidden behind a dead game.
+- **The board:** while RetroArch is open, brick-status keeps the screen on
+  whatever the quiet schedule says (brick-retro's flag file). The cabinet's
+  own buttons stay brick-status's.
+- **ROMs:** `brick-roms.timer` copies `nes/` and `snes/` daily from brick2000's
+  `/extra/games/roms` (`brick9000/sync-roms`), so games work when brick2000
+  or the cluster is down, then rewrites the playlists and imports RetroPie's
+  old `.srm` saves (never over a newer one). brick2000 lets the
+  `~/.ssh/brick-roms` key only read that folder (`rrsync -ro`); `install.sh`
+  prints the line to authorize.
+- **Controller mapping** is code: `brick9000/retroarch/autoconfig/*.cfg`,
+  installed by `install.sh`; RetroArch's settings are
+  `brick9000/retroarch/retroarch.cfg`. The pairing itself lives in BlueZ
+  (`/var/lib/bluetooth`) and survives reboots.
+
+Pair a controller once (8BitDo: hold Start + Y for Switch mode, or see its
+manual, then hold Pair):
+
+```bash
+bluetoothctl
+  scan on        # wait for the controller's name
+  pair <MAC>
+  trust <MAC>
+  connect <MAC>
+```
+
 ## brick-arena (the touchscreen on brick1982)
 
 `brick1982` (192.168.1.222, static lease) is a Raspberry Pi 4 8GB with the

@@ -1,0 +1,18 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Opens RetroArch over the board when a paired controller turns on.
+[Unit]
+Description=brick-retro: NES and SNES over the board
+After=graphical-session.target
+
+[Service]
+WorkingDirectory=%h/brick-cicd-config/brick-retro
+ExecStart=/usr/bin/python3 -m brick_retro
+EnvironmentFile=-%h/.config/brick-retro/env
+Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1
+# Only the daemon: a restart (a deploy) leaves a running game alone.
+KillMode=process
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

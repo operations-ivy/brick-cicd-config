@@ -58,4 +58,6 @@ if changed brick9000/ ':!brick9000/proxy'; then
 fi
 result=succeeded
 systemctl --user restart brick-status
+# Not before install.sh has set it up; a running game survives (KillMode=process).
+systemctl --user try-restart brick-retro
 echo "deploy: $branch @ $(git rev-parse --short HEAD) (was $(git rev-parse --short "$current"))"

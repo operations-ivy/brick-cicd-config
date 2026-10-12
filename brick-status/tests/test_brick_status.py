@@ -118,6 +118,14 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.board.mode(ts(3, 30)), QUIET)
         self.assertIsNone(self.board.awake_until(ts(3, 30)))
 
+    def test_an_open_game_keeps_it_on_in_quiet_hours(self):
+        self.board.keep_awake(ts(3), 60)  # brick-status refreshes this every second
+        self.assertEqual(self.board.mode(ts(3, 0) + 59), IDLE)
+        self.assertEqual(self.board.mode(ts(3, 0) + 60), QUIET)
+        self.board.wake_button(ts(3, 5))
+        self.board.keep_awake(ts(3, 6), 60)  # never shortens a side-button wake
+        self.assertEqual(self.board.awake_until(ts(3, 6)), ts(3, 35))
+
     def test_side_button_does_nothing_while_on(self):
         self.assertFalse(self.board.wake_button(ts(12)))  # already on: daytime
         self.assertIsNone(self.board.awake_until(ts(12)))

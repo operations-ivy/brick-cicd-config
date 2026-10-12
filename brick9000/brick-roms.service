@@ -1,0 +1,9 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Copy NES and SNES ROMs from brick2000 and rewrite the playlists
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/brick-retro/env
+ExecStart=%h/brick-cicd-config/brick9000/sync-roms
