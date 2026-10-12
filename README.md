@@ -295,8 +295,9 @@ Idle light patterns, highest priority first:
 
 A deploy or an image build on brick9000 itself (below) takes over the lights
 in idle and active mode. While brick9000 deploys a new commit, `deploying`
-boils the buttons: each one swells in a random colour on its own beat and pops
-dark, a new colour each time. An image build alone flashes `image-building`
+boils the buttons at a rolling boil: each one swells in a random colour on its
+own quick beat (a bubble every 0.13-0.33 s) and pops dark, a new colour each
+time. An image build alone flashes `image-building`
 rainbow. Either way, `image-pushed` then flashes bright green or `image-failed`
 pulses red for a minute (`BRICK_STATUS_BUILD_RESULT_SECONDS`). A deploy
 outranks an image build, so the buttons boil until the whole deploy is done,

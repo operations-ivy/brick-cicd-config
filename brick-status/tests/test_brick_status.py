@@ -267,6 +267,11 @@ class BuildLightsTest(unittest.TestCase):
         self.assertGreater(len({frames[60][i] for i in firsts}), 5)
         pops = [min(range(len(frames)), key=lambda f: max(frames[f][i])) for i in firsts]
         self.assertGreater(len(set(pops)), 3)
+        # A rolling boil: every slot pops at least three times a second.
+        for i in firsts:
+            column = [max(frame[i]) for frame in frames]
+            pops = sum(1 for f in range(len(column)) if column[f] < column[f - 1])
+            self.assertGreaterEqual(pops, 6)
         # Seeded: the same PNG on every start.
         self.assertEqual(patterns.boil(2.0), frames)
 

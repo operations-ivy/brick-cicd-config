@@ -96,12 +96,15 @@ def rainbow(seconds: float) -> list[Frame]:
 def boil(seconds: float, seed: int = 9000) -> list[Frame]:
     """Every slot bubbling on its own beat: a random hue swells, then pops dark.
 
-    Each slot's beat divides the loop, and each bubble's hue is fixed per beat,
-    so the loop repeats seamlessly. Seeded, so the PNG is the same every start.
+    A rolling boil: each bubble lasts a fifteenth to a sixth of the loop
+    (0.13-0.33 s over 2 s), and never under 4 frames so it still pops near
+    dark. Each slot's beat divides the loop, and each bubble's hue is fixed per
+    beat, so the loop repeats seamlessly. Seeded, so the PNG is the same every
+    start.
     """
     n = int(seconds * FPS)
     rng = random.Random(seed)
-    beats = [b for b in range(n // 8, n // 2 + 1) if n % b == 0]
+    beats = [b for b in range(max(4, n // 15), n // 6 + 1) if n % b == 0]
     slots = []
     for _ in range(SLOTS):
         beat = rng.choice(beats)
