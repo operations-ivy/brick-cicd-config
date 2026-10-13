@@ -1,4 +1,4 @@
-"""brick-retro: NES and SNES on brick9000 (RetroArch over the board).
+"""brick-retro: retro games on brick9000 (RetroArch over the board).
 
     python3 -m brick_retro            # the daemon: launches RetroArch for a pad
     python3 -m brick_retro games      # rewrite the playlists, import old saves
@@ -31,6 +31,8 @@ def env(name: str, default: str) -> str:
 ROM_DIR = Path(env("ROM_DIR", str(HOME / "games/roms")))
 SAVE_DIR = Path(env("SAVE_DIR", str(HOME / "games/saves")))
 PLAYLIST_DIR = Path(env("PLAYLIST_DIR", str(HOME / ".config/retroarch/playlists")))
+# Multi-disc games, one .m3u each (games.disc_games).
+M3U_DIR = Path(env("M3U_DIR", str(HOME / "games/m3u")))
 CORE_DIR = Path(env("CORE_DIR", "/usr/lib/aarch64-linux-gnu/libretro"))
 APPEND_CONFIG = env("CONFIG", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg"))
 FLAG = Path(env("FLAG", os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "brick-retro.playing")))
@@ -155,7 +157,7 @@ def daemon() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if sys.argv[1:] == ["games"]:
-        counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR)
+        counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
         log.info("playlists: %s; imported %d old save(s)", counts, len(copied))
         return

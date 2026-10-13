@@ -440,8 +440,11 @@ fresh. It exits 1 if anything is down.
 
 ## Games (brick-retro, on brick9000)
 
-NES and SNES over the board with a Bluetooth controller (RetroArch with the
-Nestopia and Snes9x cores).
+NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, Genesis, Master System
+and PlayStation over the board with a Bluetooth controller (RetroArch with the
+Nestopia, Snes9x, Gambatte, mGBA, Genesis Plus GX and PCSX-ReARMed cores).
+Debian has no PlayStation core, so `install.sh` builds PCSX-ReARMed from a
+pinned commit into `/usr/local/lib/libretro`.
 
 - **Playing:** turn a paired controller on and RetroArch's game list opens
   over the board. Start + Select opens RetroArch's menu; quitting RetroArch
@@ -458,12 +461,19 @@ Nestopia and Snes9x cores).
 - **The board:** while RetroArch is open, brick-status keeps the screen on
   whatever the quiet schedule says (brick-retro's flag file). The cabinet's
   own buttons stay brick-status's.
-- **ROMs:** `brick-roms.timer` copies `nes/` and `snes/` daily from brick2000's
-  `/extra/games/roms` (`brick9000/sync-roms`), so games work when brick2000
-  or the cluster is down, then rewrites the playlists and imports RetroPie's
-  old `.srm` saves (never over a newer one). brick2000 lets the
-  `~/.ssh/brick-roms` key only read that folder (`rrsync -ro`); `install.sh`
-  prints the line to authorize.
+- **ROMs:** `brick-roms.timer` copies each system's folder daily from
+  brick2000's `/extra/games/roms` (`brick9000/sync-roms`), plus the BIOS
+  files from `/extra/games/BIOS/system` to `~/games/system`, so games work
+  when brick2000 or the cluster is down. It then rewrites the playlists and
+  imports RetroPie's old `.srm` saves (never over a newer one). A system
+  with no games gets no playlist. brick2000 lets the `~/.ssh/brick-roms` key
+  only read `/extra/games` (`rrsync -ro`); `install.sh` prints the line to
+  authorize.
+- **PlayStation:** one entry per game. A `.chd` hides a `.bin`/`.cue` copy of
+  the same game, a multi-disc game is one `.m3u` (`~/games/m3u`, so it keeps
+  one memory card; swap discs from RetroArch's menu), and `.ecm`/`.7z`
+  images stay on brick2000 until someone unpacks them. `psx/PS1/` on
+  brick2000 duplicates the `.chd` files beside it and isn't copied.
 - **Controller mapping** is code: `brick9000/retroarch/autoconfig/*.cfg`,
   installed by `install.sh`; RetroArch's settings are
   `brick9000/retroarch/retroarch.cfg`. The pairing itself lives in BlueZ

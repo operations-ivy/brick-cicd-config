@@ -1,7 +1,7 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 # Opens RetroArch over the board when a paired controller turns on.
 [Unit]
-Description=brick-retro: NES and SNES over the board
+Description=brick-retro: retro games over the board
 After=graphical-session.target
 
 [Service]
