@@ -144,13 +144,14 @@ class GamesTests(unittest.TestCase):
                     "psx/Final Fantasy VII (USA) (Disc 2).chd", "psx/Final Fantasy VII (USA) (Disc 1).chd",
                     "psx/Tekken 3 (Track 1).bin", "psx/Tekken 3 (Track 2).bin",
                     "psx/Ace Combat 3.bin", "psx/R4.ccd", "psx/R4.img", "psx/SaGa.ccd", "psx/SaGa.img.ecm",
-                    "psx/Lost.cue"):
+                    "psx/Lost.cue", "psx/SCPH1001.BIN", "psx/GT2.ccd", "psx/GT2.img"):
             (roms / rel).parent.mkdir(parents=True, exist_ok=True)
             (roms / rel).write_text("x")
         (roms / "psx/Tekken 3.cue").write_text(
             'FILE "Tekken 3 (Track 1).bin" BINARY\n  TRACK 01 MODE2/2352\n'
             'FILE "Tekken 3 (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n')
         (roms / "psx/Lost.cue").write_text('FILE "Lost.bin" BINARY\n')
+        (roms / "psx/GT2.cue").write_text('FILE "GT2.img" BINARY\n')
         self.roms = roms
 
     def write(self):
@@ -162,7 +163,7 @@ class GamesTests(unittest.TestCase):
     def test_playlists_list_each_systems_games_by_name(self):
         counts = self.write()
         self.assertEqual(counts, {"nes": 2, "snes": 3, "gb": 1, "gbc": 0, "gba": 1, "megadrive": 1,
-                                  "mastersystem": 0, "psx": 5})
+                                  "mastersystem": 0, "psx": 6})
         nes = json.loads((self.root / "playlists/Nintendo - Nintendo Entertainment System.lpl").read_text())
         self.assertEqual([i["label"] for i in nes["items"]], ["Adventure Island", "Bomberman"])
         self.assertEqual(nes["default_core_path"], "/cores/nestopia_libretro.so")
@@ -175,9 +176,11 @@ class GamesTests(unittest.TestCase):
         self.write()
         psx = self.items("Sony - PlayStation")
         # The .bin copy of WipEout hides behind its .chd; Tekken 3's tracks are
-        # its cue sheet's; SaGa is still .ecm-packed and Lost's track is gone.
+        # its cue sheet's; SaGa is still .ecm-packed and Lost's track is gone;
+        # GT2's .cue and .ccd are one image; SCPH1001 is a BIOS.
         self.assertEqual([i["label"] for i in psx],
-                         ["Ace Combat 3", "Final Fantasy VII (USA)", "R4", "Tekken 3", "WipEout (USA)"])
+                         ["Ace Combat 3", "Final Fantasy VII (USA)", "GT2", "R4", "Tekken 3", "WipEout (USA)"])
+        self.assertEqual(Path(psx[2]["path"]).suffix, ".cue")
         self.assertEqual(psx[0]["core_path"], games.PCSX_REARMED)
         ff7 = Path(psx[1]["path"])
         self.assertEqual(ff7, self.root / "m3u/psx/Final Fantasy VII (USA).m3u")

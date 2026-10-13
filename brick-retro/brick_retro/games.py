@@ -48,6 +48,7 @@ def roms(folder: Path, extensions: tuple[str, ...]) -> list[Path]:
 
 
 DISC = re.compile(r"\s*\(disc (\d+)\)", re.IGNORECASE)
+BIOS = re.compile(r"scph\d+", re.IGNORECASE)  # a PlayStation BIOS left beside the games
 
 
 def title(stem: str) -> str:
@@ -65,7 +66,8 @@ def cue_files(cue: Path) -> list[Path]:
 
 def disc_games(folder: Path, extensions: tuple[str, ...], m3u_dir: Path) -> list[tuple[Path, str]]:
     """CD games, one entry per game: a .chd wins over a .bin/.cue copy of the
-    same game, tracks a cue sheet names aren't games themselves, an image whose
+    same game, a .cue over a .ccd of the same image, tracks a cue sheet names
+    aren't games themselves (nor is a BIOS), an image whose
     tracks are missing (still .ecm-packed, say) is left out, and a game on
     several discs is one .m3u (written to m3u_dir), so it keeps one memory card
     and RetroArch can swap discs."""
@@ -84,7 +86,10 @@ def disc_games(folder: Path, extensions: tuple[str, ...], m3u_dir: Path) -> list
                 playable.append(p)
         elif suffix != ".bin":
             playable.append(p)
-    playable += [p for p in files if p.suffix.lower() == ".bin" and p not in tracks]
+    cues = {p.with_suffix("") for p in playable if p.suffix.lower() == ".cue"}
+    playable = [p for p in playable if not (p.suffix.lower() == ".ccd" and p.with_suffix("") in cues)]
+    playable += [p for p in files
+                 if p.suffix.lower() == ".bin" and p not in tracks and not BIOS.fullmatch(p.stem)]
     chd = {title(p.stem) for p in playable if p.suffix.lower() == ".chd"}
     playable = [p for p in playable if p.suffix.lower() == ".chd" or title(p.stem) not in chd]
 
