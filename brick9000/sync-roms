@@ -45,9 +45,10 @@ sync gba gba zip
 sync megadrive md gen smd bin zip
 sync mastersystem sms zip
 # BIOS files: PlayStation (needed), Game Boy family and Sega (optional, used
-# when a core's option asks for them).
+# when a core's option asks for them). -d: this folder's files, not its subfolders
+# (without it rsync skips the folder altogether).
 mkdir -p "$system_dir"
-rsync -t -e "$ssh" \
+rsync -dt -e "$ssh" \
     --include=scph5500.bin --include=scph5501.bin --include=scph5502.bin \
     --include=gb_bios.bin --include=gbc_bios.bin --include=gba_bios.bin \
     --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin --exclude='*' \
