@@ -138,23 +138,67 @@ class GamesTests(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp())
         roms = self.root / "roms"
         for rel in ("nes/B/Bomberman.nes", "nes/A/Adventure Island.NES", "nes/readme.txt",
-                    "snes/Zelda.smc", "snes/Zelda.srm", "snes/Mario.sfc", "snes/nested/F-Zero.zip"):
+                    "snes/Zelda.smc", "snes/Zelda.srm", "snes/Mario.sfc", "snes/nested/F-Zero.zip",
+                    "gb/T/Tetris (World).zip", "gba/Metroid Fusion (USA).gba", "megadrive/S/Sonic.bin",
+                    "psx/WipEout (USA).chd", "psx/wipeout_(v1.0).bin",
+                    "psx/Final Fantasy VII (USA) (Disc 2).chd", "psx/Final Fantasy VII (USA) (Disc 1).chd",
+                    "psx/Tekken 3 (Track 1).bin", "psx/Tekken 3 (Track 2).bin",
+                    "psx/Ace Combat 3.bin", "psx/R4.ccd", "psx/R4.img", "psx/SaGa.ccd", "psx/SaGa.img.ecm",
+                    "psx/Lost.cue"):
             (roms / rel).parent.mkdir(parents=True, exist_ok=True)
             (roms / rel).write_text("x")
+        (roms / "psx/Tekken 3.cue").write_text(
+            'FILE "Tekken 3 (Track 1).bin" BINARY\n  TRACK 01 MODE2/2352\n'
+            'FILE "Tekken 3 (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n')
+        (roms / "psx/Lost.cue").write_text('FILE "Lost.bin" BINARY\n')
         self.roms = roms
 
+    def write(self):
+        return games.write_playlists(self.roms, self.root / "playlists", Path("/cores"), self.root / "m3u")
+
+    def items(self, name):
+        return json.loads((self.root / "playlists" / f"{name}.lpl").read_text())["items"]
+
     def test_playlists_list_each_systems_games_by_name(self):
-        counts = games.write_playlists(self.roms, self.root / "playlists", Path("/cores"))
-        self.assertEqual(counts, {"nes": 2, "snes": 3})
+        counts = self.write()
+        self.assertEqual(counts, {"nes": 2, "snes": 3, "gb": 1, "gbc": 0, "gba": 1, "megadrive": 1,
+                                  "mastersystem": 0, "psx": 5})
         nes = json.loads((self.root / "playlists/Nintendo - Nintendo Entertainment System.lpl").read_text())
         self.assertEqual([i["label"] for i in nes["items"]], ["Adventure Island", "Bomberman"])
         self.assertEqual(nes["default_core_path"], "/cores/nestopia_libretro.so")
-        snes = json.loads((self.root / "playlists/Nintendo - Super Nintendo Entertainment System.lpl").read_text())
-        self.assertEqual([i["label"] for i in snes["items"]], ["F-Zero", "Mario", "Zelda"])
+        snes = self.items("Nintendo - Super Nintendo Entertainment System")
+        self.assertEqual([i["label"] for i in snes], ["F-Zero", "Mario", "Zelda"])
+        self.assertEqual(self.items("Sega - Mega Drive - Genesis")[0]["core_path"],
+                         "/cores/genesis_plus_gx_libretro.so")
 
-    def test_missing_folders_are_empty_playlists(self):
-        counts = games.write_playlists(self.root / "nothing", self.root / "playlists", Path("/cores"))
-        self.assertEqual(counts, {"nes": 0, "snes": 0})
+    def test_ps1_lists_each_game_once_and_playable(self):
+        self.write()
+        psx = self.items("Sony - PlayStation")
+        # The .bin copy of WipEout hides behind its .chd; Tekken 3's tracks are
+        # its cue sheet's; SaGa is still .ecm-packed and Lost's track is gone.
+        self.assertEqual([i["label"] for i in psx],
+                         ["Ace Combat 3", "Final Fantasy VII (USA)", "R4", "Tekken 3", "WipEout (USA)"])
+        self.assertEqual(psx[0]["core_path"], games.PCSX_REARMED)
+        ff7 = Path(psx[1]["path"])
+        self.assertEqual(ff7, self.root / "m3u/psx/Final Fantasy VII (USA).m3u")
+        self.assertEqual(ff7.read_text().splitlines(),
+                         [str(self.roms / "psx/Final Fantasy VII (USA) (Disc 1).chd"),
+                          str(self.roms / "psx/Final Fantasy VII (USA) (Disc 2).chd")])
+
+    def test_a_disc_set_that_goes_away_takes_its_m3u_with_it(self):
+        self.write()
+        (self.roms / "psx/Final Fantasy VII (USA) (Disc 2).chd").unlink()
+        self.write()
+        self.assertEqual(list((self.root / "m3u/psx").iterdir()), [])
+        self.assertIn("Final Fantasy VII (USA) (Disc 1)", [i["label"] for i in self.items("Sony - PlayStation")])
+
+    def test_systems_without_games_get_no_playlist(self):
+        self.write()
+        self.assertFalse((self.root / "playlists/Nintendo - Game Boy Color.lpl").exists())
+        counts = games.write_playlists(self.root / "nothing", self.root / "playlists", Path("/cores"),
+                                       self.root / "m3u")
+        self.assertEqual(set(counts.values()), {0})
+        self.assertEqual(list((self.root / "playlists").iterdir()), [])
 
     def test_old_saves_are_imported_once_never_over_a_newer_one(self):
         saves = self.root / "saves"

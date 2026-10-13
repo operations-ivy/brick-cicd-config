@@ -1,21 +1,56 @@
 #!/bin/sh
-# Copy the NES and SNES ROMs (and RetroPie's old .srm saves beside them) from
-# brick2000's /extra/games/roms, then rewrite RetroArch's playlists. Run daily
-# by brick-roms.timer, or now with: systemctl --user start brick-roms.service
+# Copy the ROMs (and RetroPie's old .srm saves beside them) and the BIOS files
+# the cores use from brick2000's /extra/games, then rewrite RetroArch's
+# playlists. Run daily by brick-roms.timer, or now with:
+# systemctl --user start brick-roms.service
 #
-# brick2000 only lets this key read /extra/games/roms (rrsync -ro; install.sh
+# brick2000 only lets this key read /extra/games (rrsync -ro; install.sh
 # prints the authorized_keys line). A local copy keeps games playable when
 # brick2000 or the cluster is down.
-set -eu
+# -f: the --include patterns below are for rsync, never the shell's globs.
+set -euf
 src=${BRICK_ROMS_SOURCE:-zaphod@brick2000}
 dest=${BRICK_RETRO_ROM_DIR:-$HOME/games/roms}
-for system in nes snes; do
+system_dir=${BRICK_RETRO_SYSTEM_DIR:-$HOME/games/system}
+ssh="ssh -i $HOME/.ssh/brick-roms -o BatchMode=yes"
+
+# --include=*.[nN][eE][sS] for each extension given (none has a space).
+includes() {
+    printf '%s\n' "$@" | awk '{
+        s = "--include=*."
+        for (i = 1; i <= length($0); i++) { c = substr($0, i, 1); s = s "[" c toupper(c) "]" }
+        print s
+    }'
+}
+
+sync() {
+    system=$1
+    shift
     mkdir -p "$dest/$system"
-    rsync -rt --delete --prune-empty-dirs \
-        -e "ssh -i $HOME/.ssh/brick-roms -o BatchMode=yes" \
-        --include='*/' --include='*.[nN][eE][sS]' --include='*.[sS][mM][cC]' \
-        --include='*.[sS][fF][cC]' --include='*.[zZ][iI][pP]' --include='*.srm' \
-        --exclude='*' "$src:$system/" "$dest/$system/"
-done
+    # psx/PS1 on brick2000 is a second copy of the .chd games beside it.
+    rsync -rt --delete --prune-empty-dirs -e "$ssh" \
+        --exclude=/PS1/ --include='*/' $(includes "$@" srm) --exclude='*' \
+        "$src:roms/$system/" "$dest/$system/"
+}
+
+sync nes nes zip
+sync snes smc sfc zip
+sync gb gb zip
+sync gbc gbc zip
+sync gba gba zip
+sync megadrive md gen smd bin zip
+sync mastersystem sms zip
+# CD images; .ecm and .7z need unpacking first, so they stay on brick2000.
+sync psx chd cue ccd img sub bin pbp
+
+# BIOS files: PlayStation (needed), Game Boy family and Sega (optional, used
+# when a core's option asks for them).
+mkdir -p "$system_dir"
+rsync -t -e "$ssh" \
+    --include=scph5500.bin --include=scph5501.bin --include=scph5502.bin \
+    --include=gb_bios.bin --include=gbc_bios.bin --include=gba_bios.bin \
+    --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin --exclude='*' \
+    "$src:BIOS/system/" "$system_dir/"
+
 cd "$(dirname "$0")/../brick-retro"
 exec python3 -m brick_retro games

@@ -30,9 +30,25 @@ cp "$here/labwc-autostart" ~/.config/labwc/autostart
 grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/null ||
     echo 'WLR_SCENE_DISABLE_DIRECT_SCANOUT=1' >>~/.config/labwc/environment
 
-# brick-retro: NES and SNES over the board with a Bluetooth controller
+# brick-retro: retro games over the board with a Bluetooth controller
 # (README, "Games").
-sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x rsync
+sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x libretro-gambatte libretro-mgba \
+    libretro-genesisplusgx rsync build-essential git
+# Debian packages no PlayStation core: build PCSX-ReARMed from this commit
+# (about 2.5 minutes on a Pi 4), once per commit. games.py names the path.
+pcsx_commit=c8816799b50388e61cfe237fe2cdbb7d8175f20a
+pcsx_core=/usr/local/lib/libretro/pcsx_rearmed_libretro.so
+if [ "$(cat "$pcsx_core.commit" 2>/dev/null)" != "$pcsx_commit" ]; then
+    build=$(mktemp -d)
+    git -C "$build" init -q
+    git -C "$build" fetch -q --depth 1 https://github.com/libretro/pcsx_rearmed "$pcsx_commit"
+    git -C "$build" checkout -q FETCH_HEAD
+    nice make -C "$build" -f Makefile.libretro platform=rpi4_64 -j3 >"$build.log" 2>&1 ||
+        { tail -n 20 "$build.log"; exit 1; }
+    sudo install -D -m 644 "$build/pcsx_rearmed_libretro.so" "$pcsx_core"
+    echo "$pcsx_commit" | sudo tee "$pcsx_core.commit" >/dev/null
+    rm -rf "$build" "$build.log"
+fi
 # Raspberry Pi OS starts every radio blocked (rfkill default_state=0) and
 # NetworkManager only unblocks Wi-Fi; systemd-rfkill keeps this across reboots.
 for r in /sys/class/rfkill/rfkill*; do
@@ -43,7 +59,7 @@ if ! grep -q '^FastConnectable *= *true' /etc/bluetooth/main.conf; then
     sudo sed -i 's/^#*FastConnectable *=.*/FastConnectable = true/' /etc/bluetooth/main.conf
     sudo systemctl restart bluetooth
 fi
-mkdir -p ~/games/roms ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
+mkdir -p ~/games/roms ~/games/system ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
 for f in "$here"/retroarch/autoconfig/*.cfg; do
     [ -f "$f" ] && cp "$f" ~/.config/retroarch/autoconfig/
 done
@@ -54,14 +70,16 @@ volume_set=~/.local/state/brick-retro/volume-set
 if [ ! -f "$volume_set" ]; then
     wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.15 && mkdir -p "$(dirname "$volume_set")" && touch "$volume_set"
 fi
-# The key brick-roms copies ROMs with. brick2000 must let it read only the ROMs.
+# The key brick-roms copies ROMs and BIOS files with. brick2000 must let it
+# read only /extra/games.
 [ -f ~/.ssh/brick-roms ] || ssh-keygen -q -t ed25519 -N '' -C brick9000-roms -f ~/.ssh/brick-roms
 roms_host=$(sed -n 's/^BRICK_ROMS_SOURCE=.*@//p' ~/.config/brick-retro/env | tail -n 1)
 roms_host=${roms_host:-brick2000}
 ssh-keygen -F "$roms_host" >/dev/null || ssh-keyscan -t ed25519 "$roms_host" >>~/.ssh/known_hosts 2>/dev/null
-if ! ssh -i ~/.ssh/brick-roms -o BatchMode=yes "zaphod@$roms_host" true 2>/dev/null; then
-    echo "On $roms_host, add this line to ~/.ssh/authorized_keys, then run: systemctl --user start brick-roms"
-    echo "  command=\"rrsync -ro /extra/games/roms\",restrict $(cat ~/.ssh/brick-roms.pub)"
+# Listing BIOS/ also catches the older line, which only allowed roms/.
+if ! rsync --list-only -e "ssh -i $HOME/.ssh/brick-roms -o BatchMode=yes" "zaphod@$roms_host:BIOS/" >/dev/null 2>&1; then
+    echo "On $roms_host, put this line in ~/.ssh/authorized_keys (replacing any brick9000-roms line), then run: systemctl --user start brick-roms"
+    echo "  command=\"rrsync -ro /extra/games\",restrict $(cat ~/.ssh/brick-roms.pub)"
 fi
 
 # Jenkins moved to the cluster (jenkins/, README "Jenkins"). Retire the

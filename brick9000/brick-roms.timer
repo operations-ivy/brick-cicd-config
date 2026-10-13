@@ -1,6 +1,6 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 [Unit]
-Description=Copy NES and SNES ROMs from brick2000 daily
+Description=Copy ROMs and BIOS files from brick2000 daily
 
 [Timer]
 OnBootSec=10min

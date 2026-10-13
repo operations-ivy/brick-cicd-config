@@ -1,6 +1,6 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 [Unit]
-Description=Copy NES and SNES ROMs from brick2000 and rewrite the playlists
+Description=Copy ROMs and BIOS files from brick2000 and rewrite the playlists
 After=network-online.target
 
 [Service]
