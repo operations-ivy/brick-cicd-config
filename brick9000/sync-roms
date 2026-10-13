@@ -23,6 +23,10 @@ includes() {
     }'
 }
 
+playlists() {
+    (cd "$(dirname "$0")/../brick-retro" && python3 -m brick_retro games)
+}
+
 sync() {
     system=$1
     shift
@@ -40,9 +44,6 @@ sync gbc gbc zip
 sync gba gba zip
 sync megadrive md gen smd bin zip
 sync mastersystem sms zip
-# CD images; .ecm and .7z need unpacking first, so they stay on brick2000.
-sync psx chd cue ccd img sub bin pbp
-
 # BIOS files: PlayStation (needed), Game Boy family and Sega (optional, used
 # when a core's option asks for them).
 mkdir -p "$system_dir"
@@ -52,5 +53,9 @@ rsync -t -e "$ssh" \
     --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin --exclude='*' \
     "$src:BIOS/system/" "$system_dir/"
 
-cd "$(dirname "$0")/../brick-retro"
-exec python3 -m brick_retro games
+# The cartridge games are small; list them now rather than after the CD
+# images, whose first copy takes hours.
+playlists
+# CD images; .ecm and .7z need unpacking first, so they stay on brick2000.
+sync psx chd cue ccd img sub bin pbp
+playlists
