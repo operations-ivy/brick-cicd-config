@@ -122,6 +122,61 @@ def boil(seconds: float, seed: int = 9000) -> list[Frame]:
     return frames
 
 
+def nightly(seconds: float = 8.0, seed: int = 2000) -> list[Frame]:
+    """The nightly test run (Jenkins' test-all): every LED its own, in layers.
+
+    - jewels: each button's four LEDs spin a colour wheel, softly;
+    - a comet: a white-hot head sweeping the whole 40-LED chain an LED at a
+      time, four laps a loop, trailing the spectrum;
+    - fireworks: seeded bursts on random buttons, a white flash, then
+      sparks in one hue that twinkle and fade;
+    - and the whole thing breathing twice a loop.
+    Layers add, capped at full. Every cycle divides the loop and every burst
+    is placed modulo it, so it repeats seamlessly; seeded, so the PNG is the
+    same every start.
+    """
+    n = int(seconds * FPS)
+    rng = random.Random(seed)
+    laps, tail = 4, 14
+    bursts = [(rng.randrange(n), rng.randrange(SLOTS), rng.random()) for _ in range(14)]
+    burst_len = int(0.9 * FPS)
+    twinkle = [[rng.random() for _ in range(WIDTH)] for _ in range(burst_len)]
+
+    def hsv(h: float, v: float) -> Rgb:
+        r, g, b = colorsys.hsv_to_rgb(h % 1.0, 1.0, max(0.0, min(1.0, v)))
+        return (r * 255, g * 255, b * 255)
+
+    frames = []
+    for f in range(n):
+        t = f / n
+        breath = 0.75 + 0.25 * math.cos(2 * math.pi * 2 * t)
+        row = []
+        for i in range(WIDTH):
+            slot, led = divmod(i, LEDS_PER_SLOT)
+            # Jewels: a wheel in each button, turning three times a loop.
+            c = list(hsv(slot / SLOTS + led / LEDS_PER_SLOT + 3 * t, 0.22))
+            # Comet: head position along the chain; the tail fades through the spectrum.
+            behind = (t * laps * WIDTH - i) % WIDTH
+            if behind < 1:
+                c = [v + 255 for v in c]  # the head, white-hot
+            elif behind < tail:
+                k = (1 - behind / tail) ** 1.6
+                c = [a + b for a, b in zip(c, hsv(behind / tail + t, k))]
+            # Fireworks: a flash, then twinkling sparks in the burst's hue.
+            for start, bslot, hue in bursts:
+                age = (f - start) % n
+                if bslot == slot and age < burst_len:
+                    if age < 3:
+                        c = [v + 255 for v in c]
+                    else:
+                        fade = (1 - age / burst_len) ** 2
+                        spark = twinkle[age][i] > 0.35
+                        c = [a + b for a, b in zip(c, hsv(hue, fade * (1.0 if spark else 0.25)))]
+            row.append(tuple(max(0, min(255, round(v * breath))) for v in c))
+        frames.append(row)
+    return frames
+
+
 def flash(colour: Rgb, seconds: float) -> list[Frame]:
     """Hard on/off blink: on for the first half of each period, off for the second."""
     n = int(seconds * FPS)
@@ -130,6 +185,7 @@ def flash(colour: Rgb, seconds: float) -> list[Frame]:
 
 # Idle patterns, one per board event, highest priority first.
 IDLE = {
+    "nightly": lambda: nightly(8.0),
     "alert": lambda: pulse(RED, 1.0, 0.15),
     "building": lambda: chase(AMBER, 1.5),
     "uploading": lambda: pulse(GREEN, 2.0, 0.1),

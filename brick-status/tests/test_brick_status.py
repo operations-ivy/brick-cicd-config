@@ -1051,3 +1051,23 @@ class CrtTest(unittest.TestCase):
         self.assertEqual(sorted(names), files)
         self.assertEqual(names["van-gogh-the-starry-night.jpg"], "The Starry Night, Vincent van Gogh, 1889")
 
+
+class NightlyLightsTest(unittest.TestCase):
+    def test_nightly_is_a_seamless_eight_second_loop_of_whole_rows(self):
+        frames = patterns.nightly(8.0)
+        self.assertEqual(len(frames), 8 * patterns.FPS)
+        self.assertTrue(all(len(f) == patterns.WIDTH for f in frames))
+        self.assertEqual(frames, patterns.nightly(8.0))  # seeded: the same PNG every start
+        # Every LED changes during the loop, and something reaches full brightness.
+        for i in range(patterns.WIDTH):
+            self.assertGreater(len({f[i] for f in frames}), 10, i)
+        self.assertIn(255, {v for f in frames for c in f for v in c})
+
+    def test_test_all_running_gets_the_show_even_over_a_failure(self):
+        checks = [{"group": "builds", "name": "test-all", "state": "active"},
+                  {"group": "services", "name": "brick1982: x.service", "state": "fail"}]
+        self.assertEqual(lights.idle_pattern(checks), "nightly")
+        checks[0]["name"] = "test-wigle-sync"
+        self.assertEqual(lights.idle_pattern(checks), "alert")
+        self.assertIn("nightly", patterns.IDLE)
+
