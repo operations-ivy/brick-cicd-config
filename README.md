@@ -545,7 +545,21 @@ pinned commit into `/usr/local/lib/libretro`.
   imports RetroPie's old `.srm` saves (never over a newer one). A system
   with no games gets no playlist. brick2000 lets the `~/.ssh/brick-roms` key
   only read `/extra/games` (`rrsync -ro`); `install.sh` prints the line to
-  authorize.
+  authorize. A game in two folders (brick2000's SNES folder has many both
+  at the top and in an A-Z subfolder) is one entry.
+- **Thumbnails:** after the playlists, `python3 -m brick_retro thumbnails`
+  fetches box art, title screens and screenshots for every game that hasn't
+  got them, from libretro's thumbnail server, at about 1 MB/s
+  (`BRICK_RETRO_THUMB_RATE`). RetroArch looks thumbnails up by the playlist
+  label, and its own updater (Online Updater, Playlist Thumbnails Updater)
+  asks the server for exactly that, but the labels are ROM file names
+  ("7th Saga, The (U) [!]") and the server uses No-Intro names ("7th Saga,
+  The (USA)"), so most would miss. `brick_retro/thumbnails.py` matches by
+  bare title, preferring the game's own region, then USA, and saves each
+  image under the name RetroArch looks for. About 86% of the games match
+  (2026-10-14); the rest are unlicensed carts, hacks and odd file names. A
+  game with no match isn't asked about again for 30 days.
+  `brick_retro_thumbnails{system,kind}` counts them.
 - **PlayStation:** one entry per game. A `.chd` hides a `.bin`/`.cue` copy of
   the same game, a multi-disc game is one `.m3u` (`~/games/m3u`, so it keeps
   one memory card; swap discs from RetroArch's menu), and `.ecm`/`.7z`

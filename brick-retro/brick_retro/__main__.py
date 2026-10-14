@@ -2,6 +2,7 @@
 
     python3 -m brick_retro            # the daemon: launches RetroArch for a pad
     python3 -m brick_retro games      # rewrite the playlists, import old saves
+    python3 -m brick_retro thumbnails # fetch missing box art, titles and screenshots
 
 Turning a paired controller on opens RetroArch's game list over the board;
 quitting RetroArch, or holding Home for 3 seconds, shows the board again.
@@ -17,7 +18,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import games
+from . import games, thumbnails
 from . import retro_metrics as rm
 from .pads import ABS_HAT0Y, Launcher, Volume, is_pad
 
@@ -34,6 +35,9 @@ SAVE_DIR = Path(env("SAVE_DIR", str(HOME / "games/saves")))
 PLAYLIST_DIR = Path(env("PLAYLIST_DIR", str(HOME / ".config/retroarch/playlists")))
 # Multi-disc games, one .m3u each (games.disc_games).
 M3U_DIR = Path(env("M3U_DIR", str(HOME / "games/m3u")))
+THUMB_DIR = Path(env("THUMB_DIR", str(HOME / ".config/retroarch/thumbnails")))
+# Which thumbnails thumbnails.py has looked for and the server doesn't have.
+THUMB_STATE = Path(env("THUMB_STATE", str(HOME / ".local/state/brick-retro/thumbnail-misses.json")))
 CORE_DIR = Path(env("CORE_DIR", "/usr/lib/aarch64-linux-gnu/libretro"))
 APPEND_CONFIG = env("CONFIG", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg"))
 # A CRT look for every console: crt-pi, a Raspberry Pi friendly CRT shader
@@ -181,6 +185,12 @@ def main() -> None:
         rm.write_games(counts)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
         log.info("playlists: %s; imported %d old save(s)", counts, len(copied))
+        return
+    if sys.argv[1:] == ["thumbnails"]:
+        counts = thumbnails.sync(PLAYLIST_DIR, THUMB_DIR, THUMB_STATE,
+                                 rate=float(env("THUMB_RATE", "1000000")))
+        rm.write_thumbnails(counts)
+        log.info("thumbnails: %s", counts)
         return
     daemon()
 

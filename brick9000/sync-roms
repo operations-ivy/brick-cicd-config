@@ -64,3 +64,7 @@ playlists
 # CD images; .ecm and .7z need unpacking first, so they stay on brick2000.
 sync psx chd cue ccd img sub bin pbp
 playlists
+# Box art, title screens and screenshots for any game that hasn't got them,
+# from libretro's server at about 1 MB/s (brick_retro/thumbnails.py).
+(cd "$(dirname "$0")/../brick-retro" && python3 -m brick_retro thumbnails) ||
+    echo "sync-roms: thumbnails failed; the games are copied regardless" >&2

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from brick_retro import games, retro_metrics
+from brick_retro import games, retro_metrics, thumbnails
 from brick_retro.pads import BTN_DPAD_DOWN, BTN_DPAD_UP, BTN_GAMEPAD, BTN_JOYSTICK, BTN_MODE, Launcher, Volume, is_pad
 
 
@@ -258,3 +258,84 @@ class MetricsTests(unittest.TestCase):
         text = retro_metrics.games_text({"nes": 12, "psx": 0})
         self.assertIn('brick_retro_games{system="nes"} 12', text)
         self.assertIn('brick_retro_games{system="psx"} 0', text)
+
+
+class ThumbnailTests(unittest.TestCase):
+    SERVER = ["7th Saga, The (USA)", "ActRaiser (Europe)", "ActRaiser (USA)", "ActRaiser (Japan) (Virtual Console)",
+              "Mario _ Wario (Japan)", "Zelda (USA) (Beta)", "Zelda (Europe)",
+              "Kirby _ The Amazing Mirror (USA)"]
+
+    def by_key(self):
+        out = {}
+        for n in self.SERVER:
+            out.setdefault(thumbnails.key(n), []).append(n)
+        return out
+
+    def test_goodtools_and_bare_names_match_no_intro(self):
+        b = self.by_key()
+        self.assertEqual(thumbnails.best("7th Saga, The (U) [!]", b), "7th Saga, The (USA)")
+        self.assertEqual(thumbnails.best("ActRaiser", b), "ActRaiser (USA)")
+        self.assertEqual(thumbnails.best("ActRaiser (E)", b), "ActRaiser (Europe)")
+        self.assertEqual(thumbnails.best("Mario and Wario", b), "Mario _ Wario (Japan)")
+        self.assertEqual(thumbnails.best("Kirby & The Amazing Mirror (USA)", b), "Kirby _ The Amazing Mirror (USA)")
+        self.assertEqual(thumbnails.best("Zelda (U)", b), "Zelda (Europe)")  # a release over a beta
+        self.assertIsNone(thumbnails.best("Not On The Server", b))
+
+    def test_file_name_like_retroarch(self):
+        self.assertEqual(thumbnails.file_name("Mario & Wario: Go?"), "Mario _ Wario_ Go_.png")
+
+    def test_sync_fetches_missing_only_and_remembers_misses(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "pl").mkdir()
+            items = [{"label": "ActRaiser"}, {"label": "ActRaiser"}, {"label": "Nope"}]
+            (d / "pl" / "Nintendo - Super Nintendo Entertainment System.lpl").write_text(json.dumps({"items": items}))
+            fetched, listed = [], []
+
+            def index_fn(system, kind):
+                listed.append(kind)
+                return self.SERVER
+
+            def fetch_fn(system, kind, name, target, limiter):
+                fetched.append((kind, name))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"png")
+
+            counts = thumbnails.sync(d / "pl", d / "th", d / "state.json", now=1000, index_fn=index_fn, fetch_fn=fetch_fn)
+            self.assertEqual(sorted(fetched), sorted((k, "ActRaiser (USA)") for k in thumbnails.KINDS))
+            snes = counts["Nintendo - Super Nintendo Entertainment System"]
+            self.assertEqual((snes["games"], snes["Named_Boxarts"]), (2, 1))
+            fetched.clear()
+            listed.clear()
+            thumbnails.sync(d / "pl", d / "th", d / "state.json", now=2000, index_fn=index_fn, fetch_fn=fetch_fn)
+            self.assertEqual((fetched, listed), ([], []))  # nothing missing, the miss remembered: no server calls
+            thumbnails.sync(d / "pl", d / "th", d / "state.json", now=1000 + 31 * 86400, index_fn=index_fn, fetch_fn=fetch_fn)
+            self.assertEqual(len(listed), 3)  # the miss expired: asked again
+
+    def test_offline_records_no_misses(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "pl").mkdir()
+            (d / "pl" / "X.lpl").write_text(json.dumps({"items": [{"label": "A"}]}))
+
+            def down(system, kind):
+                raise OSError("offline")
+
+            thumbnails.sync(d / "pl", d / "th", d / "state.json", index_fn=down)
+            self.assertEqual(json.loads((d / "state.json").read_text()), {})
+
+    def test_thumbnail_metrics(self):
+        text = retro_metrics.thumbnails_text({"X": {"games": 3, "Named_Boxarts": 2}})
+        self.assertIn('brick_retro_thumbnails{system="X",kind="Named_Boxarts"} 2', text)
+        self.assertIn('brick_retro_playlist_games{system="X"} 3', text)
+
+    def test_one_entry_per_name_across_folders(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "roms"
+            for rel in ("snes/Mario.smc", "snes/M/Mario.smc", "snes/Zelda.sfc"):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_bytes(b"x")
+            snes = next(s for s in games.SYSTEMS if s.folder == "snes")
+            got = games.games(snes, root, Path(d) / "m3u")
+        self.assertEqual([label for _, label in got], ["Mario", "Zelda"])
+        self.assertEqual(got[0][0], root / "snes/Mario.smc")

@@ -52,6 +52,23 @@ def games_text(counts: dict[str, int]) -> str:
     return r.render()
 
 
+def thumbnails_text(counts: dict[str, dict[str, int]]) -> str:
+    r = Registry()
+    have = r.gauge("brick_retro_thumbnails", "Games with each kind of thumbnail, per playlist.", ["system", "kind"])
+    games = r.gauge("brick_retro_playlist_games", "Distinct games in each playlist.", ["system"])
+    for system, c in counts.items():
+        games.set(c["games"], system=system)
+        for kind, n in c.items():
+            if kind != "games":
+                have.set(n, system=system, kind=kind)
+    return r.render()
+
+
+def write_thumbnails(counts, path: str = os.path.join(TEXTFILE_DIR, "brick-retro-thumbnails.prom")) -> None:
+    if os.path.isdir(os.path.dirname(path)):
+        write_textfile(path, thumbnails_text(counts))
+
+
 def write_games(counts: dict[str, int], path: str = os.path.join(TEXTFILE_DIR, "brick-retro-games.prom")) -> None:
     if os.path.isdir(os.path.dirname(path)):
         write_textfile(path, games_text(counts))
