@@ -1071,3 +1071,58 @@ class NightlyLightsTest(unittest.TestCase):
         self.assertEqual(lights.idle_pattern(checks), "alert")
         self.assertIn("nightly", patterns.IDLE)
 
+
+class PlasmaLibraryTest(unittest.TestCase):
+    """jenkins/lib/plasma.groovy marks running builds; brick-status reads the
+    mark (checks) and lights the stage's pattern (lights, patterns)."""
+
+    LIB = JENKINS / "lib" / "plasma.groovy"
+
+    def test_every_part_agrees_on_the_kinds(self):
+        groovy = re.search(r"def kinds = \[(.*?)\]", self.LIB.read_text()).group(1)
+        kinds = re.findall(r"'(\w+)'", groovy)
+        self.assertEqual(sorted(kinds), sorted(checks.PLASMA_STAGES))
+        self.assertEqual(sorted(lights.STAGE_ORDER), sorted(kinds))
+        self.assertEqual(sorted(patterns.STAGES), sorted(kinds))
+        for kind in kinds:
+            self.assertIn(f"stage-{kind}", patterns.IDLE)
+
+    def test_jobs_use_only_known_kinds(self):
+        used = set()
+        for job in (JENKINS / "jobs").glob("*.groovy"):
+            used |= set(re.findall(r"plasma\('(\w+)'\)", job.read_text()))
+        self.assertTrue(used)
+        self.assertLessEqual(used, set(checks.PLASMA_STAGES))
+
+    def test_the_seed_puts_the_library_in_every_job_and_the_image_ships_it(self):
+        seed = (JENKINS / "seed.groovy").read_text()
+        self.assertIn("script(library + '\\n' + text)", seed)
+        self.assertIn("COPY --chown=root:root --chmod=755 lib /usr/share/brick-jenkins/lib",
+                      (JENKINS / "Dockerfile").read_text())
+
+    def test_the_mark_is_read_from_a_running_build(self):
+        self.assertEqual(checks.plasma_stage("plasma:test"), "test")
+        self.assertEqual(checks.plasma_stage("plasma:dance"), "")
+        self.assertEqual(checks.plasma_stage("a note someone wrote"), "")
+        self.assertEqual(checks.plasma_stage(None), "")
+        jobs = [{"name": "test-wigle-sync",
+                 "lastBuild": {"building": True, "timestamp": 1000 * (NOW - 30), "description": "plasma:install"}}]
+        [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
+        self.assertEqual((c.state, c.stage, c.detail), ("active", "install", "running 30s, install"))
+
+    def test_the_furthest_stage_wins_and_nightly_and_failures_outrank_stages(self):
+        def build(name, stage):
+            return {"group": "builds", "name": name, "state": "active", "stage": stage}
+        self.assertEqual(lights.idle_pattern([build("a", "test"), build("b", "push")]), "stage-push")
+        self.assertEqual(lights.idle_pattern([build("a", ""), {"group": "x", "name": "y", "state": "ok"}]),
+                         "building")
+        failing = {"group": "services", "name": "z", "state": "fail"}
+        self.assertEqual(lights.idle_pattern([build("a", "test"), failing]), "alert")
+        self.assertEqual(lights.idle_pattern([build("test-all", ""), build("a", "test"), failing]), "nightly")
+
+    def test_stage_patterns_are_whole_loops(self):
+        for kind, make in patterns.STAGES.items():
+            frames = make()
+            self.assertGreater(len(frames), 30, kind)
+            self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), kind)
+

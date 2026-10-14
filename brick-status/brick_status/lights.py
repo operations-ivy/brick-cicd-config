@@ -8,6 +8,9 @@ from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
 
 log = logging.getLogger(__name__)
 
+# Plasma stage kinds, least to most important (checks.PLASMA_STAGES).
+STAGE_ORDER = ["checkout", "install", "test", "verify", "build", "push", "deploy"]
+
 
 def idle_pattern(checks: list[dict]) -> str:
     """Pick the idle light pattern for the most important current event."""
@@ -18,6 +21,11 @@ def idle_pattern(checks: list[dict]) -> str:
         return "nightly"
     if FAIL in states:
         return "alert"
+    # A build marked by the plasma library: its stage's pattern. With several,
+    # the stage furthest along wins.
+    staged = [c["stage"] for c in checks if c["group"] == "builds" and c["state"] == ACTIVE and c.get("stage")]
+    if staged:
+        return "stage-" + max(staged, key=STAGE_ORDER.index)
     if "builds" in running:
         return "building"
     if "wigle" in running:

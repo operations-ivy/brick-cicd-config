@@ -36,6 +36,9 @@ class Check:
     name: str
     state: str
     detail: str = ""
+    # A running Jenkins build's stage kind, from the plasma library's mark
+    # (jenkins/lib/plasma.groovy): the lights play that kind's pattern.
+    stage: str = ""
 
 
 def worst(states: list[str]) -> str:
@@ -109,7 +112,7 @@ class Jenkins:
     """Jenkins on the cluster, read through its API (as brick-status' read-only
     user) rather than Prometheus, which only has build results by the minute."""
 
-    TREE = "jobs[name,lastBuild[number,building,timestamp],lastCompletedBuild[result,timestamp]]"
+    TREE = "jobs[name,lastBuild[number,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
 
     def __init__(self, url: str, user: str, password: str, timeout: float = 5.0):
         self.url = url
@@ -122,6 +125,18 @@ class Jenkins:
         req = urllib.request.Request(f"{self.url}/api/json?{qs}", headers=self.headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.load(resp)["jobs"]
+
+
+# The stage kinds the plasma library marks builds with (jenkins/lib/plasma.groovy).
+PLASMA_STAGES = ("checkout", "install", "test", "build", "push", "deploy", "verify")
+
+
+def plasma_stage(description: str | None) -> str:
+    """The stage kind in a build's "plasma:<kind>" description, or ""."""
+    if description and description.startswith("plasma:"):
+        kind = description.removeprefix("plasma:").strip()
+        return kind if kind in PLASMA_STAGES else ""
+    return ""
 
 
 def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
@@ -138,8 +153,10 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
     for job in sorted(jobs, key=lambda j: j["name"]):
         last, done = job.get("lastBuild") or {}, job.get("lastCompletedBuild")
         if last.get("building"):
+            stage = plasma_stage(last.get("description"))
             checks.append(Check("builds", job["name"], ACTIVE,
-                                f"running {_ago(now - last['timestamp'] / 1000)}"))
+                                f"running {_ago(now - last['timestamp'] / 1000)}" + (f", {stage}" if stage else ""),
+                                stage))
         elif not done:
             checks.append(Check("builds", job["name"], OK, "not run yet"))
         else:

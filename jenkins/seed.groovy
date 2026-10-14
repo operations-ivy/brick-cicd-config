@@ -16,6 +16,10 @@
 // same value as ~/.config/brick-jenkins/secrets/webhook_secret on brick9000).
 
 def root = '/usr/share/brick-jenkins'
+// The shared library (lib/*.groovy, e.g. plasma), put ahead of every job's
+// pipeline: the jobs can call its functions as their own.
+def library = new File("${root}/lib").listFiles().findAll { it.name.endsWith('.groovy') }.sort { it.name }
+        .collect { it.text }.join('\n')
 def secret = new File('/run/secrets/additional/webhook-secret').text.trim()
 
 new File("${root}/jobs").listFiles().findAll { it.name.endsWith('.groovy') }.sort { it.name }.each { file ->
@@ -78,7 +82,7 @@ new File("${root}/jobs").listFiles().findAll { it.name.endsWith('.groovy') }.sor
         }
         definition {
             cps {
-                script(text)
+                script(library + '\n' + text)
                 sandbox(true)
             }
         }

@@ -42,3 +42,4 @@ RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 COPY --chown=root:root --chmod=644 seed.groovy /usr/share/brick-jenkins/seed.groovy
 COPY --chown=root:root --chmod=755 jobs /usr/share/brick-jenkins/jobs
 COPY --chown=root:root --chmod=755 bin /usr/share/brick-jenkins/bin
+COPY --chown=root:root --chmod=755 lib /usr/share/brick-jenkins/lib
