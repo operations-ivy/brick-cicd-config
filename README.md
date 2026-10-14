@@ -67,6 +67,17 @@ script in git that runs from anywhere, not a Jenkins job.
   Maintenance jobs run on the controller (`agent { label 'built-in' }`), which
   has the tools and secrets; the controller takes nothing else, so build and
   test jobs get a throwaway agent pod on brick2000.
+- **Agent pods** run in the `jenkins-agents` namespace, where the controller
+  may only manage pods. They run as a ServiceAccount with no token, so the
+  repo code a test job runs can't call the cluster's API at all. Each test
+  job's pod has the agent's `jnlp` container (it has git, and clones the
+  repo) and one for the tests, with CPU and memory limits:
+  `test-brick-cicd-config` uses this Jenkins image (already on brick2000,
+  with git, Python 3 and ssh; a test keeps its tag in step with
+  `values.yaml`), the Poetry repos the same pinned `python:3.11` image and
+  Poetry as their Dockerfiles. Those two images come from Docker Hub, so a
+  node that hasn't pulled them can't start a test while the internet is
+  down. chucks-wisdom's database tests need Docker, so they skip in a pod.
 - **Webhooks from the LAN.** Every job can be started with
   `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
   parameters in the query string (`&APPLY=true`). The secret is
@@ -91,6 +102,8 @@ script in git that runs from anywhere, not a Jenkins job.
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
 | `deploy-brick9000` | Points brick9000's deploy at a branch and starts it now instead of at its 2-hourly timer, which then keeps following that branch (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | `BRANCH=<branch>` to try a branch; without it, or empty, `main` |
 | `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |
+| `test-<repo>` | Runs a repo's tests in an agent pod: `test-brick-cicd-config` (`scripts/test`), `test-wigle-sync`, `test-chucks-wisdom`, `test-overwatch` (`poetry run pytest`) | `BRANCH=<branch>`; without it, `main` |
+| `test-all` | Runs every `test-<repo>` on `main`, one at a time, and fails naming the repos that failed (nightly) | |
 | `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
 ### Secrets

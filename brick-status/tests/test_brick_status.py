@@ -838,11 +838,43 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertIn("pipeline {", job.read_text(), job.name)
             self.assertRegex(job.stem, r"^[a-z0-9-]+$")
 
+    def maintenance_jobs(self):
+        """Every job but the test jobs, which run in agent pods (test-*) or
+        only start others (test-all)."""
+        return [j for j in (JENKINS / "jobs").glob("*.groovy") if not j.stem.startswith("test-")]
+
     def test_jobs_run_on_the_controller(self):
         # The controller is EXCLUSIVE (values.yaml): a job that doesn't ask for
         # the built-in node waits for an agent pod, which has none of the tools.
-        for job in (JENKINS / "jobs").glob("*.groovy"):
+        for job in self.maintenance_jobs():
             self.assertIn("agent { label 'built-in' }", job.read_text(), job.name)
+
+    def test_test_jobs_run_in_agent_pods(self):
+        for job in (JENKINS / "jobs").glob("test-*.groovy"):
+            text = job.read_text()
+            if job.stem == "test-all":
+                self.assertIn("agent none", text)
+            else:
+                self.assertIn("kubernetes {", text, job.name)
+                self.assertNotIn("label 'built-in'", text, job.name)
+
+    def test_the_tests_pod_runs_the_controller_image_it_ships_in(self):
+        # test-brick-cicd-config runs this image: a stale tag would test with old tools.
+        tag = re.search(r'^    tag: "(.+)"$', (JENKINS / "values.yaml").read_text(), re.M).group(1)
+        job = (JENKINS / "jobs" / "test-brick-cicd-config.groovy").read_text()
+        self.assertIn(f"image: docker.io/whitepatrick/brick-jenkins:{tag}\n", job)
+
+    def test_test_all_runs_every_test_job(self):
+        jobs = {p.stem.removeprefix("test-") for p in (JENKINS / "jobs").glob("test-*.groovy")} - {"all"}
+        listed = re.search(r"for \(repo in \[(.*?)\]\)", (JENKINS / "jobs" / "test-all.groovy").read_text()).group(1)
+        self.assertEqual(set(re.findall(r"'([\w-]+)'", listed)), jobs)
+
+    def test_agent_pods_get_no_service_account_token(self):
+        # Test jobs run each repo's code; it mustn't reach the cluster API.
+        values = (JENKINS / "values.yaml").read_text()
+        self.assertRegex(values, r"(?m)^serviceAccountAgent:\n  create: true\n  automountServiceAccountToken: false$")
+        self.assertRegex(values, r"(?m)^  namespace: jenkins-agents$")
+        self.assertIn("name: jenkins-agents", (JENKINS / "namespace.yaml").read_text())
 
     def test_job_scripts_parse(self):
         scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("release", "seal-secrets")]
@@ -852,7 +884,7 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
 
     def test_jobs_call_scripts_that_exist(self):
-        for job in (JENKINS / "jobs").glob("*.groovy"):
+        for job in self.maintenance_jobs():
             paths = re.findall(r"/usr/share/brick-jenkins/(bin/[\w-]+)", job.read_text())
             self.assertTrue(paths, f"{job.name}: runs no script")
             for path in paths:
