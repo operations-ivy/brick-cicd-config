@@ -20,9 +20,12 @@ mimetypes.add_type("font/woff2", ".woff2")
 
 def crt_playlist(settings) -> dict:
     """The CRT window's programs that are installed, in order, and how long each plays."""
-    programs = [{"name": n, "tint": matrix.PROGRAMS[n].tint} for n in settings.crt_programs
+    def entry(name):
+        p = matrix.PROGRAMS[name]
+        return {"name": name, "tint": p.tint, "layout": p.layout, "font": p.font}
+    programs = [entry(n) for n in settings.crt_programs
                 if n in matrix.PROGRAMS and matrix.PROGRAMS[n].available(settings.cmatrix)]
-    return {"programs": programs or [{"name": "cmatrix", "tint": False}], "minutes": settings.crt_minutes}
+    return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes}
 
 
 def serve(settings, board, status) -> None:
