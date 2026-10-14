@@ -45,6 +45,11 @@ class Settings:
     # Seconds after the last button press before the board goes back to idle.
     active_seconds: float = 120.0
     cmatrix: str = "cmatrix"
+    # The overview's CRT window plays these in turn (matrix.PROGRAMS names),
+    # each for crt_minutes; ones that aren't installed are skipped.
+    crt_programs: list[str] = field(default_factory=lambda: [
+        "cmatrix", "pipes", "gallery", "bonsai", "rain", "clock", "nyancat", "train"])
+    crt_minutes: float = 10.0
     # When the screen and lights are off; see board.QuietSchedule for the format.
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
     # How long the side button turns everything on for, while it's quiet.
@@ -101,6 +106,9 @@ class Settings:
         s.retro_flag = env("BRICK_STATUS_RETRO_FLAG", s.retro_flag)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
+        if v := env("BRICK_STATUS_CRT_PROGRAMS"):
+            s.crt_programs = [n.strip() for n in v.split(",") if n.strip()]
+        s.crt_minutes = float(env("BRICK_STATUS_CRT_MINUTES", s.crt_minutes))
         if v := env("BRICK_STATUS_QUIET"):
             s.quiet = QuietSchedule.parse(v)
         elif env("BRICK_STATUS_QUIET_START") and env("BRICK_STATUS_QUIET_END"):

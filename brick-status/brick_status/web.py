@@ -1,4 +1,4 @@
-"""The board page Chromium shows, the JSON state it polls, and the cmatrix stream."""
+"""The board page Chromium shows, the JSON state it polls, and the CRT window's stream."""
 
 import base64
 import json
@@ -18,7 +18,19 @@ BOOT = str(time.time())
 mimetypes.add_type("font/woff2", ".woff2")
 
 
+def crt_playlist(settings) -> dict:
+    """The CRT window's programs that are installed, in order, and how long each plays."""
+    def entry(name):
+        p = matrix.PROGRAMS[name]
+        return {"name": name, "tint": p.tint, "layout": p.layout, "font": p.font}
+    programs = [entry(n) for n in settings.crt_programs
+                if n in matrix.PROGRAMS and matrix.PROGRAMS[n].available(settings.cmatrix)]
+    return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes}
+
+
 def serve(settings, board, status) -> None:
+    crt = crt_playlist(settings)
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             url = urlsplit(self.path)
@@ -32,6 +44,7 @@ def serve(settings, board, status) -> None:
                     "views": board.views,
                     "updated": status.updated,
                     "now": now,
+                    "crt": crt,
                     **status.get(),
                 }).encode()
                 self._send(200, "application/json", body)
@@ -67,8 +80,9 @@ def serve(settings, board, status) -> None:
                 size = int(arg("cols", "80")), int(arg("rows", "24"))
             except ValueError:
                 return
-            # closing() stops cmatrix as soon as the page goes away.
-            with closing(matrix.stream(settings.cmatrix, *size, arg("colour", "green"))) as chunks:
+            # closing() stops the program as soon as the page goes away.
+            with closing(matrix.stream(arg("program", "cmatrix"), *size, arg("colour", "green"),
+                                       settings.cmatrix)) as chunks:
                 try:
                     for chunk in chunks:
                         self.wfile.write(b"data: " + base64.b64encode(chunk) + b"\n\n")

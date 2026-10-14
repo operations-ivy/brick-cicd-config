@@ -13,7 +13,7 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import build, checks, host, lights, notify, patterns, units, web
+from brick_status import build, checks, crt_gallery, host, lights, matrix, notify, patterns, units, web
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
 
@@ -961,4 +961,61 @@ class UnitsTest(unittest.TestCase):
         self.assertEqual(target.read_text(), text)
         self.assertEqual(oct(target.stat().st_mode & 0o777), "0o644")
         self.assertEqual([p.name for p in d.iterdir()], ["brick-units.prom"])
+
+
+class CrtTest(unittest.TestCase):
+    def test_playlist_skips_programs_that_are_not_installed(self):
+        s = Settings()
+        s.crt_programs = ["cmatrix", "pipes", "no-such-program", "gallery"]
+        s.cmatrix = sys.executable  # stands in for an installed cmatrix
+        orig = matrix.PROGRAMS["pipes"]
+        matrix.PROGRAMS["pipes"] = matrix.Program(("/nonexistent/pipes",))
+        try:
+            crt = web.crt_playlist(s)
+        finally:
+            matrix.PROGRAMS["pipes"] = orig
+        self.assertEqual([p["name"] for p in crt["programs"]], ["cmatrix", "gallery"])
+        self.assertEqual([(p["tint"], p["layout"]) for p in crt["programs"]], [(False, "wide"), (True, "box")])
+        self.assertEqual(crt["minutes"], 10.0)
+
+    def test_nothing_installed_falls_back_to_cmatrix(self):
+        s = Settings()
+        s.crt_programs = ["no-such-program"]
+        self.assertEqual(web.crt_playlist(s)["programs"],
+                         [{"name": "cmatrix", "tint": False, "layout": "wide", "font": 11}])
+
+    def test_unknown_program_names_run_cmatrix(self):
+        # The page names the program; only names in PROGRAMS ever run.
+        ran = []
+
+        class FakePopen:
+            pid = 0
+
+            def __init__(self, argv, **kw):
+                ran.append(argv)
+
+            def poll(self):
+                return 0
+
+        orig = subprocess.Popen
+        matrix.subprocess.Popen = FakePopen
+        try:
+            list(matrix.stream("rm -rf /", 80, 24, "red", cmatrix="/usr/bin/cmatrix"))
+        finally:
+            matrix.subprocess.Popen = orig
+        self.assertEqual(ran, [["/usr/bin/cmatrix", "-b", "-s", "-C", "red"]])
+
+    def test_every_program_has_a_layout_the_page_knows(self):
+        page = (Path(web.STATIC) / "index.html").read_text()
+        for name, p in matrix.PROGRAMS.items():
+            self.assertIn(p.layout, ("wide", "box"), name)
+            if p.layout != "wide":
+                self.assertIn(f"body.overview.crt-{p.layout}", page, name)
+
+    def test_every_painting_has_a_credit(self):
+        names = crt_gallery.credits()
+        files = sorted(p.name for p in Path(crt_gallery.PAINTINGS).glob("*.jpg"))
+        self.assertGreaterEqual(len(files), 8)
+        self.assertEqual(sorted(names), files)
+        self.assertEqual(names["van-gogh-the-starry-night.jpg"], "The Starry Night, Vincent van Gogh, 1889")
 
