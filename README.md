@@ -507,6 +507,17 @@ fresh. It exits 1 if anything is down.
 NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, Genesis, Master System
 and PlayStation over the board with a Bluetooth controller (RetroArch with the
 Nestopia, Snes9x, Gambatte, mGBA, Genesis Plus GX and PCSX-ReARMed cores).
+Every console gets crt-pi, a Raspberry Pi friendly CRT shader (scanlines, a
+slight curve; `brick9000/retroarch/shaders`, vendored with its GPL-2.0+
+credit), passed by brick-retro with `--set-shader` (`BRICK_RETRO_SHADER=` to
+turn it off). PlayStation games render at twice the PS1's resolution
+(PCSX-ReARMed's enhanced resolution, `retroarch/core-options.cfg`), scaled
+to the full screen. Measured on brick9000 (2026-10-14): ReARMed 6.4-9x full
+speed native, 4.5-8x at 2x, 3.4x at 2x with crt-pi in the heaviest games.
+SwanStation (3.1-3.9x, software only) and Beetle PSX HW (0.8-1.7x) were
+tried: their GPU renderers can't run on the Pi 4 (Vulkan stalls; their
+OpenGL ones need more than its OpenGL 3.1, even with a desktop-GL RetroArch
+built to test), so neither could upscale.
 Debian has no PlayStation core, so `install.sh` builds PCSX-ReARMed from a
 pinned commit into `/usr/local/lib/libretro`.
 

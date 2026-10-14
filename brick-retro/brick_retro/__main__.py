@@ -35,6 +35,9 @@ PLAYLIST_DIR = Path(env("PLAYLIST_DIR", str(HOME / ".config/retroarch/playlists"
 M3U_DIR = Path(env("M3U_DIR", str(HOME / "games/m3u")))
 CORE_DIR = Path(env("CORE_DIR", "/usr/lib/aarch64-linux-gnu/libretro"))
 APPEND_CONFIG = env("CONFIG", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg"))
+# A CRT look for every console: crt-pi, a Raspberry Pi friendly CRT shader
+# (brick9000/retroarch/shaders, vendored). BRICK_RETRO_SHADER= (empty) turns it off.
+SHADER = env("SHADER", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/shaders/crt-pi.glslp"))
 FLAG = Path(env("FLAG", os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "brick-retro.playing")))
 
 
@@ -42,10 +45,18 @@ def retroarch_running() -> bool:
     return subprocess.run(["pgrep", "-x", "retroarch"], stdout=subprocess.DEVNULL).returncode == 0
 
 
+def retroarch_command(shader: str = SHADER) -> list[str]:
+    """RetroArch with brick9000's settings, and the CRT shader for every core."""
+    cmd = ["retroarch", "--appendconfig", APPEND_CONFIG]
+    if shader:
+        cmd += ["--set-shader", shader]
+    return cmd
+
+
 def start_retroarch() -> None:
     log.info("starting RetroArch")
     # Its own session: restarting brick-retro (a deploy) leaves a game alone.
-    subprocess.Popen(["retroarch", "--appendconfig", APPEND_CONFIG], start_new_session=True,
+    subprocess.Popen(retroarch_command(), start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
