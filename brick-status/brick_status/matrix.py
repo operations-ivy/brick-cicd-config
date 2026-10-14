@@ -20,7 +20,7 @@ import sys
 import termios
 import threading
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
@@ -28,17 +28,12 @@ log = logging.getLogger(__name__)
 # burnt orange, since cmatrix has no orange.
 COLOURS = {"green", "yellow", "red", "white"}
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# hollywood runs its panes in a tmux server, which outlives its process group:
-# give it a private one (TMUX_TMPDIR) and kill that server when it stops.
-TMUX_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "brick-status-crt-tmux")
 
 
 @dataclass(frozen=True)
 class Program:
     argv: tuple[str, ...]  # "{colour}" is replaced with the health colour
     tint: bool = True  # the page tints its colours; False: it colours itself
-    env: dict = field(default_factory=dict)
-    cleanup: tuple[str, ...] = ()  # run after it stops
 
     def available(self, cmatrix: str = "cmatrix") -> bool:
         exe = cmatrix if self.argv[0] == "cmatrix" else self.argv[0]
@@ -56,11 +51,11 @@ PROGRAMS = {
     "rain": Program(("/usr/games/rain", "-d", "150")),
     "train": Program(("sh", "-c", "while :; do sl; sleep 20; done")),
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45")),
-    "hollywood": Program(("hollywood",), env={"TMUX_TMPDIR": TMUX_DIR},
-                         cleanup=("tmux", "kill-server")),
+    # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
+    # held the Pi 4 at 96% CPU (#28).
 }
 
-_current: tuple[subprocess.Popen, Program] | None = None
+_current: subprocess.Popen | None = None
 _lock = threading.Lock()
 
 
@@ -80,17 +75,14 @@ def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix
 
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-    env = {**os.environ, "TERM": "xterm-256color", "COLUMNS": str(cols), "LINES": str(rows),
-           **program.env}
-    if program.env.get("TMUX_TMPDIR"):
-        os.makedirs(program.env["TMUX_TMPDIR"], mode=0o700, exist_ok=True)
+    env = {**os.environ, "TERM": "xterm-256color", "COLUMNS": str(cols), "LINES": str(rows)}
     proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, env=env, cwd=PACKAGE_ROOT,
                             start_new_session=True, close_fds=True)
     os.close(slave)
     with _lock:
-        previous, _current = _current, (proc, program)
+        previous, _current = _current, proc
     if previous is not None:
-        _stop(*previous)
+        _stop(previous)
     log.info("%s started (%dx%d, %s)", name, cols, rows, colour)
 
     try:
@@ -106,23 +98,22 @@ def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix
                 break
             yield data
     finally:
-        _stop(proc, program)
+        _stop(proc)
         os.close(master)
         with _lock:
-            if _current is not None and _current[0] is proc:
+            if _current is proc:
                 _current = None
 
 
-def _stop(proc: subprocess.Popen, program: Program) -> None:
-    if proc.poll() is None:
+def _stop(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=2)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
+            os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=2)
         except (ProcessLookupError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait(timeout=2)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                pass
-    if program.cleanup:
-        subprocess.run(program.cleanup, env={**os.environ, **program.env}, capture_output=True, timeout=10)
+            pass

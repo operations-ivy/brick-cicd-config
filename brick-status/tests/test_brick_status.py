@@ -1004,11 +1004,6 @@ class CrtTest(unittest.TestCase):
             matrix.subprocess.Popen = orig
         self.assertEqual(ran, [["/usr/bin/cmatrix", "-b", "-s", "-C", "red"]])
 
-    def test_hollywood_cleans_up_its_private_tmux(self):
-        h = matrix.PROGRAMS["hollywood"]
-        self.assertEqual(h.cleanup, ("tmux", "kill-server"))
-        self.assertTrue(h.env["TMUX_TMPDIR"].endswith("brick-status-crt-tmux"))
-
     def test_every_painting_has_a_credit(self):
         names = crt_gallery.credits()
         files = sorted(p.name for p in Path(crt_gallery.PAINTINGS).glob("*.jpg"))
