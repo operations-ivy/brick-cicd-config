@@ -10,7 +10,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # brick-status.local), which the proxy redirects to the new ones.
 sudo apt-get install -y python3-evdev avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
-sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat sl bsdgames chafa
+sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
 # The plasma daemon (root) only loads patterns from /etc/plasma/; brick-status
 # (zaphod) writes its own into this subdirectory.
 sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status

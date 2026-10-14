@@ -22,7 +22,7 @@ def crt_playlist(settings) -> dict:
     """The CRT window's programs that are installed, in order, and how long each plays."""
     def entry(name):
         p = matrix.PROGRAMS[name]
-        return {"name": name, "tint": p.tint, "layout": p.layout, "font": p.font}
+        return {"name": name, "tint": p.tint, "font": p.font}
     programs = [entry(n) for n in settings.crt_programs
                 if n in matrix.PROGRAMS and matrix.PROGRAMS[n].available(settings.cmatrix)]
     return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes}

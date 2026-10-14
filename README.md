@@ -284,11 +284,10 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix,
   pipes, a gallery of public-domain paintings drawn with chafa
   (`brick-status/art/paintings/`, credits in its `CREDITS.md`), cbonsai,
-  rain, tty-clock, nyancat and sl. The bezel says which. Each program
-  names a frame: the full-width strip, or a box about a quarter of the
-  screen with the three tiles stacked beside it (bonsai, clock, nyancat, the
-  gallery), and a font size (smaller shows more of programs that draw at a
-  fixed size, like nyancat). Only names in
+  rain, tty-clock and nyancat. The bezel says which. The window is a
+  square-ish CRT frame about a quarter of the screen, with the three tiles
+  stacked beside it and the vitals below; each program names a font size
+  (smaller shows more of programs that draw at a fixed size, like nyancat). Only names in
   `matrix.PROGRAMS` run, and ones that aren't installed are skipped. Each
   runs in a pseudo-terminal sized to the window; its output streams to the
   page as server-sent events and xterm.js draws it with its WebGL renderer
