@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import build, checks, host, lights, notify, web
+from . import build, checks, host, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
@@ -70,7 +70,8 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
                 vitals = []
             vitals.append(local.read())
             internet = host.internet_up()
-            summary = checks.summarize(checks.collect(prom, jenkins, internet))
+            summary = checks.summarize(checks.collect(prom, jenkins, internet)
+                                       + units.board_checks(prom, socket.gethostname()))
             status.set(summary, {"sshd": host.sshd_running(), "internet": internet}, vitals)
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),

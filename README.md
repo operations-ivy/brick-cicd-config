@@ -217,6 +217,21 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   with the Pi went (OK, failed, or waiting for internet), how many files it
   uploaded, and when the next one runs. It only alerts when every run for 2
   hours has had errors; the pwnagotchi being away and syncs pausing are normal.
+- **Services:** failed systemd units and timers that stopped firing, on
+  every host (`brick_status/units.py`). brick9000's own system and user
+  units are read straight from `systemctl`, so they still show when the
+  cluster is down; the rest come from Prometheus: node-exporter's systemd
+  collector for the k3s nodes' system units, and for user units (which that
+  collector can't see) `brick-units.timer` on brick1982, which every 2
+  minutes writes `brick_systemd_unit_problem` to node-exporter's textfile
+  directory (`/var/lib/node-exporter-textfile`). A timer is a problem when
+  its next run is more than 15 minutes overdue, or it's enabled with nothing
+  scheduled; the report itself going 10 minutes stale is one too. A problem
+  makes the Services view "Failing" (yellow, like a degraded workload: a
+  failed job isn't the cluster down) and shows on the CRT label and the
+  lights; it doesn't page. Units known to fail are listed with why in
+  `units.EXPECTED` (brick2000's, which are hands off) and show green.
+  brick69 isn't covered yet: it isn't a node, and it's often out driving.
 - It also checks the internet itself, by opening a TCP connection to three
   public DNS anycast addresses (1.1.1.1, 8.8.8.8, 9.9.9.9); any one answering
   means it's up. An ISP outage is outside our control, so it isn't a failure:
@@ -263,7 +278,7 @@ The board has three modes:
 | quiet | the quiet schedule (below) | off | off; only the side button does anything: it turns everything on for 30 minutes |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
-Cluster; bottom-left picks wigle-sync; the other two are free for now. The
+Cluster; the bottom row picks wigle-sync and Services; the last one is free for now. The
 joystick left/right steps through the views. The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,

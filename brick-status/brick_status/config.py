@@ -10,8 +10,8 @@ from .board import QuietSchedule
 DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
                  "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
-# The four board views, in button order.
-VIEWS = ["overview", "builds", "cluster", "wigle"]
+# The board views, in button order (the sixth button is free).
+VIEWS = ["overview", "builds", "cluster", "wigle", "services"]
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the

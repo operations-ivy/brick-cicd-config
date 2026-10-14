@@ -1,0 +1,11 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Started by brick-units.timer. node-exporter's systemd collector sees only
+# system units; this reports zaphod's (brick-arena, brick-deploy) through its
+# textfile collector, for brick9000's board (README, "Services").
+[Unit]
+Description=Report failed user units to node-exporter
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/brick-cicd-config/brick-status
+ExecStart=/usr/bin/python3 -m brick_status.units --textfile /var/lib/node-exporter-textfile/brick-units.prom

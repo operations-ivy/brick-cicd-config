@@ -11,7 +11,10 @@ sudo apt-get install -y --no-install-recommends cage chromium grim fonts-dejavu-
 
 mkdir -p ~/.config/brick-arena ~/.config/systemd/user ~/.local/share/brick-arena
 [ -f ~/.config/brick-arena/env ] || cp "$here/brick-arena.env.example" ~/.config/brick-arena/env
-cp "$here/brick-arena.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" ~/.config/systemd/user/
+cp "$here/brick-arena.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
+    "$here/brick-units.service" "$here/brick-units.timer" ~/.config/systemd/user/
+# node-exporter (the cluster's DaemonSet) reads brick-units' report from here.
+sudo install -d -o "$USER" -g "$USER" -m 755 /var/lib/node-exporter-textfile
 
 sudo cp "$here/90-backlight.rules" /etc/udev/rules.d/
 sudo udevadm trigger --subsystem-match=backlight --action=add
@@ -23,7 +26,7 @@ sudo loginctl enable-linger "$USER"
 systemctl --user daemon-reload
 systemctl --user enable brick-arena
 systemctl --user restart brick-arena
-systemctl --user enable --now brick-deploy.timer
+systemctl --user enable --now brick-deploy.timer brick-units.timer
 
 sudo systemctl daemon-reload
 sudo systemctl disable getty@tty1.service

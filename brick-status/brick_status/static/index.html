@@ -209,16 +209,17 @@
 <script src="/static/vendor/addon-fit.js"></script>
 <script src="/static/vendor/addon-webgl.js"></script>
 <script>
-const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync" };
+const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync", services: "Services" };
 const WORDS = {
   builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Running", unknown: "No data" },
   cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },
   wigle: { ok: "OK", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
+  services: { ok: "Running", warn: "Failing", fail: "Failing", active: "Running", unknown: "No data" },
 };
 const SEVERITY = ["fail", "warn", "unknown", "active", "ok"];
 const MAX_ROWS = 9;
-// Physical buttons: two rows of three. The board's views take the first four.
-const PAD = ["overview", "builds", "cluster", "wigle", null, null];
+// Physical buttons: two rows of three. The board's views take the first five.
+const PAD = ["overview", "builds", "cluster", "wigle", "services", null];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bySeverity = (a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state);
 

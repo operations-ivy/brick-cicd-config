@@ -13,7 +13,7 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import build, checks, host, lights, notify, patterns, web
+from brick_status import build, checks, host, lights, notify, patterns, units, web
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
 
@@ -876,3 +876,87 @@ class JenkinsJobsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NOW = 1_800_000_000.0
+
+
+def timer(unit, next_s, enabled=None):
+    t = {"unit": unit, "next": int(next_s * 1e6) if next_s else 0}
+    if enabled is not None:
+        t["enabled"] = enabled
+    return t
+
+
+class UnitsTest(unittest.TestCase):
+    def test_failed_overdue_and_stopped_timers_are_problems(self):
+        data = {"failed": ["brick-roms.service"],
+                "timers": [timer("ok.timer", NOW + 60), timer("late.timer", NOW - 20 * 60),
+                           timer("just-late.timer", NOW - 60), timer("stopped.timer", 0, enabled=True),
+                           timer("disabled.timer", 0, enabled=False)]}
+        found = units.problems(data, NOW)
+        self.assertEqual([(u, kind) for u, kind, _ in found],
+                         [("brick-roms.service", "failed"), ("late.timer", "overdue"), ("stopped.timer", "stopped")])
+        self.assertEqual(found[1][2], "overdue by 20m")
+
+    def test_local_checks_cover_both_scopes_and_say_ok_when_clean(self):
+        scopes = {False: {"failed": [], "timers": []},
+                  True: {"failed": ["brick-mirror.service"], "timers": []}}
+        cs = units.local_checks("brick9000", NOW, reader=lambda user: scopes[user])
+        self.assertEqual([(c.name, c.state) for c in cs], [("brick9000: brick-mirror.service", "warn")])
+        scopes[True]["failed"] = []
+        cs = units.local_checks("brick9000", NOW, reader=lambda user: scopes[user])
+        self.assertEqual([(c.name, c.state, c.detail) for c in cs], [("brick9000", "ok", "no failed units")])
+
+    def test_local_checks_survive_systemctl_failing(self):
+        def broken(user):
+            raise subprocess.TimeoutExpired("systemctl", 10)
+        [c] = units.local_checks("brick9000", NOW, reader=broken)
+        self.assertEqual((c.group, c.state), ("services", "unknown"))
+
+    def test_remote_checks_name_hosts_and_skip_the_board_itself(self):
+        prom = FakeProm({
+            "node_uname_info": [({"instance": "a:19100", "nodename": "brick2000"}, 1),
+                                ({"instance": "b:19100", "nodename": "brick1982"}, 1),
+                                ({"instance": "c:19100", "nodename": "brick420"}, 1)],
+            "node_systemd_unit_state": [({"instance": "a:19100", "name": "influxdb.service"}, 1),
+                                        ({"instance": "c:19100", "name": "k3s.service"}, 1)],
+            "brick_systemd_unit_problem": [({"instance": "b:19100", "unit": "brick-arena.service",
+                                             "problem": "failed"}, 1)],
+            "brick_systemd_report_timestamp_seconds": [({"instance": "b:19100"}, NOW - 60)],
+        })
+        cs = {c.name: (c.state, c.detail) for c in units.remote_checks(prom, "brick420", NOW)}
+        self.assertEqual(cs, {
+            # Known failures stay ok, with why; the host still gets its ok row.
+            "brick2000: influxdb.service": ("ok", "expected: pironman5 runs its own influxd"),
+            "brick2000": ("ok", "no failed units"),
+            "brick1982: brick-arena.service": ("warn", "failed"),
+        })
+
+    def test_a_stale_textfile_report_is_a_problem(self):
+        prom = FakeProm({"node_uname_info": [({"instance": "b:19100", "nodename": "brick1982"}, 1)],
+                         "brick_systemd_report_timestamp_seconds": [({"instance": "b:19100"}, NOW - 3600)]})
+        [c] = units.remote_checks(prom, "brick9000", NOW)
+        self.assertEqual((c.name, c.state, c.detail),
+                         ("brick1982: brick-units.timer", "warn", "user units unreported for 60m"))
+
+    def test_board_checks_keep_local_rows_when_prometheus_is_down(self):
+        class Down:
+            def query(self, promql):
+                raise urllib.error.URLError("timed out")
+        cs = units.board_checks(Down(), "brick9000", NOW, reader=lambda user: {"failed": [], "timers": []})
+        self.assertEqual([(c.name, c.state) for c in cs], [("brick9000", "ok"), ("other hosts", "unknown")])
+
+    def test_textfile_metrics_parse_and_replace_atomically(self):
+        text = units.metrics("user", [("brick-arena.service", "failed", "failed"),
+                                      ('we"ird.timer', "overdue", "")], NOW)
+        self.assertIn('brick_systemd_unit_problem{scope="user",unit="brick-arena.service",problem="failed"} 1', text)
+        self.assertIn('unit="we\\"ird.timer"', text)
+        self.assertIn('brick_systemd_report_timestamp_seconds{scope="user"} 1800000000', text)
+        d = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
+        target = d / "brick-units.prom"
+        units.write_textfile(str(target), text)
+        self.assertEqual(target.read_text(), text)
+        self.assertEqual(oct(target.stat().st_mode & 0o777), "0o644")
+        self.assertEqual([p.name for p in d.iterdir()], ["brick-units.prom"])
+
