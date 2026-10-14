@@ -19,6 +19,9 @@ GREEN = (0, 255, 0)
 AMBER = (255, 140, 0)
 RED = (255, 0, 0)
 GREY = (90, 90, 110)
+CYAN = (0, 200, 255)
+BLUE = (40, 90, 255)
+PURPLE = (170, 60, 255)
 OFF = (0, 0, 0)
 
 STATE_COLOURS = {"ok": GREEN, "warn": AMBER, "fail": RED, "active": GREEN, "unknown": GREY}
@@ -177,6 +180,70 @@ def nightly(seconds: float = 8.0, seed: int = 2000) -> list[Frame]:
     return frames
 
 
+def _led_frames(seconds: float, lit) -> list[Frame]:
+    """Frames from lit(f, n, i) -> brightness 0-1 per LED (all 40, not per slot)."""
+    n = int(seconds * FPS)
+    return [[lit(f, n, i) for i in range(WIDTH)] for f in range(n)]
+
+
+def stream(colour: Rgb, seconds: float, tail: int = 10) -> list[Frame]:
+    """checkout: a comet an LED at a time along the chain, data coming in."""
+    def lit(f, n, i):
+        behind = (f / n * WIDTH - i) % WIDTH
+        return _scale(colour, max(0.03, 1 - behind / tail) if behind < tail else 0.03)
+    return _led_frames(seconds, lit)
+
+
+def fill(colour: Rgb, seconds: float) -> list[Frame]:
+    """install: the slots fill one by one, the newest throbbing, then empty."""
+    n = int(seconds * FPS)
+    frames = []
+    for f in range(n):
+        level = f / n * (SLOTS + 1)
+        row = []
+        for s in range(SLOTS):
+            if s < int(level):
+                row.append(_scale(colour, 0.85))
+            elif s == int(level):
+                row.append(_scale(colour, 0.15 + 0.7 * (level - int(level))))
+            else:
+                row.append(_scale(colour, 0.03))
+        frames.append(_slots(row))
+    return frames
+
+
+def scanner(colour: Rgb, seconds: float, width: float = 5.0) -> list[Frame]:
+    """test: a scanner bouncing end to end across all 40 LEDs."""
+    def lit(f, n, i):
+        pos = (WIDTH - 1) * (0.5 - 0.5 * math.cos(2 * math.pi * f / n))
+        return _scale(colour, max(0.03, 1 - abs(i - pos) / width))
+    return _led_frames(seconds, lit)
+
+
+def rush(colour: Rgb, seconds: float) -> list[Frame]:
+    """push: a bright wave rushing out along the chain, twice a loop."""
+    def lit(f, n, i):
+        phase = (i / WIDTH - 2 * f / n) % 1.0
+        return _scale(colour, 0.05 + 0.95 * max(0.0, math.cos(2 * math.pi * phase)) ** 6)
+    return _led_frames(seconds, lit)
+
+
+def converge(colour: Rgb, seconds: float, tail: float = 4.0) -> list[Frame]:
+    """verify: two heads racing in from both ends, a white flash where they meet."""
+    def lit(f, n, i):
+        t = f / n
+        head = t * WIDTH / 2  # each covers half the chain per loop
+        k = 0.03
+        for d in (i, WIDTH - 1 - i):
+            behind = head - d
+            if 0 <= behind < tail:
+                k = max(k, 1 - behind / tail)
+        if t > 0.92:  # they've met: the whole chain flashes white, fading
+            return _scale((255, 255, 255), (1 - t) / 0.08)
+        return _scale(colour, k)
+    return _led_frames(seconds, lit)
+
+
 def flash(colour: Rgb, seconds: float) -> list[Frame]:
     """Hard on/off blink: on for the first half of each period, off for the second."""
     n = int(seconds * FPS)
@@ -193,6 +260,19 @@ IDLE = {
     "unknown": lambda: pulse(GREY, 4.0, 0.05, 0.4),
     "calm": lambda: pulse(GREEN, 6.0, 0.03),
 }
+
+# Jenkins build stages, from the plasma library's mark on a running build
+# (jenkins/lib/plasma.groovy, checks.PLASMA_STAGES): "stage-<kind>" patterns.
+STAGES = {
+    "checkout": lambda: stream(CYAN, 1.5),
+    "install": lambda: fill(AMBER, 2.0),
+    "test": lambda: scanner(GREEN, 1.6),
+    "verify": lambda: converge(PURPLE, 1.6),
+    "build": lambda: rainbow(0.75),
+    "push": lambda: rush(BLUE, 1.0),
+    "deploy": lambda: boil(2.0),
+}
+IDLE.update({f"stage-{kind}": make for kind, make in STAGES.items()})
 
 # Image builds and deploys on brick9000 (see build.py). These take over the
 # lights in idle and active mode alike; a deploy outranks an image build.

@@ -25,13 +25,13 @@ spec:
     stages {
         stage('Checkout') {
             // The agent's own container has git; the slim Python image doesn't.
-            steps { container('jnlp') { sh 'git clone --depth 1 --branch "$BRANCH" https://github.com/operations-ivy/chucks-wisdom src' } }
+            steps { script { plasma('checkout') { container('jnlp') { sh 'git clone --depth 1 --branch "$BRANCH" https://github.com/operations-ivy/chucks-wisdom src' } } } }
         }
         stage('Install') {
-            steps { dir('src') { sh 'pip install --no-cache-dir poetry==2.1.2 && poetry install --no-root --no-interaction' } }
+            steps { script { plasma('install') { dir('src') { sh 'pip install --no-cache-dir poetry==2.1.2 && poetry install --no-root --no-interaction' } } } }
         }
         stage('Test') {
-            steps { dir('src') { sh 'poetry run pytest -q' } }
+            steps { script { plasma('test') { dir('src') { sh 'poetry run pytest -q' } } } }
         }
     }
 }

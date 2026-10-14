@@ -14,7 +14,7 @@ kind: Pod
 spec:
   containers:
     - name: tests
-      image: docker.io/whitepatrick/brick-jenkins:2.580.1-6
+      image: docker.io/whitepatrick/brick-jenkins:2.580.1-7
       command: [sleep]
       args: [infinity]
       resources:
@@ -26,10 +26,10 @@ spec:
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 30, unit: 'MINUTES') }
     stages {
         stage('Checkout') {
-            steps { sh 'git clone --depth 1 --branch "$BRANCH" https://github.com/operations-ivy/brick-cicd-config src' }
+            steps { script { plasma('checkout') { sh 'git clone --depth 1 --branch "$BRANCH" https://github.com/operations-ivy/brick-cicd-config src' } } }
         }
         stage('Test') {
-            steps { dir('src') { sh 'scripts/test' } }
+            steps { script { plasma('test') { dir('src') { sh 'scripts/test' } } } }
         }
     }
 }

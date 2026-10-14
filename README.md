@@ -78,6 +78,15 @@ script in git that runs from anywhere, not a Jenkins job.
   Poetry as their Dockerfiles. Those two images come from Docker Hub, so a
   node that hasn't pulled them can't start a test while the internet is
   down. chucks-wisdom's database tests need Docker, so they skip in a pod.
+- **The plasma library drives the cabinet's buttons.** `jenkins/lib/*.groovy`
+  is a shared library the seed puts ahead of every job's pipeline (no Jenkins
+  library plugin source to fetch: it's baked into the image like the jobs).
+  `steps { script { plasma('test') { ... } } }` marks the running build with
+  what it's doing (its description becomes `plasma:test` for the block's
+  length). brick-status reads the mark from running builds as it polls
+  Jenkins and lights that stage's pattern (README, "brick-status", lights):
+  a pull, so it works from agent pods, which can't reach brick9000. Kinds:
+  `checkout`, `install`, `test`, `verify`, `build`, `push`, `deploy`.
 - **Webhooks from the LAN.** Every job can be started with
   `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
   parameters in the query string (`&APPLY=true`). The secret is
@@ -331,6 +340,7 @@ Idle light patterns, highest priority first:
 | --- | --- |
 | `nightly` | the show, while Jenkins' nightly `test-all` runs: each button's four LEDs spin a colour wheel, a white-hot comet sweeps the chain trailing the spectrum, fireworks burst on random buttons, and it all breathes (outranks everything, for the few minutes it runs) |
 | `alert` | red pulse: anything failing |
+| `stage-<kind>` | a running Jenkins build marked by the plasma library: `checkout` a cyan comet streaming along the chain, `install` an amber bar filling, `test` a green scanner swinging end to end, `verify` purple heads racing in from both ends to a white flash, `build` the rainbow, `push` blue waves rushing out, `deploy` the boil; with several, the stage furthest along wins |
 | `building` | amber chase: a Jenkins job is running |
 | `uploading` | green pulse: wigle-sync is uploading |
 | `warn` | slow amber pulse: something degraded |
