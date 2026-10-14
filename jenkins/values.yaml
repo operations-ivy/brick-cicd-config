@@ -13,7 +13,7 @@ controller:
   image:
     registry: docker.io
     repository: whitepatrick/brick-jenkins
-    tag: "2.580.1-7"
+    tag: "2.580.1-8"
     pullPolicy: IfNotPresent
   # The chart's own plugin download would need the internet on every start;
   # the image has them instead. overwritePlugins clears the home's plugins on
@@ -109,6 +109,18 @@ controller:
             useScriptSecurity: false
         jobs:
           - file: /usr/share/brick-jenkins/seed.groovy
+        # Docker Hub, for build-image's pushes (lib/build.groovy), from the
+        # brick-jenkins Secret's dockerhub-username and dockerhub-token.
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: dockerhub
+                      description: Docker Hub, for build-image pushes
+                      username: "${dockerhub-username}"
+                      password: "${dockerhub-token}"
 
 agent:
   # Build and test pods also go on brick2000: more RAM, and workspaces on the

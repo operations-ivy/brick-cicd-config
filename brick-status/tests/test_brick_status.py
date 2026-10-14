@@ -839,9 +839,11 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertRegex(job.stem, r"^[a-z0-9-]+$")
 
     def maintenance_jobs(self):
-        """Every job but the test jobs, which run in agent pods (test-*) or
-        only start others (test-all)."""
-        return [j for j in (JENKINS / "jobs").glob("*.groovy") if not j.stem.startswith("test-")]
+        """Every job that runs on the controller: not the ones in agent pods
+        (kubernetes, e.g. test-*, build-image, verify-images) or that only
+        start others (test-all)."""
+        return [j for j in (JENKINS / "jobs").glob("*.groovy")
+                if "kubernetes {" not in j.read_text() and j.stem != "test-all"]
 
     def test_jobs_run_on_the_controller(self):
         # The controller is EXCLUSIVE (values.yaml): a job that doesn't ask for
@@ -858,11 +860,35 @@ class JenkinsJobsTest(unittest.TestCase):
                 self.assertIn("kubernetes {", text, job.name)
                 self.assertNotIn("label 'built-in'", text, job.name)
 
-    def test_the_tests_pod_runs_the_controller_image_it_ships_in(self):
-        # test-brick-cicd-config runs this image: a stale tag would test with old tools.
+    def test_pods_run_the_controller_image_they_ship_in(self):
+        # test-brick-cicd-config and the build pod's tools run this image: a
+        # stale tag would run old tools (hub-image-info, scripts/test's tools).
         tag = re.search(r'^    tag: "(.+)"$', (JENKINS / "values.yaml").read_text(), re.M).group(1)
-        job = (JENKINS / "jobs" / "test-brick-cicd-config.groovy").read_text()
-        self.assertIn(f"image: docker.io/whitepatrick/brick-jenkins:{tag}\n", job)
+        for f in [JENKINS / "jobs" / "test-brick-cicd-config.groovy", JENKINS / "lib" / "build.groovy"]:
+            self.assertIn(f"image: docker.io/whitepatrick/brick-jenkins:{tag}\n", f.read_text(), f.name)
+
+    def test_build_jobs_share_one_recipe_and_one_image_table(self):
+        lib = (JENKINS / "lib" / "build.groovy").read_text()
+        for job in ("build-image", "verify-images"):
+            text = (JENKINS / "jobs" / f"{job}.groovy").read_text()
+            self.assertIn("yaml buildkitPod()", text, job)
+            self.assertIn("buildImage(", text, job)
+            self.assertIn("checkoutForBuild(", text, job)
+        # BuildKit pinned by digest (another version can change the digest).
+        self.assertRegex(lib, r"moby/buildkit:v[\d.]+-rootless@sha256:[0-9a-f]{64}")
+        # Reproducible: commit time, rewritten timestamps, the labels verify-images reads.
+        for needle in ("SOURCE_DATE_EPOCH=", "rewrite-timestamp=true", "org.opencontainers.image.revision=",
+                       "org.opencontainers.image.source="):
+            self.assertIn(needle, lib)
+        images = set(re.findall(r"'(whitepatrick/[\w-]+)':", lib))
+        self.assertEqual(images, {"whitepatrick/wigle-sync", "whitepatrick/wigle-console", "whitepatrick/joke-reader",
+                                  "whitepatrick/joke-importer", "whitepatrick/overwatch"})
+
+    def test_the_hub_push_credential_comes_from_the_sealed_secret(self):
+        values = (JENKINS / "values.yaml").read_text()
+        self.assertIn("id: dockerhub", values)
+        self.assertIn('username: "${dockerhub-username}"', values)
+        self.assertIn('password: "${dockerhub-token}"', values)
 
     def test_test_all_runs_every_test_job(self):
         jobs = {p.stem.removeprefix("test-") for p in (JENKINS / "jobs").glob("test-*.groovy")} - {"all"}
@@ -880,6 +906,10 @@ class JenkinsJobsTest(unittest.TestCase):
         scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("release", "seal-secrets")]
                    + [BRICK9000 / n for n in ("build-image", "build-status.sh", "deploy", "install.sh", "proxy/up")])
         for script in scripts:
+            text = script.read_text()
+            if text.startswith("#!/usr/bin/env python3"):
+                compile(text, script.name, "exec")  # in memory: leaves no __pycache__ in bin/
+                continue
             result = subprocess.run(["sh", "-n", str(script)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
 

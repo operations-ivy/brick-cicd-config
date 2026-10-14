@@ -87,6 +87,15 @@ script in git that runs from anywhere, not a Jenkins job.
   Jenkins and lights that stage's pattern (README, "brick-status", lights):
   a pull, so it works from agent pods, which can't reach brick9000. Kinds:
   `checkout`, `install`, `test`, `verify`, `build`, `push`, `deploy`.
+- **Reproducible images.** `build-image` and `verify-images` share one recipe
+  (`lib/build.groovy`): rootless BuildKit pinned by digest,
+  `SOURCE_DATE_EPOCH` = the commit's time with file timestamps rewritten to
+  it, the `org.opencontainers.image.revision` and `.source` labels, no
+  provenance or SBOM. A commit always builds the same digest (two `--no-cache`
+  builds of wigle-sync matched on brick2000), so `verify-images` can check
+  every published image against its source. Pushes use the `dockerhub`
+  credential (the Secret's `dockerhub-username` and `dockerhub-token`).
+  `bin/hub-image-info` reads a tag's digest and labels from Docker Hub.
 - **Webhooks from the LAN.** Every job can be started with
   `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
   parameters in the query string (`&APPLY=true`). The secret is
@@ -113,6 +122,8 @@ script in git that runs from anywhere, not a Jenkins job.
 | `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |
 | `test-<repo>` | Runs a repo's tests in an agent pod: `test-brick-cicd-config` (`scripts/test`), `test-wigle-sync`, `test-chucks-wisdom`, `test-overwatch` (`poetry run pytest`) | `BRANCH=<branch>`; without it, `main` |
 | `test-all` | Runs every `test-<repo>` on `main`, one at a time, and fails naming the repos that failed (nightly) | |
+| `build-image` | Builds an app image (`lib/build.groovy`'s table: wigle-sync, wigle-console, joke-reader, joke-importer, overwatch) from a commit of its repo, reproducibly, in a rootless BuildKit pod on brick2000, and pushes it to Docker Hub; refuses a tag Hub already has | `IMAGE=whitepatrick/<name>`, `REF=<full commit>`, `TAG=<version>`; `PUSH=false` to only build |
+| `verify-images` | For each app image, rebuilds the commit its newest Hub tag's revision label names, from scratch, and fails naming any whose digest differs (nightly, after `test-all`) | |
 | `chuck-importer` | Runs the chucks-wisdom joke importer (a Kubernetes Job) | `QUERY`, `CATEGORIES`, `JOKES`, `TRIES_PER_CATEGORY`, `MAX_DUPLICATES`, `SLEEP_SECONDS` (see chucks-wisdom's `CLUSTER_SETUP.md`), `WAIT=true` to wait for it |
 
 ### Secrets
