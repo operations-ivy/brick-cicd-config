@@ -506,7 +506,14 @@ fresh. It exits 1 if anything is down.
 
 NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, Genesis, Master System
 and PlayStation over the board with a Bluetooth controller (RetroArch with the
-Nestopia, Snes9x, Gambatte, mGBA, Genesis Plus GX and PCSX-ReARMed cores).
+Nestopia, Snes9x, Gambatte, mGBA, Genesis Plus GX and SwanStation cores).
+PlayStation runs on SwanStation, more accurate than PCSX-ReARMed (still
+installed). Measured on brick9000 (2026-10-14, two game-minutes per game,
+uncapped): PCSX-ReARMed 6.4-7.6x full speed, SwanStation 3.1-3.9x, Beetle PSX
+HW 0.8-1.7x (too slow). SwanStation uses its software renderer at native
+resolution (`retroarch/core-options.cfg`): its Vulkan renderer stalls on this
+Pi, and its OpenGL one needs desktop GL, which Debian's RetroArch (GLES)
+can't give it.
 Debian has no PlayStation core, so `install.sh` builds PCSX-ReARMed from a
 pinned commit into `/usr/local/lib/libretro`.
 

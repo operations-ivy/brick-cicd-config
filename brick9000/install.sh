@@ -35,7 +35,8 @@ grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/
 # brick-retro: retro games over the board with a Bluetooth controller
 # (README, "Games").
 sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x libretro-gambatte libretro-mgba \
-    libretro-genesisplusgx rsync build-essential git
+    libretro-genesisplusgx rsync build-essential git cmake ninja-build libgl-dev libegl-dev libgles-dev \
+    libvulkan-dev libwayland-dev
 # Debian packages no PlayStation core: build PCSX-ReARMed from this commit
 # (about 2.5 minutes on a Pi 4), once per commit. games.py names the path.
 pcsx_commit=c8816799b50388e61cfe237fe2cdbb7d8175f20a
@@ -51,6 +52,25 @@ if [ "$(cat "$pcsx_core.commit" 2>/dev/null)" != "$pcsx_commit" ]; then
     echo "$pcsx_commit" | sudo tee "$pcsx_core.commit" >/dev/null
     rm -rf "$build" "$build.log"
 fi
+# The PlayStation core RetroArch uses: SwanStation (more accurate than
+# PCSX-ReARMed, which stays installed). Measured on brick9000 (2026-10-14,
+# software renderer): 3.1-3.9x full speed, where Beetle PSX HW fell below 1x.
+# Its GPU renderers can't run here (Vulkan stalls on this Pi; its OpenGL one
+# needs desktop GL and Debian's RetroArch is GLES), so core-options.cfg
+# forces Software. Built from this commit, once per commit (about 7 minutes).
+swan_commit=dd4805619bbbfc6e0d1776372cb16377088b448e
+swan_core=/usr/local/lib/libretro/swanstation_libretro.so
+if [ "$(cat "$swan_core.commit" 2>/dev/null)" != "$swan_commit" ]; then
+    build=$(mktemp -d -p "$HOME")
+    git -C "$build" init -q
+    git -C "$build" fetch -q --depth 1 https://github.com/libretro/swanstation "$swan_commit"
+    git -C "$build" checkout -q FETCH_HEAD
+    { cmake -S "$build" -B "$build/out" -G Ninja -DCMAKE_BUILD_TYPE=Release && nice ninja -C "$build/out" -j3; } \
+        >"$build.log" 2>&1 || { tail -n 20 "$build.log"; exit 1; }
+    sudo install -D -m 644 "$build/out/swanstation_libretro.so" "$swan_core"
+    echo "$swan_commit" | sudo tee "$swan_core.commit" >/dev/null
+    rm -rf "$build" "$build.log"
+fi
 # Raspberry Pi OS starts every radio blocked (rfkill default_state=0) and
 # NetworkManager only unblocks Wi-Fi; systemd-rfkill keeps this across reboots.
 for r in /sys/class/rfkill/rfkill*; do
@@ -62,6 +82,8 @@ if ! grep -q '^FastConnectable *= *true' /etc/bluetooth/main.conf; then
     sudo systemctl restart bluetooth
 fi
 mkdir -p ~/games/roms ~/games/system ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
+# Core options brick-retro's RetroArch uses (retroarch.cfg points at this copy).
+cp "$here/retroarch/core-options.cfg" ~/.config/retroarch/brick-core-options.cfg
 for f in "$here"/retroarch/autoconfig/*.cfg; do
     [ -f "$f" ] && cp "$f" ~/.config/retroarch/autoconfig/
 done

@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Built from source by install.sh: Debian packages no PlayStation core.
+# SwanStation plays them (more accurate, 3x full speed here); PCSX-ReARMed
+# stays installed as the fallback.
 PCSX_REARMED = "/usr/local/lib/libretro/pcsx_rearmed_libretro.so"
+SWANSTATION = "/usr/local/lib/libretro/swanstation_libretro.so"
 
 
 @dataclass(frozen=True)
@@ -34,7 +37,7 @@ SYSTEMS = (
            (".md", ".gen", ".smd", ".bin", ".zip")),
     System("mastersystem", "Sega - Master System - Mark III", "genesis_plus_gx_libretro.so",
            "Genesis Plus GX", (".sms", ".zip")),
-    System("psx", "Sony - PlayStation", PCSX_REARMED, "PCSX-ReARMed",
+    System("psx", "Sony - PlayStation", SWANSTATION, "SwanStation",
            (".chd", ".cue", ".ccd", ".pbp", ".bin"), discs=True),
 )
 

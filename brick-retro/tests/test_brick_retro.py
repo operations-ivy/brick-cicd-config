@@ -181,7 +181,7 @@ class GamesTests(unittest.TestCase):
         self.assertEqual([i["label"] for i in psx],
                          ["Ace Combat 3", "Final Fantasy VII (USA)", "GT2", "R4", "Tekken 3", "WipEout (USA)"])
         self.assertEqual(Path(psx[2]["path"]).suffix, ".cue")
-        self.assertEqual(psx[0]["core_path"], games.PCSX_REARMED)
+        self.assertEqual(psx[0]["core_path"], games.SWANSTATION)
         ff7 = Path(psx[1]["path"])
         self.assertEqual(ff7, self.root / "m3u/psx/Final Fantasy VII (USA).m3u")
         self.assertEqual(ff7.read_text().splitlines(),
