@@ -632,6 +632,20 @@ class JobsTest(unittest.TestCase):
         text = jobs.render("brick-deploy", 1.0, True, None, 0.0, ("main", "abc1234"))
         self.assertIn('brick_job_checkout_info{unit="brick-deploy",branch="main",commit="abc1234"} 1', text)
 
+    def test_detached_checkout_names_the_remote_branches_at_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            def git(*args, cwd=f"{d}/clone"):
+                subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+            subprocess.run(["git", "init", "-q", "-b", "main", f"{d}/origin"], check=True)
+            git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x",
+                cwd=f"{d}/origin")
+            subprocess.run(["git", "clone", "-q", f"{d}/origin", f"{d}/clone"], check=True)
+            git("checkout", "-q", "--detach", "origin/main")
+            branch, commit = jobs.git_info(f"{d}/clone")
+        self.assertEqual(branch, "main")
+        self.assertTrue(commit)
+
     def test_main_reads_systemds_result(self):
         import os
         import tempfile

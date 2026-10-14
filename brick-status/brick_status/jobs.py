@@ -51,7 +51,12 @@ def git_info(checkout: str) -> tuple[str, str] | None:
         return subprocess.run(["git", "-C", checkout, *args], capture_output=True, text=True,
                               timeout=10).stdout.strip()
     try:
-        return git("rev-parse", "--abbrev-ref", "HEAD"), git("rev-parse", "--short", "HEAD")
+        branch = git("rev-parse", "--abbrev-ref", "HEAD")
+        if branch == "HEAD":  # deploys check out a detached commit: name the branches at it
+            refs = git("branch", "-r", "--points-at", "HEAD", "--format=%(refname)").split()
+            names = {r.split("/", 3)[3] for r in refs if r.count("/") >= 3 and not r.endswith("/HEAD")}
+            branch = ",".join(sorted(names)) or "HEAD"
+        return branch, git("rev-parse", "--short", "HEAD")
     except (OSError, subprocess.SubprocessError):
         return None
 
