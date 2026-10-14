@@ -13,6 +13,9 @@ def idle_pattern(checks: list[dict]) -> str:
     """Pick the idle light pattern for the most important current event."""
     states = {c["state"] for c in checks}
     running = {c["group"] for c in checks if c["state"] == ACTIVE}
+    # The nightly test run gets the show, even over a failure: it lasts minutes.
+    if any(c["group"] == "builds" and c["name"] == "test-all" and c["state"] == ACTIVE for c in checks):
+        return "nightly"
     if FAIL in states:
         return "alert"
     if "builds" in running:
