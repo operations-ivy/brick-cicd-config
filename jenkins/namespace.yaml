@@ -4,3 +4,11 @@ metadata:
   name: jenkins
   labels:
     name: jenkins
+---
+# Build and test agent pods (values.yaml, agent.namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins-agents
+  labels:
+    name: jenkins-agents

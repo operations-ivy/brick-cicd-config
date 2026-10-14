@@ -13,7 +13,7 @@ controller:
   image:
     registry: docker.io
     repository: whitepatrick/brick-jenkins
-    tag: "2.580.1-4"
+    tag: "2.580.1-6"
     pullPolicy: IfNotPresent
   # The chart's own plugin download would need the internet on every start;
   # the image has them instead. overwritePlugins clears the home's plugins on
@@ -116,6 +116,15 @@ agent:
   nodeSelector:
     chuck.io/storage-node: "true"
   nodeUsageMode: EXCLUSIVE
+  # Their own namespace (namespace.yaml), where the jenkins ServiceAccount may
+  # only manage pods (the chart's schedule-agents Role). Test jobs run each
+  # repo's code: their pods run as serviceAccountAgent below, with no token,
+  # so that code can't reach the cluster's API as anyone.
+  namespace: jenkins-agents
+
+serviceAccountAgent:
+  create: true
+  automountServiceAccountToken: false
 
 persistence:
   size: 20Gi

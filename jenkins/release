@@ -44,3 +44,33 @@ fi
 helm repo add jenkins https://charts.jenkins.io --force-update >/dev/null
 helm upgrade --install jenkins jenkins/jenkins --version "$CHART_VERSION" \
     --namespace jenkins --values "$here/values.yaml" --wait --timeout 10m
+
+# Jobs the seed adds at start-up can be dropped: configuration as code runs the
+# seed while Jenkins is still loading jobs from disk, and the load replaces
+# what the seed just created (seen 2026-10-13 adding the test jobs). They're
+# on disk by then, so one more restart loads them. Check every job file is a
+# job, as admin inside the pod (the password never leaves it).
+missing_jobs() {
+    kubectl -n jenkins exec jenkins-0 -c jenkins -- sh -c '
+        p=$(cat /run/secrets/additional/admin-password)
+        for i in $(seq 1 60); do
+            live=$(curl -sf -g -u "admin:$p" "http://localhost:8080/api/json?tree=jobs[name]") && break
+            sleep 5
+        done
+        for f in /usr/share/brick-jenkins/jobs/*.groovy; do
+            n=$(basename "$f" .groovy)
+            case "$live" in *"\"name\":\"$n\""*) ;; *) echo "$n" ;; esac
+        done'
+}
+missing=$(missing_jobs)
+if [ -n "$missing" ]; then
+    echo "release: jobs not loaded ($(echo $missing)); restarting Jenkins once to load them"
+    kubectl -n jenkins delete pod jenkins-0 --wait=true >/dev/null
+    kubectl -n jenkins wait --for=condition=Ready pod/jenkins-0 --timeout=10m
+    missing=$(missing_jobs)
+    if [ -n "$missing" ]; then
+        echo "release: still missing after a restart: $(echo $missing)" >&2
+        exit 1
+    fi
+fi
+echo "release: every job is loaded"
