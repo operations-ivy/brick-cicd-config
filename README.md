@@ -316,6 +316,7 @@ Idle light patterns, highest priority first:
 
 | Pattern | Event |
 | --- | --- |
+| `nightly` | the show, while Jenkins' nightly `test-all` runs: each button's four LEDs spin a colour wheel, a white-hot comet sweeps the chain trailing the spectrum, fireworks burst on random buttons, and it all breathes (outranks everything, for the few minutes it runs) |
 | `alert` | red pulse: anything failing |
 | `building` | amber chase: a Jenkins job is running |
 | `uploading` | green pulse: wigle-sync is uploading |
