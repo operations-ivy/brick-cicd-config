@@ -10,8 +10,8 @@ from .board import QuietSchedule
 DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
                  "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
-# The four board views, in button order.
-VIEWS = ["overview", "builds", "cluster", "wigle"]
+# The board views, in button order (the sixth button is free).
+VIEWS = ["overview", "builds", "cluster", "wigle", "services"]
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the
@@ -45,6 +45,11 @@ class Settings:
     # Seconds after the last button press before the board goes back to idle.
     active_seconds: float = 120.0
     cmatrix: str = "cmatrix"
+    # The overview's CRT window plays these in turn (matrix.PROGRAMS names),
+    # each for crt_minutes; ones that aren't installed are skipped.
+    crt_programs: list[str] = field(default_factory=lambda: [
+        "cmatrix", "pipes", "gallery", "bonsai", "rain", "clock", "nyancat", "train"])
+    crt_minutes: float = 10.0
     # When the screen and lights are off; see board.QuietSchedule for the format.
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
     # How long the side button turns everything on for, while it's quiet.
@@ -101,6 +106,9 @@ class Settings:
         s.retro_flag = env("BRICK_STATUS_RETRO_FLAG", s.retro_flag)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
+        if v := env("BRICK_STATUS_CRT_PROGRAMS"):
+            s.crt_programs = [n.strip() for n in v.split(",") if n.strip()]
+        s.crt_minutes = float(env("BRICK_STATUS_CRT_MINUTES", s.crt_minutes))
         if v := env("BRICK_STATUS_QUIET"):
             s.quiet = QuietSchedule.parse(v)
         elif env("BRICK_STATUS_QUIET_START") and env("BRICK_STATUS_QUIET_END"):

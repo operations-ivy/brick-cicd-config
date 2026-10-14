@@ -217,6 +217,21 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   with the Pi went (OK, failed, or waiting for internet), how many files it
   uploaded, and when the next one runs. It only alerts when every run for 2
   hours has had errors; the pwnagotchi being away and syncs pausing are normal.
+- **Services:** failed systemd units and timers that stopped firing, on
+  every host (`brick_status/units.py`). brick9000's own system and user
+  units are read straight from `systemctl`, so they still show when the
+  cluster is down; the rest come from Prometheus: node-exporter's systemd
+  collector for the k3s nodes' system units, and for user units (which that
+  collector can't see) `brick-units.timer` on brick1982, which every 2
+  minutes writes `brick_systemd_unit_problem` to node-exporter's textfile
+  directory (`/var/lib/node-exporter-textfile`). A timer is a problem when
+  its next run is more than 15 minutes overdue, or it's enabled with nothing
+  scheduled; the report itself going 10 minutes stale is one too. A problem
+  makes the Services view "Failing" (yellow, like a degraded workload: a
+  failed job isn't the cluster down) and shows on the CRT label and the
+  lights; it doesn't page. Units known to fail are listed with why in
+  `units.EXPECTED` (brick2000's, which are hands off) and show green.
+  brick69 isn't covered yet: it isn't a node, and it's often out driving.
 - It also checks the internet itself, by opening a TCP connection to three
   public DNS anycast addresses (1.1.1.1, 8.8.8.8, 9.9.9.9); any one answering
   means it's up. An ISP outage is outside our control, so it isn't a failure:
@@ -235,7 +250,7 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   through the proxy (it adds `X-Forwarded-For`) can't start one, which would
   stop the kiosk's. While the cabinet is quiet the header says "Display Off"
   and the data keeps updating.
-- The overview is a CRT window running the real `cmatrix -bs`, the three area
+- The overview is a CRT window running a terminal program (below), the three area
   tiles, and a compact vitals strip for brick420 and brick2000 (from
   node_exporter) and brick9000 itself (read from `/proc` and `/sys`, since it
   runs no node_exporter). Each host gets a pie for root disk and LED segment
@@ -243,13 +258,28 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   memory turn yellow at 85% and red at 95%, temperature at 158°F and 176°F,
   disk at 85% and 95%), and its CPU temperature in °F beside the bar. The header shows a red
   "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
-- cmatrix runs in a pseudo-terminal sized to the window; its output streams to
-  the page as server-sent events and xterm.js draws it with its WebGL renderer
-  (the default DOM renderer kept Chromium above a full core on the Pi 4; WebGL
-  brought the whole system to about 27% CPU). The rain is green when all is
-  well, orange when degraded or building, red when failing; cmatrix has no
-  orange, so the page's terminal theme repaints its yellow. It runs only while
-  the overview is on screen, and not overnight.
+- The CRT window plays real terminal programs in turn, 10 minutes each by the
+  clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix,
+  pipes, a gallery of public-domain paintings drawn with chafa
+  (`brick-status/art/paintings/`, credits in its `CREDITS.md`), cbonsai,
+  rain, tty-clock, nyancat and sl. The bezel says which. Each program
+  names a frame: the full-width strip, or a box about a quarter of the
+  screen with the three tiles stacked beside it (bonsai, clock, nyancat, the
+  gallery), and a font size (smaller shows more of programs that draw at a
+  fixed size, like nyancat). Only names in
+  `matrix.PROGRAMS` run, and ones that aren't installed are skipped. Each
+  runs in a pseudo-terminal sized to the window; its output streams to the
+  page as server-sent events and xterm.js draws it with its WebGL renderer
+  (the default DOM renderer kept Chromium above a full core on the Pi 4).
+- The colour still means health: green when all is well, orange when
+  degraded or building, red when failing. cmatrix colours itself (it has no
+  orange, so the page's theme repaints its yellow); every other program is
+  tinted by the page, which maps all 256 terminal colours to shades of the
+  health colour by brightness. Measured on brick9000 at about 140x20 (whole
+  machine, ~30% with the board idle): pipes adds about 7 points, cmatrix 1,
+  the rest under 1. hollywood was tried and left out: its widgets held the
+  Pi at 96% whatever its settings (#28). It all runs only while the overview
+  is on screen, and not overnight.
 - It reads the front-panel buttons from the `gpio_keys` input device (grabbed,
   so presses don't reach Chromium) and drives the screen with `wlopm` and the
   button lights through the plasma daemon's FIFO, `/tmp/plasma`.
@@ -263,7 +293,7 @@ The board has three modes:
 | quiet | the quiet schedule (below) | off | off; only the side button does anything: it turns everything on for 30 minutes |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
-Cluster; bottom-left picks wigle-sync; the other two are free for now. The
+Cluster; the bottom row picks wigle-sync and Services; the last one is free for now. The
 joystick left/right steps through the views. The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,
