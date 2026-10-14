@@ -5,7 +5,8 @@
 // A job file starts with comment lines:
 //   // What the job does, in a sentence or two (becomes the description).
 //   // param NAME=default  Help text  (true/false defaults make a checkbox)
-//   // cron H */2 * * *               (optional schedule)
+//   // cron H */2 * * *               (optional schedule; several cron lines
+//                                     are joined, so one can be TZ=Area/City)
 // then a declarative pipeline.
 //
 // Every job can be started from the LAN with a webhook, parameters in the
@@ -26,7 +27,7 @@ new File("${root}/jobs").listFiles().findAll { it.name.endsWith('.groovy') }.sor
         assert m.matches(): "${file.name}: bad param line: ${line}"
         [name: m.group(1), value: m.group(2), help: m.group(3)]
     }
-    def schedule = header.find { it.startsWith('cron ') }?.substring(5)
+    def schedule = header.findAll { it.startsWith('cron ') }.collect { it.substring(5) }.join('\n') ?: null
     def about = header.findAll { !it.startsWith('param ') && !it.startsWith('cron ') }.join('\n')
 
     pipelineJob(name) {

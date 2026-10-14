@@ -1,6 +1,9 @@
 // Run every repo's tests (the test-<repo> jobs) on main, and fail naming the
-// repos whose tests failed. Nightly, so a broken main shows on the board.
-// cron H 3 * * *
+// repos whose tests failed. Nightly at 21:00-21:29 local, while the board's
+// lights are on to show it (brick-status' "nightly" pattern), done well
+// before its quiet hours start at midnight. Jenkins runs on UTC, hence TZ.
+// cron TZ=America/New_York
+// cron H(0-29) 21 * * *
 pipeline {
     agent none
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 2, unit: 'HOURS') }
