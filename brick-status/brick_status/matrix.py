@@ -35,9 +35,9 @@ class Program:
     argv: tuple[str, ...]  # "{colour}" is replaced with the health colour
     tint: bool = True  # the page tints its colours; False: it colours itself
     # The window's shape on the overview (the page lays the tiles out around
-    # it): "wide", the full-width strip; "box", about a quarter of the screen;
-    # "portrait", a tall frame for the paintings. And the terminal's font size
-    # in pixels: smaller shows more of programs that draw at a fixed size.
+    # it): "wide", the full-width strip, or "box", about a quarter of the
+    # screen with the tiles stacked beside it. And the terminal's font size in
+    # pixels: smaller shows more of programs that draw at a fixed size.
     layout: str = "wide"
     font: int = 11
 
@@ -56,8 +56,8 @@ PROGRAMS = {
     # nyancat crops its fixed-size animation to the terminal: a small font shows all of it.
     "nyancat": Program(("nyancat", "-n", "-s"), layout="box", font=6),
     "rain": Program(("/usr/games/rain", "-d", "150")),
-    "train": Program(("sh", "-c", "while :; do sl; sleep 20; done")),
-    "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45"), layout="portrait", font=7),
+    "train": Program(("sh", "-c", "while :; do sl; sleep 8; done")),
+    "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45"), layout="box", font=7),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
     # held the Pi 4 at 96% CPU (#28).
 }

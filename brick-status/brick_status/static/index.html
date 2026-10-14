@@ -169,17 +169,13 @@
   .crt, .crt * { cursor: none !important; }
   /* The CRT window's shape follows its program (matrix.PROGRAMS' layout).
      box: a quarter-screen frame, the tiles stacked beside it, vitals below.
-     portrait: a tall frame for the paintings, header to footer, with the
-     tiles and a two-row vitals grid beside it. */
+     (A tall portrait frame for the paintings was tried: it shrank the tiles'
+     pixel art too much.) */
   body.overview.crt-box main { grid-template-columns: 50vw minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   body.overview.crt-box #crt { grid-column: 1; grid-row: 1; }
   body.overview.crt-box #content { grid-column: 2; grid-row: 1; min-height: 0; }
   body.overview.crt-box #vitals { grid-column: 1 / -1; grid-row: 2; }
-  body.overview.crt-portrait main { grid-template-columns: 46vw minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
-  body.overview.crt-portrait #crt { grid-column: 1; grid-row: 1 / -1; }
-  body.overview.crt-portrait #content { grid-column: 2; grid-row: 1; min-height: 0; }
-  body.overview.crt-portrait #vitals { grid-column: 2; grid-row: 2; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 0.6em; }
-  body.overview.crt-box .tiles, body.overview.crt-portrait .tiles {
+  body.overview.crt-box .tiles {
     grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(0, 1fr); height: 100%; }
   body.overview .crt { display: block; animation: power-on 700ms cubic-bezier(.2,.7,.2,1) both; }
   @keyframes power-on { /* a tube warming up: a line, then the picture opens */
@@ -453,7 +449,7 @@ function render(s) {
   document.getElementById("crt-program").textContent = `now showing: ${crtProgram(s).name}`;
   // cmatrix runs only while the overview is on screen; not overnight with the screen off.
   const program = crtProgram(s);
-  for (const l of ["wide", "box", "portrait"]) document.body.classList.toggle(`crt-${l}`, (program.layout || "wide") === l);
+  for (const l of ["wide", "box"]) document.body.classList.toggle(`crt-${l}`, (program.layout || "wide") === l);
   if (overview && s.mode !== "quiet") matrix.start(matrixColour(s), program);
   else matrix.stop();
 

@@ -975,7 +975,7 @@ class CrtTest(unittest.TestCase):
         finally:
             matrix.PROGRAMS["pipes"] = orig
         self.assertEqual([p["name"] for p in crt["programs"]], ["cmatrix", "gallery"])
-        self.assertEqual([(p["tint"], p["layout"]) for p in crt["programs"]], [(False, "wide"), (True, "portrait")])
+        self.assertEqual([(p["tint"], p["layout"]) for p in crt["programs"]], [(False, "wide"), (True, "box")])
         self.assertEqual(crt["minutes"], 10.0)
 
     def test_nothing_installed_falls_back_to_cmatrix(self):
@@ -1008,7 +1008,7 @@ class CrtTest(unittest.TestCase):
     def test_every_program_has_a_layout_the_page_knows(self):
         page = (Path(web.STATIC) / "index.html").read_text()
         for name, p in matrix.PROGRAMS.items():
-            self.assertIn(p.layout, ("wide", "box", "portrait"), name)
+            self.assertIn(p.layout, ("wide", "box"), name)
             if p.layout != "wide":
                 self.assertIn(f"body.overview.crt-{p.layout}", page, name)
 
