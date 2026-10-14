@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Print what Docker Hub has for an image, as JSON: its newest tag (or the one
+given), that tag's manifest digest, and the commit its revision label names.
+
+    hub-image-info [--kv] whitepatrick/wigle-sync [TAG]
+
+--kv prints key=value lines instead of JSON (for Jenkins pipelines, which
+have no JSON step here).
+
+Anonymous reads of public images; nothing to authenticate. Used by
+verify-images (and build-image, to refuse a tag that already exists: exit 3).
+"""
+
+import json
+import sys
+import urllib.error
+import urllib.request
+
+ACCEPT = ", ".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
+INDEXES = ("application/vnd.oci.image.index.v1+json",
+           "application/vnd.docker.distribution.manifest.list.v2+json")
+
+
+def get(url: str, headers: dict | None = None):
+    req = urllib.request.Request(url, headers={"User-Agent": "brick-jenkins hub-image-info", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.headers, json.load(resp)
+
+
+def newest_tag(repo: str) -> str | None:
+    _, page = get(f"https://hub.docker.com/v2/repositories/{repo}/tags?page_size=10&ordering=last_updated")
+    tags = [t["name"] for t in page.get("results", []) if t["name"] != "latest"]
+    return tags[0] if tags else None
+
+
+def emit(info: dict, kv: bool) -> None:
+    if kv:
+        print("\n".join(f"{k}={'' if v is None else str(v).lower() if isinstance(v, bool) else v}"
+                        for k, v in info.items()))
+    else:
+        print(json.dumps(info))
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    kv = args[:1] == ["--kv"]
+    args = args[1:] if kv else args
+    repo = args[0]
+    tag = args[1] if len(args) > 1 else newest_tag(repo)
+    if not tag:
+        emit({"image": repo, "exists": False, "error": "no tags"}, kv)
+        return 1
+    _, token = get(f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull")
+    auth = {"Authorization": f"Bearer {token['token']}"}
+    registry = f"https://registry-1.docker.io/v2/{repo}"
+    try:
+        headers, manifest = get(f"{registry}/manifests/{tag}", {**auth, "Accept": ACCEPT})
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            emit({"image": repo, "tag": tag, "exists": False}, kv)
+            return 3
+        raise
+    digest = headers["Docker-Content-Digest"]
+    if manifest.get("mediaType") in INDEXES:  # an index: the arm64 image's own manifest has the config
+        arm64 = next(m for m in manifest["manifests"] if m.get("platform", {}).get("architecture") == "arm64")
+        _, manifest = get(f"{registry}/manifests/{arm64['digest']}", {**auth, "Accept": ACCEPT})
+    _, config = get(f"{registry}/blobs/{manifest['config']['digest']}", auth)
+    labels = (config.get("config") or {}).get("Labels") or {}
+    emit({"image": repo, "tag": tag, "exists": True, "digest": digest,
+          "revision": labels.get("org.opencontainers.image.revision"),
+          "source": labels.get("org.opencontainers.image.source")}, kv)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
