@@ -1,4 +1,5 @@
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -339,3 +340,27 @@ class ThumbnailTests(unittest.TestCase):
             got = games.games(snes, root, Path(d) / "m3u")
         self.assertEqual([label for _, label in got], ["Mario", "Zelda"])
         self.assertEqual(got[0][0], root / "snes/Mario.smc")
+
+
+class WallpaperTests(unittest.TestCase):
+    def test_committed_wallpaper_matches_the_generator(self):
+        """Rerun brick-retro/tools/wallpaper.py after changing it."""
+        import sys
+        import zlib
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import wallpaper
+
+        def pixels(png):
+            idat, pos = b"", 8
+            while pos < len(png):
+                n, kind = struct.unpack(">I4s", png[pos:pos + 8])
+                if kind == b"IDAT":
+                    idat += png[pos + 8:pos + 8 + n]
+                pos += 12 + n
+            return zlib.decompress(idat)
+
+        self.assertEqual(pixels(wallpaper.OUT.read_bytes()), pixels(wallpaper.image()))
+
+    def test_retroarch_config_names_the_wallpaper(self):
+        cfg = (Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg").read_text()
+        self.assertIn('menu_wallpaper = "~/brick-cicd-config/brick9000/retroarch/wallpaper.png"', cfg)

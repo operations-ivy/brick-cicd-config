@@ -11,6 +11,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 sudo apt-get install -y python3-evdev avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
 sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
+# RetroArch's menu uses the board's typeface (retroarch/retroarch.cfg).
+sudo apt-get install -y --no-install-recommends fonts-ibm-plex
 # Prometheus scrapes brick9000 like a node (README, "Metrics"): node-exporter
 # on :9100 with the same flags as the cluster's DaemonSet (systemd units, Wi-Fi, and
 # a textfile directory for brick-retro and the oneshot units' runs). Scraping
