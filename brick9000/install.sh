@@ -62,6 +62,8 @@ if ! grep -q '^FastConnectable *= *true' /etc/bluetooth/main.conf; then
     sudo systemctl restart bluetooth
 fi
 mkdir -p ~/games/roms ~/games/system ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
+# Core options brick-retro's RetroArch uses (retroarch.cfg points at this copy).
+cp "$here/retroarch/core-options.cfg" ~/.config/retroarch/brick-core-options.cfg
 for f in "$here"/retroarch/autoconfig/*.cfg; do
     [ -f "$f" ] && cp "$f" ~/.config/retroarch/autoconfig/
 done

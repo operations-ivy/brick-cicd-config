@@ -209,3 +209,28 @@ class GamesTests(unittest.TestCase):
         (saves / "Zelda.srm").write_text("played on brick9000")
         self.assertEqual(games.import_saves(self.roms, saves), [])
         self.assertEqual((saves / "Zelda.srm").read_text(), "played on brick9000")
+
+
+class LookTest(unittest.TestCase):
+    """The CRT shader for every core, and PS1 at twice its resolution."""
+
+    ROOT = Path(__file__).resolve().parents[2] / "brick9000" / "retroarch"
+
+    def test_every_core_gets_the_crt_shader_unless_turned_off(self):
+        from brick_retro import __main__ as main
+        cmd = main.retroarch_command()
+        self.assertEqual(cmd[:3], ["retroarch", "--appendconfig", main.APPEND_CONFIG])
+        self.assertEqual(cmd[3], "--set-shader")
+        preset = Path(cmd[4])
+        self.assertTrue(preset.is_file(), preset)
+        # The preset's shader path is relative to the preset.
+        shader0 = [l for l in preset.read_text().splitlines() if l.startswith("shader0")][0]
+        self.assertTrue((preset.parent / shader0.split('"')[1]).is_file())
+        self.assertNotIn("--set-shader", main.retroarch_command(shader=""))
+
+    def test_shaders_are_on_and_ps1_renders_at_twice_its_resolution(self):
+        cfg = (self.ROOT / "retroarch.cfg").read_text()
+        self.assertIn('video_shader_enable = "true"', cfg)
+        self.assertIn('core_options_path = "~/.config/retroarch/brick-core-options.cfg"', cfg)
+        self.assertIn('pcsx_rearmed_neon_enhancement_enable = "enabled"', (self.ROOT / "core-options.cfg").read_text())
+
