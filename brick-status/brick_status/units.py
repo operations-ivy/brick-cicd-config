@@ -46,6 +46,12 @@ def is_enabled(user: bool, unit: str) -> bool:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip() == "enabled"
 
 
+def is_running(user: bool, unit: str) -> bool:
+    cmd = ["systemctl", *(["--user"] if user else []), "is-active", unit]
+    state = subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip()
+    return state in ("active", "activating", "reloading")
+
+
 def read(user: bool) -> dict:
     """One scope's failed units and timers, straight from systemd."""
     failed = [u["unit"] for u in systemctl(user, "list-units", "--state=failed", "--plain")]
@@ -53,6 +59,9 @@ def read(user: bool) -> dict:
     for t in timers:
         if not t.get("next"):
             t["enabled"] = is_enabled(user, t["unit"])
+            # An OnUnitActiveSec timer has no next run while its service runs
+            # (brick-units.timer while it reports, brick-roms during a copy).
+            t["running"] = bool(t.get("activates")) and is_running(user, t["activates"])
     return {"failed": failed, "timers": timers}
 
 
@@ -63,7 +72,7 @@ def problems(data: dict, now: float) -> list[tuple[str, str, str]]:
     for t in data["timers"]:
         nxt = (t.get("next") or 0) / 1e6
         if not nxt:
-            if t.get("enabled"):
+            if t.get("enabled") and not t.get("running"):
                 found.append((t["unit"], "stopped", "enabled, not scheduled"))
         elif now - nxt > OVERDUE_SECONDS:
             found.append((t["unit"], "overdue", f"overdue by {_ago(now - nxt)}"))

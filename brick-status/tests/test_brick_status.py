@@ -881,8 +881,8 @@ if __name__ == "__main__":
 NOW = 1_800_000_000.0
 
 
-def timer(unit, next_s, enabled=None):
-    t = {"unit": unit, "next": int(next_s * 1e6) if next_s else 0}
+def timer(unit, next_s, enabled=None, running=False):
+    t = {"unit": unit, "next": int(next_s * 1e6) if next_s else 0, "running": running}
     if enabled is not None:
         t["enabled"] = enabled
     return t
@@ -893,7 +893,9 @@ class UnitsTest(unittest.TestCase):
         data = {"failed": ["brick-roms.service"],
                 "timers": [timer("ok.timer", NOW + 60), timer("late.timer", NOW - 20 * 60),
                            timer("just-late.timer", NOW - 60), timer("stopped.timer", 0, enabled=True),
-                           timer("disabled.timer", 0, enabled=False)]}
+                           timer("disabled.timer", 0, enabled=False),
+                           # No next run because its service is running right now.
+                           timer("busy.timer", 0, enabled=True, running=True)]}
         found = units.problems(data, NOW)
         self.assertEqual([(u, kind) for u, kind, _ in found],
                          [("brick-roms.service", "failed"), ("late.timer", "overdue"), ("stopped.timer", "stopped")])
