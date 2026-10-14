@@ -12,14 +12,14 @@ sudo apt-get install -y python3-evdev avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
 sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
 # Prometheus scrapes brick9000 like a node (README, "Metrics"): node-exporter
-# on :9100 with the same flags as the cluster's DaemonSet (systemd units, and
+# on :9100 with the same flags as the cluster's DaemonSet (systemd units, Wi-Fi, and
 # a textfile directory for brick-retro and the oneshot units' runs). Scraping
 # brick9000 never makes it depend on the cluster.
 sudo apt-get install -y --no-install-recommends prometheus-node-exporter
 sudo install -d -o "$USER" -g "$USER" -m 755 /var/lib/node-exporter-textfile
 # No comments after a value in this file, and no backslashes (systemd
 # EnvironmentFile): [.] for a literal dot.
-node_args='ARGS="--collector.textfile.directory=/var/lib/node-exporter-textfile --collector.systemd --collector.systemd.enable-restarts-metrics --collector.systemd.unit-include=.+[.](service|timer)"'
+node_args='ARGS="--collector.textfile.directory=/var/lib/node-exporter-textfile --collector.systemd --collector.systemd.enable-restarts-metrics --collector.systemd.unit-include=.+[.](service|timer) --collector.wifi"'
 if [ "$(cat /etc/default/prometheus-node-exporter 2>/dev/null)" != "$node_args" ]; then
     printf '%s\n' "$node_args" | sudo tee /etc/default/prometheus-node-exporter >/dev/null
     sudo systemctl restart prometheus-node-exporter
