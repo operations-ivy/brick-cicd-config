@@ -48,7 +48,7 @@ class Settings:
     # The overview's CRT window plays these in turn (matrix.PROGRAMS names),
     # each for crt_minutes; ones that aren't installed are skipped.
     crt_programs: list[str] = field(default_factory=lambda: [
-        "cmatrix", "pipes", "gallery", "bonsai", "rain", "clock", "nyancat", "train"])
+        "cmatrix", "pipes", "gallery", "bonsai", "rain", "clock", "nyancat"])
     crt_minutes: float = 10.0
     # When the screen and lights are off; see board.QuietSchedule for the format.
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))

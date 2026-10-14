@@ -1007,14 +1007,14 @@ class CrtTest(unittest.TestCase):
         finally:
             matrix.PROGRAMS["pipes"] = orig
         self.assertEqual([p["name"] for p in crt["programs"]], ["cmatrix", "gallery"])
-        self.assertEqual([(p["tint"], p["layout"]) for p in crt["programs"]], [(False, "wide"), (True, "box")])
+        self.assertEqual([(p["tint"], p["font"]) for p in crt["programs"]], [(False, 11), (True, 7)])
         self.assertEqual(crt["minutes"], 10.0)
 
     def test_nothing_installed_falls_back_to_cmatrix(self):
         s = Settings()
         s.crt_programs = ["no-such-program"]
         self.assertEqual(web.crt_playlist(s)["programs"],
-                         [{"name": "cmatrix", "tint": False, "layout": "wide", "font": 11}])
+                         [{"name": "cmatrix", "tint": False, "font": 11}])
 
     def test_unknown_program_names_run_cmatrix(self):
         # The page names the program; only names in PROGRAMS ever run.
@@ -1037,12 +1037,13 @@ class CrtTest(unittest.TestCase):
             matrix.subprocess.Popen = orig
         self.assertEqual(ran, [["/usr/bin/cmatrix", "-b", "-s", "-C", "red"]])
 
-    def test_every_program_has_a_layout_the_page_knows(self):
+    def test_one_frame_for_every_program_and_no_train(self):
+        # The user's pick (2026-10-13): the square CRT frame for everything; sl's train is out.
+        self.assertNotIn("train", matrix.PROGRAMS)
+        self.assertNotIn("train", Settings().crt_programs)
         page = (Path(web.STATIC) / "index.html").read_text()
-        for name, p in matrix.PROGRAMS.items():
-            self.assertIn(p.layout, ("wide", "box"), name)
-            if p.layout != "wide":
-                self.assertIn(f"body.overview.crt-{p.layout}", page, name)
+        self.assertNotIn("crt-box", page)
+        self.assertNotIn("layout", web.crt_playlist(Settings())["programs"][0])
 
     def test_every_painting_has_a_credit(self):
         names = crt_gallery.credits()
