@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from brick_retro import games
+from brick_retro import games, retro_metrics
 from brick_retro.pads import BTN_DPAD_DOWN, BTN_DPAD_UP, BTN_GAMEPAD, BTN_JOYSTICK, BTN_MODE, Launcher, Volume, is_pad
 
 
@@ -234,3 +234,27 @@ class LookTest(unittest.TestCase):
         self.assertIn('core_options_path = "~/.config/retroarch/brick-core-options.cfg"', cfg)
         self.assertIn('pcsx_rearmed_neon_enhancement_enable = "enabled"', (self.ROOT / "core-options.cfg").read_text())
 
+
+
+class MetricsTests(unittest.TestCase):
+    def test_written_only_when_something_changed(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/brick-retro.prom"
+            retro_metrics.PADS.set(1)
+            retro_metrics.flush(path)
+            self.assertIn("brick_retro_pads_connected 1", Path(path).read_text())
+            Path(path).unlink()
+            retro_metrics.flush(path)
+            self.assertFalse(Path(path).exists())  # nothing changed, nothing written
+            retro_metrics.PADS.set(2)
+            retro_metrics.flush(path)
+            self.assertIn("brick_retro_pads_connected 2", Path(path).read_text())
+
+    def test_no_textfile_directory_no_error(self):
+        retro_metrics.PADS.set(3)
+        retro_metrics.flush("/nonexistent/brick-retro.prom")
+
+    def test_games_per_system(self):
+        text = retro_metrics.games_text({"nes": 12, "psx": 0})
+        self.assertIn('brick_retro_games{system="nes"} 12', text)
+        self.assertIn('brick_retro_games{system="psx"} 0', text)

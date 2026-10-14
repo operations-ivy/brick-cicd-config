@@ -35,8 +35,8 @@ def internet_up(probes=INTERNET_PROBES, timeout: float = 2.0) -> bool:
 class LocalVitals:
     """brick9000's own CPU %, memory %, CPU temperature and root disk %.
 
-    brick9000 isn't a cluster node and runs no node_exporter, so these come
-    straight from /proc and /sys. CPU % is measured between calls.
+    Read straight from /proc and /sys, not from Prometheus, so the board shows
+    them when the cluster is down. CPU % is measured between calls.
     """
 
     def __init__(self, name: str):

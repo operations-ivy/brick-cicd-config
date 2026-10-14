@@ -73,6 +73,16 @@ class ArenaOverHttp(unittest.TestCase):
         self.assertEqual(s["weather"]["forecast"], "Calm, drizzle")
         self.assertTrue(s["kiosk"])  # this test talks to it over loopback
 
+    def test_metrics(self):
+        self.get("/api/state")
+        self.assertEqual(self.post_view("arena"), 204)
+        r = self.get("/metrics")
+        self.assertTrue(r.headers["Content-Type"].startswith("text/plain; version=0.0.4"))
+        text = r.read().decode()
+        self.assertIn('brick_arena_view{view="arena"} 1', text)
+        self.assertIn('brick_arena_http_requests_total{path="/api/screen",code="204"}', text)
+        self.assertRegex(text, r"brick_arena_kiosk_last_seen_timestamp_seconds [1-9]")
+
     def test_only_the_local_unproxied_browser_sets_the_view(self):
         self.assertEqual(self.post_view("weather"), 204)
         self.assertEqual(json.load(self.get("/api/state"))["screen"]["view"], "weather")

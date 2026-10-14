@@ -13,7 +13,8 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import build, checks, crt_gallery, host, lights, matrix, notify, patterns, units, web
+from brick_status import board_metrics, build, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify, patterns, units, web
+from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
 
@@ -489,6 +490,15 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual([n["node"] for n in got], ["brick420", "brick2000"])
         self.assertEqual(got[1]["cpu"], 7.5)
 
+    def test_vitals_only_ask_the_clusters_node_exporter(self):
+        """brick9000 reads its own; brick69 is scraped too, but isn't a node."""
+        asked = []
+        prom = type("P", (), {"query": lambda self, q: asked.append(q) or []})()
+        checks.cluster_vitals(prom)
+        self.assertTrue(asked)
+        for q in asked:
+            self.assertEqual(q.count('job="node-exporter"'), q.count("node_"), q)
+
     def test_unreachable_prometheus_is_unknown_not_crash(self):
         class Broken:
             def query(self, promql):
@@ -532,6 +542,104 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(self.get("/", proxied=True), 200)
         self.assertEqual(self.get("/api/state", proxied=True), 200)
         self.assertEqual(self.get("/api/matrix?cols=80&rows=24", proxied=True), 403)
+
+    def test_metrics_endpoint(self):
+        self.get("/api/state", proxied=False)
+        with urllib.request.urlopen(self.base + "/metrics", timeout=2) as r:
+            self.assertTrue(r.headers["Content-Type"].startswith("text/plain; version=0.0.4"))
+            text = r.read().decode()
+        self.assertIn("# TYPE brick_status_polls_total counter", text)
+        self.assertRegex(text, r'brick_status_http_requests_total\{path="/api/state",code="200"\} [1-9]')
+
+
+class MetricsTest(unittest.TestCase):
+    def test_render_text_format(self):
+        r = metrics.Registry()
+        c = r.counter("x_total", "Things.", ["kind"])
+        g = r.gauge("y", "A level.")
+        c.inc(kind='a"b')
+        c.inc(2, kind='a"b')
+        g.set(0.5)
+        self.assertEqual(r.render(), "\n".join([
+            "# HELP x_total Things.", "# TYPE x_total counter", 'x_total{kind="a\\"b"} 3',
+            "# HELP y A level.", "# TYPE y gauge", "y 0.5"]) + "\n")
+
+    def test_labels_must_match(self):
+        g = metrics.Registry().gauge("z", "Z.", ["a"])
+        with self.assertRaises(ValueError):
+            g.set(1, b="x")
+
+    def test_replace_drops_old_series(self):
+        r = metrics.Registry()
+        g = r.gauge("z", "Z.", ["a"])
+        g.set(1, a="old")
+        g.replace({("new",): 2})
+        self.assertNotIn("old", r.render())
+        self.assertIn('z{a="new"} 2', r.render())
+
+    def test_write_textfile_replaces_in_one_step(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/x.prom"
+            metrics.write_textfile(path, "a 1\n")
+            metrics.write_textfile(path, "a 2\n")
+            self.assertEqual(Path(path).read_text(), "a 2\n")
+            self.assertEqual(sorted(p.name for p in Path(d).iterdir()), ["x.prom"])
+
+    def test_summary_states_as_numbers(self):
+        summary = checks.summarize([checks.Check("cluster", "api", "ok"),
+                                    checks.Check("cluster", "pods", "warn"),
+                                    checks.Check("wigle", "sync", "fail")])
+        board_metrics.record_summary(summary)
+        text = board_metrics.REGISTRY.render()
+        self.assertIn("brick_status_overall_state 4", text)
+        self.assertIn('brick_status_group_state{group="cluster"} 3', text)
+        self.assertIn('brick_status_check_state{group="cluster",check="api"} 0', text)
+
+    def test_button_names(self):
+        from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
+        self.assertEqual(button_name(BUTTON_KEYS[0]), "overview")
+        self.assertEqual(button_name(BUTTON_KEYS[5]), "button6")
+        self.assertEqual(button_name(KEY_WAKE), "side")
+        self.assertEqual(button_name(KEY_LEFT), "left")
+        self.assertEqual(button_name(999), "other")
+
+    def test_http_paths_are_bounded(self):
+        self.assertEqual(board_metrics.http_path("/static/vendor/xterm.js"), "/static/")
+        self.assertEqual(board_metrics.http_path("/wp-login.php"), "other")
+        self.assertEqual(board_metrics.http_path("/metrics"), "/metrics")
+
+
+class JobsTest(unittest.TestCase):
+    def test_success_records_now(self):
+        text = jobs.render("brick-roms", 1000.0, True, 12.5, 0.0)
+        self.assertIn('brick_job_last_success{unit="brick-roms"} 1', text)
+        self.assertIn('brick_job_last_success_timestamp_seconds{unit="brick-roms"} 1000', text)
+        self.assertIn('brick_job_last_duration_seconds{unit="brick-roms"} 12.5', text)
+
+    def test_failure_keeps_the_last_success(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/brick-job-x.prom"
+            Path(path).write_text(jobs.render("x", 1000.0, True, None, 0.0))
+            text = jobs.render("x", 2000.0, False, None, jobs.previous_success(path, "x"))
+        self.assertIn('brick_job_last_success{unit="x"} 0', text)
+        self.assertIn('brick_job_last_success_timestamp_seconds{unit="x"} 1000', text)
+        self.assertIn('brick_job_last_run_timestamp_seconds{unit="x"} 2000', text)
+        self.assertNotIn("duration", text)
+
+    def test_checkout_info(self):
+        text = jobs.render("brick-deploy", 1.0, True, None, 0.0, ("main", "abc1234"))
+        self.assertIn('brick_job_checkout_info{unit="brick-deploy",branch="main",commit="abc1234"} 1', text)
+
+    def test_main_reads_systemds_result(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            env = {**os.environ, "SERVICE_RESULT": "exit-code", "EXIT_STATUS": "1",
+                   "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+            subprocess.run([sys.executable, "-m", "brick_status.jobs", "x", "--dir", d], env=env, check=True)
+            self.assertIn('brick_job_last_success{unit="x"} 0', Path(f"{d}/brick-job-x.prom").read_text())
 
 
 class PixelArtTest(unittest.TestCase):
@@ -680,10 +788,10 @@ class PagerTest(unittest.TestCase):
         p = self.pager()
         p.observe([self.NODE], self.SEEN, 0)
         p.observe([self.NODE], self.SEEN, 700)
-        notify.deliver(p, Down())
+        self.assertEqual(notify.deliver(p, Down()), (0, 1))
         self.assertEqual(len(p.take()), 1)
         up = Up()
-        notify.deliver(p, up)
+        self.assertEqual(notify.deliver(p, up), (1, 0))
         self.assertEqual((up.sent, p.take()), (["brick2000 is down"], []))
 
 

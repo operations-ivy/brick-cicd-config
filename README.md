@@ -32,8 +32,10 @@ Picade. It deliberately does **not** join k3s:
   pods.
 
 The cost: the cluster's node_exporter and Promtail DaemonSets don't cover it.
-brick-status reads brick9000's own vitals directly, and its logs stay in its
-own journal. The secrets it needs live in files on the host, never in git or
+brick-status reads brick9000's own vitals directly (so the board shows them
+when the cluster is down), and its logs stay in its own journal. It runs its
+own node-exporter for Prometheus (below, "Metrics"); being scraped never
+makes it depend on the cluster. The secrets it needs live in files on the host, never in git or
 a SealedSecret. `~/.config/brick-jenkins/secrets/` there also keeps the
 plaintext of Jenkins' secrets, which are sealed from it (below).
 
@@ -285,8 +287,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   and the data keeps updating.
 - The overview is a CRT window running a terminal program (below), the three area
   tiles, and a compact vitals strip for brick420 and brick2000 (from
-  node_exporter) and brick9000 itself (read from `/proc` and `/sys`, since it
-  runs no node_exporter). Each host gets a pie for root disk and LED segment
+  node_exporter) and brick9000 itself (read from `/proc` and `/sys`, so they
+  show when the cluster is down). Each host gets a pie for root disk and LED segment
   bars for CPU, memory and temperature, green, yellow or red by level (CPU and
   memory turn yellow at 85% and red at 95%, temperature at 158°F and 176°F,
   disk at 85% and 95%), and its CPU temperature in °F beside the bar. The header shows a red
@@ -632,6 +634,29 @@ panel shows from elsewhere:
 ```bash
 ssh zaphod@brick1982 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim -' > arena.png
 ```
+
+## Metrics
+
+Everything here that can be measured is, for Prometheus (scrape jobs in
+brick-k8s-config's `kube-prometheus-stack-values.yaml`) and the "Brick
+boards" Grafana dashboard (`dashboards/`, `kubectl apply -f dashboards/`).
+No pip packages on the hosts: `brick_status/metrics.py` writes the text
+format, and brick-arena and brick-retro import it from the same checkout.
+
+| What | Where Prometheus gets it | Metrics |
+| --- | --- | --- |
+| brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the proxy; it listens on localhost) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
+| brick-arena | `brick1982:8766/metrics` | `brick_arena_*`: polls, pod events animated, panel view and backlight, taps, kiosk browser last seen, requests |
+| brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
+| Oneshot user units (`brick-deploy` on both hosts, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
+| brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
+| Caddy | `brick9000:9180/metrics` | `caddy_*`, per name |
+
+The textfile directory is `/var/lib/node-exporter-textfile` on both hosts,
+like the cluster's DaemonSet (brick1982's `brick-units` writes there too).
+The board's vitals strip and brick-arena's weather only use the cluster's
+node-exporter (`job="node-exporter"`): brick9000 and brick69 are scraped too,
+but aren't nodes.
 
 ## Making changes
 

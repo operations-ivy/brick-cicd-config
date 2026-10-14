@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from . import games
+from . import retro_metrics as rm
 from .pads import ABS_HAT0Y, Launcher, Volume, is_pad
 
 log = logging.getLogger("brick-retro")
@@ -55,6 +56,7 @@ def retroarch_command(shader: str = SHADER) -> list[str]:
 
 def start_retroarch() -> None:
     log.info("starting RetroArch")
+    rm.LAUNCHES.inc()
     # Its own session: restarting brick-retro (a deploy) leaves a game alone.
     subprocess.Popen(retroarch_command(), start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -62,11 +64,13 @@ def start_retroarch() -> None:
 
 def stop_retroarch() -> None:
     log.info("no controller for a while: closing RetroArch (it saves a state first)")
+    rm.CLOSES.inc(reason="idle")
     subprocess.run(["pkill", "-TERM", "-x", "retroarch"])
 
 
 def force_quit_retroarch() -> None:
     log.info("Home held: closing RetroArch")
+    rm.CLOSES.inc(reason="home")
     subprocess.run(["pkill", "-TERM", "-x", "retroarch"])
     for _ in range(10):
         if not retroarch_running():
@@ -151,6 +155,7 @@ def daemon() -> None:
             log.info("controller gone: %s", pads[path].name)
         for path in set(current) - set(pads):
             log.info("controller connected: %s", current[path].name)
+            rm.CONNECTS.inc()
         for path, d in current.items():
             if path in pads:
                 d.close()
@@ -162,13 +167,18 @@ def daemon() -> None:
             force_quit_retroarch()
             launcher.known = set(pads)  # and don't reopen it for the same pad
         launcher.tick(set(pads), home)
-        set_flag(retroarch_running())
+        running = retroarch_running()
+        set_flag(running)
+        rm.RUNNING.set(int(running))
+        rm.PADS.set(len(pads))
+        rm.flush()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if sys.argv[1:] == ["games"]:
         counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR)
+        rm.write_games(counts)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
         log.info("playlists: %s; imported %d old save(s)", counts, len(copied))
         return

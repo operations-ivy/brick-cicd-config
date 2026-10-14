@@ -16,6 +16,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import board_metrics as bm
 from . import build, checks, host, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
@@ -62,6 +63,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
     ntfy = ntfy_from(settings)
     while True:
+        started = time.monotonic()
         try:
             try:
                 vitals = checks.cluster_vitals(prom)
@@ -72,16 +74,36 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             internet = host.internet_up()
             summary = checks.summarize(checks.collect(prom, jenkins, internet)
                                        + units.board_checks(prom, socket.gethostname()))
-            status.set(summary, {"sshd": host.sshd_running(), "internet": internet}, vitals)
+            sshd = host.sshd_running()
+            status.set(summary, {"sshd": sshd, "internet": internet}, vitals)
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
                           lambda problem: notify.facts(problem, summary, vitals))
             if internet:  # otherwise each send would stall the poll until it timed out
-                notify.deliver(pager, ntfy)
+                sent, failed = notify.deliver(pager, ntfy)
+                bm.PAGES.inc(sent, result="sent")
+                bm.PAGES.inc(failed, result="failed")
+            bm.record_summary(summary)
+            bm.INTERNET.set(1 if internet else 0)
+            bm.SSHD.set(1 if sshd else 0)
+            bm.OPEN.set(len(pager.open))
+            bm.QUEUED.set(len(pager.outbox))
+            bm.POLLS.inc(result="ok")
         except Exception:
             # Keep polling; a dead poller would leave the board showing stale data.
             log.exception("poll failed")
+            bm.POLLS.inc(result="error")
+        bm.POLL_SECONDS.set(time.monotonic() - started)
+        bm.POLLED_AT.set(time.time())
         time.sleep(settings.poll_seconds)
+
+
+def button_name(code: int) -> str:
+    """A cabinet key as a metric label: the view a button picks, or what it does."""
+    if code in BUTTON_KEYS:
+        i = BUTTON_KEYS.index(code)
+        return VIEWS[i] if i < len(VIEWS) else f"button{i + 1}"
+    return {KEY_WAKE: "side", KEY_LEFT: "left", KEY_RIGHT: "right"}.get(code, "other")
 
 
 def send_test_page(settings: Settings) -> None:
@@ -116,6 +138,7 @@ def main() -> None:
 
     def on_key(code: int) -> None:
         now = time.time()
+        bm.BUTTONS.inc(button=button_name(code))
         if code == KEY_WAKE:
             if board.wake_button(now):
                 log.info("side button: on for %d minutes", settings.wake_seconds // 60)
@@ -143,6 +166,8 @@ def main() -> None:
         if os.path.exists(settings.retro_flag):  # a game is open over the board
             board.keep_awake(now, 60)
         mode = board.mode(now)
+        bm.one_hot(bm.MODE, "mode", mode, ("idle", "active", "quiet"))
+        bm.one_hot(bm.VIEW, "view", board.views[board.view(now)], board.views)
         summary = status.get()
         screen.set(mode != QUIET)
 
@@ -152,6 +177,9 @@ def main() -> None:
                                         running="deploying", min_running_seconds=settings.deploy_min_seconds)
                     or build.light_pattern(settings.build_status, now, settings.build_result_seconds))
 
+        lights_state = ("off" if mode == QUIET else "build" if building
+                        else "active" if mode == ACTIVE else "idle")
+        bm.one_hot(bm.LIGHTS, "state", lights_state, ("off", "build", "active", "idle"))
         if mode == QUIET:
             plasma.off()
             last_active = None

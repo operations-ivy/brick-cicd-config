@@ -316,15 +316,19 @@ def read_topic(path: str) -> str:
         return ""
 
 
-def deliver(pager: Pager, ntfy: Ntfy | None) -> None:
-    """Send what's waiting. A failure leaves it queued for the next poll."""
+def deliver(pager: Pager, ntfy: Ntfy | None) -> tuple[int, int]:
+    """Send what's waiting. A failure leaves it queued for the next poll.
+    Returns how many were sent and how many sends failed."""
+    sent = 0
     if ntfy is None:
-        return
+        return sent, 0
     for message in pager.take():
         try:
             ntfy.send(message)
         except Exception as e:  # offline, ntfy down: try again next poll
             log.warning("page not sent yet (%s): %s", message["title"], e)
-            return
+            return sent, 1
         log.info("paged: %s", message["title"])
         pager.sent(message)
+        sent += 1
+    return sent, 0

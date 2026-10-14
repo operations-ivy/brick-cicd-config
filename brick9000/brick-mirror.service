@@ -10,3 +10,5 @@ After=network-online.target
 Type=oneshot
 Environment=MIRRORS=%h/.local/share/brick-mirrors
 ExecStart=%h/brick-cicd-config/jenkins/bin/mirror-repos
+# How the run went, for Prometheus (brick_status/jobs.py); '-': never fails the run.
+ExecStopPost=-/usr/bin/env PYTHONPATH=%h/brick-cicd-config/brick-status python3 -m brick_status.jobs brick-mirror
