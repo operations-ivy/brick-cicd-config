@@ -295,7 +295,7 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix,
   pipes, a gallery of public-domain paintings drawn with chafa
   (`brick-status/art/paintings/`, credits in its `CREDITS.md`), cbonsai,
-  rain, tty-clock and nyancat. The bezel says which. The window is a
+  rain and nyancat (tty-clock is available but not in the default list). The bezel says which. The window is a
   square-ish CRT frame about a quarter of the screen, with the three tiles
   stacked beside it and the vitals below; each program names a font size
   (smaller shows more of programs that draw at a fixed size, like nyancat). Only names in
