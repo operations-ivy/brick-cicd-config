@@ -16,7 +16,7 @@ shows how that's going.
 | `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
-| `brick1982` (host, also a k3s worker) | 7" touchscreen kiosk, `brick-arena` daemon | Needs the screen; an ambient display, so it's fine for it to share the cluster's fate |
+| `brick1982` (host) | 7" touchscreen kiosk, `brick-arena` daemon | Needs the screen; left the cluster 2026-10-14 to become a wall display |
 
 ### brick9000 is not a cluster node
 
@@ -256,7 +256,7 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   every host (`brick_status/units.py`). brick9000's own system and user
   units are read straight from `systemctl`, so they still show when the
   cluster is down; the rest come from Prometheus: node-exporter's systemd
-  collector for the k3s nodes' system units, and for user units (which that
+  collector for the other hosts' system units, and for user units (which that
   collector can't see) `brick-units.timer` on brick1982, which every 2
   minutes writes `brick_systemd_unit_problem` to node-exporter's textfile
   directory (`/var/lib/node-exporter-textfile`). A timer is a problem when
@@ -673,12 +673,15 @@ format, and brick-arena and brick-retro import it from the same checkout.
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
 | Oneshot user units (`brick-deploy` on both hosts, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
 | brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
+| brick1982 itself | node-exporter on `:9100` (`brick1982/install.sh`; systemd units too) | `node_*` |
 | Caddy | `brick9000:9180/metrics` | `caddy_*`, per name |
 
 The textfile directory is `/var/lib/node-exporter-textfile` on both hosts,
-like the cluster's DaemonSet (brick1982's `brick-units` writes there too).
-The board's vitals strip and brick-arena's weather only use the cluster's
-node-exporter (`job="node-exporter"`): brick9000 and brick69 are scraped too,
+like the cluster's DaemonSet. brick1982 has its own node-exporter too (the
+same install as brick9000's, `brick1982/install.sh`), scraped as
+`brick1982-node` since it left the cluster on 2026-10-14. The board's vitals
+strip and brick-arena's weather only use the cluster's node-exporter
+(`job="node-exporter"`): brick9000, brick1982 and brick69 are scraped too,
 but aren't nodes.
 
 ## Making changes
