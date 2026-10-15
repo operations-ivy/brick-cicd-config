@@ -4,8 +4,8 @@
 BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
 # brick9000, the status board, outside the cluster (reached over SSH).
 BRICK9000=${BRICK9000:-192.168.1.221}
-# brick1982, the touchscreen (brick-arena); a k3s worker, but its display
-# runs on the host, so it's reached over SSH too.
+# brick1982, the touchscreen (brick-arena), outside the cluster (reached over
+# SSH).
 BRICK1982=${BRICK1982:-192.168.1.222}
 # The local clones mirror-repos keeps: in Jenkins' home, or wherever the
 # caller says (brick9000's brick-mirror.timer keeps its own).

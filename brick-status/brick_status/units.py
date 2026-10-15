@@ -3,7 +3,7 @@ as Prometheus metrics.
 
 brick-status checks brick9000's own units directly, so the board still shows
 them when the cluster is down. Other hosts come through Prometheus:
-node-exporter's systemd collector for the k3s nodes' system units, and this
+node-exporter's systemd collector for the other hosts' system units, and this
 module's textfile output for user units, which that collector can't see (run
 on brick1982 by brick-units.timer):
 
