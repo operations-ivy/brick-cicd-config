@@ -4,9 +4,9 @@
     scripts/smoke            # from the laptop or Jenkins, read-only
 
 - every *.brick.nozdormu.cloud name answers through brick9000's proxy
-- brick-status and the proxy on brick9000, and brick-arena and the kiosk on
+- brick-status and the proxy on brick9000, and the LCARS panel's kiosk on
   brick1982, are running (over SSH)
-- the board's and the arena's data is fresh (polled in the last minute)
+- the board's data is fresh (polled in the last minute)
 
 Exits 1 if anything is down.
 """
@@ -20,11 +20,11 @@ import urllib.error
 import urllib.request
 
 # name -> the statuses that mean "up" (logins redirect or refuse)
-NAMES = {"status": {200}, "arena": {200}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200},
+NAMES = {"status": {200}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200},
          "homeassistant": {200, 302}, "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403}, "dashboard": {200}}
 SERVICES = {"brick9000": [("--user", "brick-status"), ("", "docker")],
-            "brick1982": [("--user", "brick-arena"), ("", "brick-kiosk")]}
-FRESH = {"status": "/api/state", "arena": "/api/state"}
+            "brick1982": [("", "lcars-kiosk"), ("--user", "lcars-deploy.timer")]}
+FRESH = {"status": "/api/state"}
 
 
 def status(url: str) -> int:

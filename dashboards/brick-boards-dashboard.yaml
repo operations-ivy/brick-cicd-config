@@ -1,4 +1,4 @@
-# Grafana dashboard for brick-status, brick-arena, brick-retro and the hosts'
+# Grafana dashboard for brick-status, the LCARS panel, brick-retro and the hosts'
 # oneshot units (README, "Metrics"). Grafana's sidecar loads any ConfigMap
 # labelled grafana_dashboard.
 #   kubectl apply -f dashboards/
@@ -45,7 +45,8 @@ data:
             "x": 0,
             "y": 0
           },
-          "id": 1
+          "id": 1,
+          "targets": []
         },
         {
           "type": "stat",
@@ -870,15 +871,6 @@ data:
               },
               "expr": "brick_status_poll_duration_seconds",
               "legendFormat": "poll"
-            },
-            {
-              "refId": "B",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "brick_arena_poll_duration_seconds",
-              "legendFormat": "arena poll"
             }
           ],
           "fieldConfig": {
@@ -939,15 +931,6 @@ data:
               },
               "expr": "increase(brick_status_polls_total{result=\"error\"}[15m])",
               "legendFormat": "brick-status"
-            },
-            {
-              "refId": "B",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "increase(brick_arena_polls_total{result=\"error\"}[15m])",
-              "legendFormat": "brick-arena"
             }
           ],
           "fieldConfig": {
@@ -1155,15 +1138,6 @@ data:
               },
               "expr": "sum by (path) (rate(brick_status_http_requests_total[5m]))",
               "legendFormat": "board {{path}}"
-            },
-            {
-              "refId": "B",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "sum by (path) (rate(brick_arena_http_requests_total[5m]))",
-              "legendFormat": "arena {{path}}"
             }
           ],
           "fieldConfig": {
@@ -1209,7 +1183,7 @@ data:
         },
         {
           "type": "row",
-          "title": "brick-arena (brick1982's panel)",
+          "title": "LCARS panel (brick1982, operations-ivy/rpi_lcars)",
           "collapsed": false,
           "panels": [],
           "gridPos": {
@@ -1222,8 +1196,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Up for",
-          "description": "",
+          "title": "Home Assistant link",
+          "description": "1 while Home Assistant answers the panel's polls (lcars_ha_up).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1235,14 +1209,14 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "time() - brick_arena_start_time_seconds",
-              "instant": true,
-              "legendFormat": ""
+              "expr": "lcars_ha_up",
+              "legendFormat": "",
+              "instant": true
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "dtdurations",
+              "unit": "none",
               "color": {
                 "mode": "thresholds"
               },
@@ -1254,7 +1228,24 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "Down",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "Up",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
             },
             "overrides": []
           },
@@ -1266,7 +1257,7 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "none",
+            "colorMode": "background",
             "graphMode": "none",
             "textMode": "auto",
             "justifyMode": "auto",
@@ -1282,8 +1273,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Last poll",
-          "description": "",
+          "title": "Controls",
+          "description": "Climate control open (unlocked by code or from Home Assistant) or secured.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1295,14 +1286,14 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "time() - brick_arena_last_poll_timestamp_seconds",
-              "instant": true,
-              "legendFormat": ""
+              "expr": "lcars_can_change",
+              "legendFormat": "",
+              "instant": true
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "s",
+              "unit": "none",
               "color": {
                 "mode": "thresholds"
               },
@@ -1312,18 +1303,26 @@ data:
                   {
                     "color": "green",
                     "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 60
-                  },
-                  {
-                    "color": "red",
-                    "value": 300
                   }
                 ]
               },
-              "decimals": 0
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "Secured",
+                      "color": "text",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "Open",
+                      "color": "orange",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
             },
             "overrides": []
           },
@@ -1351,8 +1350,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Kiosk browser seen",
-          "description": "",
+          "title": "Screen",
+          "description": "The screen being shown.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1364,74 +1363,9 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "time() - brick_arena_kiosk_last_seen_timestamp_seconds",
-              "instant": true,
-              "legendFormat": ""
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 60
-                  }
-                ]
-              },
-              "decimals": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "colorMode": "background",
-            "graphMode": "none",
-            "textMode": "auto",
-            "justifyMode": "auto",
-            "orientation": "auto"
-          },
-          "gridPos": {
-            "h": 4,
-            "w": 4,
-            "x": 8,
-            "y": 42
-          },
-          "id": 21
-        },
-        {
-          "type": "stat",
-          "title": "Panel",
-          "description": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "brick_arena_panel_asleep",
-              "instant": true,
-              "legendFormat": ""
+              "expr": "lcars_screen == 1",
+              "legendFormat": "{{screen}}",
+              "instant": true
             }
           ],
           "fieldConfig": {
@@ -1449,23 +1383,7 @@ data:
                   }
                 ]
               },
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "0": {
-                      "text": "On",
-                      "color": "green",
-                      "index": 0
-                    },
-                    "1": {
-                      "text": "Asleep",
-                      "color": "text",
-                      "index": 1
-                    }
-                  }
-                }
-              ]
+              "mappings": []
             },
             "overrides": []
           },
@@ -1477,24 +1395,24 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "background",
+            "colorMode": "none",
             "graphMode": "none",
-            "textMode": "auto",
+            "textMode": "name",
             "justifyMode": "auto",
             "orientation": "auto"
           },
           "gridPos": {
             "h": 4,
             "w": 4,
-            "x": 12,
+            "x": 8,
             "y": 42
           },
-          "id": 22
+          "id": 21
         },
         {
           "type": "stat",
           "title": "Backlight",
-          "description": "",
+          "description": "0 is dark (night); a tap wakes it dimmed.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1506,9 +1424,9 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "brick_arena_backlight_fraction",
-              "instant": true,
-              "legendFormat": ""
+              "expr": "lcars_backlight_level",
+              "legendFormat": "",
+              "instant": true
             }
           ],
           "fieldConfig": {
@@ -1525,7 +1443,69 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 42
+          },
+          "id": 22
+        },
+        {
+          "type": "stat",
+          "title": "Taps (24h)",
+          "description": "Touches, including ones that only woke the dark screen.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(lcars_taps_total[24h]))",
+              "legendFormat": "",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -1553,8 +1533,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Taps (24h)",
-          "description": "",
+          "title": "Frame time",
+          "description": "Time the last frame took to draw (a frame is 1/15 s at most).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1566,14 +1546,14 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "increase(brick_arena_wakes_total[24h])",
-              "instant": true,
-              "legendFormat": ""
+              "expr": "lcars_frame_seconds",
+              "legendFormat": "",
+              "instant": true
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
+              "unit": "s",
               "color": {
                 "mode": "thresholds"
               },
@@ -1583,10 +1563,18 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.05
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.066
                   }
                 ]
               },
-              "decimals": 0
+              "mappings": []
             },
             "overrides": []
           },
@@ -1598,7 +1586,7 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "none",
+            "colorMode": "background",
             "graphMode": "none",
             "textMode": "auto",
             "justifyMode": "auto",
@@ -1613,88 +1601,9 @@ data:
           "id": 24
         },
         {
-          "type": "state-timeline",
-          "title": "Panel view",
-          "description": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "1 * max(brick_arena_view{view=\"main\"}) + 2 * max(brick_arena_view{view=\"arena\"}) + 3 * max(brick_arena_view{view=\"weather\"})",
-              "legendFormat": "view"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "main",
-                      "color": "purple",
-                      "index": 0
-                    },
-                    "2": {
-                      "text": "arena",
-                      "color": "blue",
-                      "index": 1
-                    },
-                    "3": {
-                      "text": "weather",
-                      "color": "green",
-                      "index": 2
-                    }
-                  }
-                }
-              ],
-              "custom": {
-                "fillOpacity": 80,
-                "lineWidth": 0
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "showValue": "never",
-            "mergeValues": true,
-            "rowHeight": 0.85,
-            "alignValue": "left",
-            "legend": {
-              "showLegend": false
-            }
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 12,
-            "x": 0,
-            "y": 46
-          },
-          "id": 25
-        },
-        {
           "type": "timeseries",
-          "title": "Backlight",
-          "description": "",
+          "title": "Codes entered",
+          "description": "Per hour, by result: granted, denied, locked_out, hard_locked, no_code.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1706,81 +1615,19 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "brick_arena_backlight_fraction",
-              "legendFormat": ""
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 15,
-                "showPoints": "never",
-                "spanNulls": false,
-                "lineInterpolation": "stepAfter",
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "axisSoftMin": 0
-              },
-              "color": {
-                "mode": "palette-classic"
-              },
-              "max": 1
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "calcs": []
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 12,
-            "x": 12,
-            "y": 46
-          },
-          "id": 26
-        },
-        {
-          "type": "timeseries",
-          "title": "Pod events the arena animated",
-          "description": "Per hour: a pod moving node, restarting, or a new pod.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "sum by (kind) (increase(brick_arena_events_total[1h]))",
-              "legendFormat": "{{kind}}"
+              "expr": "sum by (result) (increase(lcars_unlock_attempts_total[1h]))",
+              "legendFormat": "{{result}}"
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "none",
+              "decimals": 0,
               "custom": {
                 "drawStyle": "bars",
                 "lineWidth": 1,
                 "fillOpacity": 60,
                 "showPoints": "never",
-                "spanNulls": false,
-                "lineInterpolation": "smooth",
                 "stacking": {
                   "mode": "normal",
                   "group": "A"
@@ -1797,20 +1644,209 @@ data:
             "legend": {
               "displayMode": "list",
               "placement": "bottom",
-              "calcs": []
+              "calcs": [
+                "sum"
+              ]
             },
             "tooltip": {
               "mode": "multi",
               "sort": "desc"
             }
           },
+          "interval": "1h",
           "gridPos": {
             "h": 6,
-            "w": 24,
+            "w": 12,
             "x": 0,
-            "y": 51
+            "y": 46
+          },
+          "id": 25
+        },
+        {
+          "type": "timeseries",
+          "title": "Changes sent",
+          "description": "Per hour, by action (set_temperature, set_hvac_mode).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (action) (increase(lcars_commands_total[1h]))",
+              "legendFormat": "{{action}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 1,
+                "fillOpacity": 60,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisSoftMin": 0
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "calcs": [
+                "sum"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "interval": "1h",
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "id": 26
+        },
+        {
+          "type": "timeseries",
+          "title": "Relocks",
+          "description": "Per hour, by reason: idle, dark, hard_locked (from Home Assistant), button.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (reason) (increase(lcars_relocks_total[1h]))",
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 1,
+                "fillOpacity": 60,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisSoftMin": 0
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "calcs": [
+                "sum"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "interval": "1h",
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 52
           },
           "id": 27
+        },
+        {
+          "type": "timeseries",
+          "title": "Requests to Home Assistant",
+          "description": "Per hour, by kind (state, call) and result.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (kind, result) (increase(lcars_ha_requests_total[1h]))",
+              "legendFormat": "{{kind}} {{result}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 1,
+                "fillOpacity": 60,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisSoftMin": 0
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "calcs": [
+                "sum"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "interval": "1h",
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 52
+          },
+          "id": 41
         },
         {
           "type": "row",
@@ -1821,9 +1857,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 57
+            "y": 58
           },
-          "id": 28
+          "id": 28,
+          "targets": []
         },
         {
           "type": "stat",
@@ -1898,7 +1935,7 @@ data:
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 58
+            "y": 59
           },
           "id": 29
         },
@@ -1958,7 +1995,7 @@ data:
             "h": 4,
             "w": 4,
             "x": 4,
-            "y": 58
+            "y": 59
           },
           "id": 30
         },
@@ -2019,7 +2056,7 @@ data:
             "h": 4,
             "w": 4,
             "x": 8,
-            "y": 58
+            "y": 59
           },
           "id": 31
         },
@@ -2079,7 +2116,7 @@ data:
             "h": 4,
             "w": 4,
             "x": 12,
-            "y": 58
+            "y": 59
           },
           "id": 32
         },
@@ -2133,7 +2170,7 @@ data:
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 58
+            "y": 59
           },
           "id": 33
         },
@@ -2207,7 +2244,7 @@ data:
             "h": 4,
             "w": 16,
             "x": 0,
-            "y": 66
+            "y": 67
           },
           "id": 34
         },
@@ -2267,7 +2304,7 @@ data:
             "h": 4,
             "w": 16,
             "x": 0,
-            "y": 70
+            "y": 71
           },
           "id": 35
         },
@@ -2280,9 +2317,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 74
+            "y": 75
           },
-          "id": 36
+          "id": 36,
+          "targets": []
         },
         {
           "type": "table",
@@ -2334,7 +2372,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 75
+            "y": 76
           },
           "id": 37
         },
@@ -2388,7 +2426,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 75
+            "y": 76
           },
           "id": 38
         },
@@ -2448,7 +2486,7 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 82
+            "y": 83
           },
           "id": 39
         },
@@ -2508,7 +2546,7 @@ data:
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 82
+            "y": 83
           },
           "id": 40
         }
@@ -2529,7 +2567,7 @@ data:
       },
       "timepicker": {},
       "timezone": "browser",
-      "title": "Brick boards: status, arena, games",
+      "title": "Brick boards: status, LCARS panel, games",
       "uid": "brick-boards",
-      "version": 1
+      "version": 2
     }

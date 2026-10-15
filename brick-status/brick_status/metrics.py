@@ -3,7 +3,7 @@ rendered in the text format, served at /metrics or written for
 node-exporter's textfile collector.
 
 The hosts run these daemons on the system Python with no pip packages, so
-brick-arena and brick-retro import this from the same checkout.
+brick-retro imports this from the same checkout.
 
     REQUESTS = registry.counter("brick_x_requests_total", "Requests.", ["path"])
     REQUESTS.inc(path="/")

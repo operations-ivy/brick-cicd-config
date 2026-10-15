@@ -1,6 +1,6 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 [Unit]
-Description=Deploy brick-arena from GitHub
+Description=Update brick-cicd-config (host tooling) from GitHub
 After=network-online.target
 
 [Service]

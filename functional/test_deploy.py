@@ -42,7 +42,7 @@ class DeployHarness:
         (self.work / "scripts/test").chmod(0o755)
         self.commit("pass", "first")
         subprocess.run(["git", "clone", "-q", str(self.origin), str(self.device)], check=True, capture_output=True)
-        env_dir = self.home / ".config" / ("brick-status" if host == "brick9000" else "brick-arena")
+        env_dir = self.home / ".config" / ("brick-status" if host == "brick9000" else "brick-cicd-config")
         env_dir.mkdir(parents=True)
         self.env_file = env_dir / "env"
         self.follow("main")
@@ -153,10 +153,18 @@ class DeployScripts:
 
 
 class Brick1982Deploy(DeployScripts, unittest.TestCase):
-    host, service = "brick1982", "brick-arena"
+    # Host tooling only: the units run from the clone, so nothing restarts.
+    host, service = "brick1982", None
+
+    def test_a_passing_commit_is_deployed_and_the_service_restarted(self):
+        sha = self.h.commit("pass", "second")
+        result = self.h.deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.h.head, sha)
+        self.assertEqual([c for c in self.h.commands if "restart" in c], [])
 
     def test_a_change_under_brick1982_says_to_rerun_install(self):
-        self.h.commit("pass", "unit change", touch="brick1982/brick-kiosk.service")
+        self.h.commit("pass", "unit change", touch="brick1982/brick-units.service")
         result = self.h.deploy()
         self.assertIn("run brick1982/install.sh", result.stderr)
 

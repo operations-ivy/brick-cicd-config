@@ -1,14 +1,16 @@
 #!/bin/sh
-# Deploy brick-arena from GitHub. Run every 2 hours by brick-deploy.timer,
-# or now with: systemctl --user start brick-deploy.service
+# Keep brick1982's clone of brick-cicd-config up to date from GitHub: its host
+# tooling (brick-units, the deploys' metrics) runs from it. Run every 2 hours
+# by brick-deploy.timer, or now with: systemctl --user start brick-deploy.service
 #
 # Same as brick9000/deploy, without the board lights or the proxy: if the
 # branch brick1982 follows (BRICK_DEPLOY_BRANCH in the env file, main by
-# default) has moved, test the new commit in a scratch worktree, switch to it
-# only if the tests pass, then restart brick-arena (the page reloads itself).
+# default) has moved, test the new commit in a scratch worktree and switch to
+# it only if the tests pass. Nothing to restart: the units run from the clone
+# each time. The screen's LCARS panel deploys itself (rpi_lcars).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
-env_file=$HOME/.config/brick-arena/env
+env_file=$HOME/.config/brick-cicd-config/env
 state=${XDG_STATE_HOME:-$HOME/.local/state}/brick-deploy
 mkdir -p "$state"
 
@@ -41,4 +43,3 @@ echo "deploy: $branch @ $(git rev-parse --short "$target") (was $(git rev-parse 
 if ! git diff --quiet "$current" "$target" -- brick1982/; then
     echo "deploy: brick1982/ changed; run brick1982/install.sh to apply it" >&2
 fi
-systemctl --user restart brick-arena
