@@ -247,17 +247,22 @@ def _clock(ts: float, now: float) -> str:
     return hm if at.date() == today.date() else f"{at:%a} {hm}"
 
 
+# The cluster's own node-exporter DaemonSet only: brick9000 reads its own
+# vitals (LocalVitals, so they show when the cluster is down), and brick69,
+# scraped as a host outside the cluster, wanders off wardriving.
+NODES = 'job="node-exporter"'
 VITALS_QUERIES = {
-    "cpu": '100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])))',
-    "mem": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
-    "temp": 'max by (instance) (node_thermal_zone_temp{type="cpu-thermal"})',
-    "disk": '100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})',
+    "cpu": f'100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{{{NODES},mode="idle"}}[2m])))',
+    "mem": f"100 * (1 - node_memory_MemAvailable_bytes{{{NODES}}} / node_memory_MemTotal_bytes{{{NODES}}})",
+    "temp": f'max by (instance) (node_thermal_zone_temp{{{NODES},type="cpu-thermal"}})',
+    "disk": f'100 * (1 - node_filesystem_avail_bytes{{{NODES},mountpoint="/"}}'
+            f' / node_filesystem_size_bytes{{{NODES},mountpoint="/"}})',
 }
 
 
 def cluster_vitals(prom: Prometheus) -> list[dict]:
     """CPU %, memory %, CPU temperature and root disk % for each node_exporter host."""
-    names = {m["instance"]: m.get("nodename", m["instance"]) for m, _ in prom.query("node_uname_info")}
+    names = {m["instance"]: m.get("nodename", m["instance"]) for m, _ in prom.query(f"node_uname_info{{{NODES}}}")}
     nodes: dict[str, dict] = {}
     for key, promql in VITALS_QUERIES.items():
         for m, v in prom.query(promql):

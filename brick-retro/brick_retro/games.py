@@ -119,7 +119,15 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
     folder = rom_dir / system.folder
     if system.discs:
         return disc_games(folder, system.extensions, m3u_dir / system.folder)
-    return [(p, p.stem) for p in roms(folder, system.extensions)]
+    # The same game in two places (brick2000's SNES folder has many both at
+    # the top and in an A-Z subfolder) is one entry: RetroArch keys saves by
+    # file name, so both copies share one save anyway.
+    seen, entries = set(), []
+    for p in sorted(roms(folder, system.extensions), key=lambda p: (p.stem.lower(), len(p.parts), str(p))):
+        if p.stem.lower() not in seen:
+            seen.add(p.stem.lower())
+            entries.append((p, p.stem))
+    return entries
 
 
 def playlist(system: System, rom_dir: Path, core_dir: Path, m3u_dir: Path) -> dict:

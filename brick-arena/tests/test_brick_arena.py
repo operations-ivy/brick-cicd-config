@@ -87,6 +87,14 @@ class TrackerTests(unittest.TestCase):
         [restart] = t.update([pod("a-2", "brick666", "ns/a", restarts=1)], 20)
         self.assertEqual((restart.kind, restart.dst), ("restart", "brick666"))
 
+    def test_new_holds_only_the_last_updates_events(self):
+        t = collect.Tracker()
+        t.update([pod("a-1", "brick666", "ns/a")], 0)
+        t.update([pod("a-2", "brick666", "ns/a")], 10)
+        self.assertEqual([e.kind for e in t.new], ["new"])
+        t.update([pod("a-2", "brick666", "ns/a")], 20)
+        self.assertEqual(t.new, [])
+
     def test_events_expire(self):
         t = collect.Tracker()
         t.update([], 0)
@@ -193,6 +201,13 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.light.level, 1.0)
         self.panel.update(t + 1700 + 1800)
         self.assertEqual(self.light.level, 0)
+
+    def test_panel_metrics_follow_the_light(self):
+        from brick_arena import arena_metrics as am
+        self.panel.update(self.at(2026, 10, 12, 9, 0))  # Monday morning: quiet
+        self.assertEqual((am.ASLEEP.get(), am.BRIGHTNESS.get()), (1, 0))
+        self.panel.update(self.at(2026, 10, 17, 23, 30))  # Saturday night: dim
+        self.assertEqual((am.ASLEEP.get(), am.BRIGHTNESS.get()), (0, 0.08))
 
     def test_tap_outside_quiet_hours_leaves_nothing_behind(self):
         evening = self.at(2026, 10, 12, 20, 0)

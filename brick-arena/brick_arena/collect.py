@@ -23,8 +23,10 @@ VITALS_QUERIES = {
     "mem": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
     "temp": 'max by (instance) (node_thermal_zone_temp{type="cpu-thermal"})',
 }
-WIND_QUERY = ('sum by (instance) (rate(node_network_receive_bytes_total{device=~"wlan.*|eth.*|end.*"}[2m])'
-              ' + rate(node_network_transmit_bytes_total{device=~"wlan.*|eth.*|end.*"}[2m]))')
+# The cluster's nodes only (the node-exporter DaemonSet), not brick9000 and
+# brick69, which Prometheus scrapes too.
+WIND_QUERY = ('sum by (instance) (rate(node_network_receive_bytes_total{job="node-exporter",device=~"wlan.*|eth.*|end.*"}[2m])'
+              ' + rate(node_network_transmit_bytes_total{job="node-exporter",device=~"wlan.*|eth.*|end.*"}[2m]))')
 RAIN_QUERY = "sum(rate(coredns_dns_requests_total[2m]))"
 
 # Pod name suffixes: a ReplicaSet's hash, and the random tail every
@@ -131,6 +133,7 @@ class Tracker:
     restarts: dict[str, int] = field(default_factory=dict)   # pod name -> count
     seen: set[str] = field(default_factory=set)              # pod names
     events: list[Event] = field(default_factory=list)
+    new: list[Event] = field(default_factory=list)            # the last update's
     primed: bool = False
 
     def update(self, current: list[Pod], now: float) -> list[Event]:
@@ -158,6 +161,7 @@ class Tracker:
         self.seen = names
         self.primed = True
         self.events = [e for e in self.events if now - e.at < EVENT_SECONDS] + new_events
+        self.new = new_events
         return new_events
 
 

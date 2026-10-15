@@ -19,6 +19,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import arena_metrics as am
 from . import collect
 from .backlight import DEFAULT_QUIET, Backlight, QuietSchedule, in_window, parse_window
 
@@ -63,7 +64,12 @@ class State:
             return False
         with self._lock:
             if (view, body) != (self.screen["view"], self.screen["body"]):
+                if view != self.screen["view"]:
+                    am.VIEW_CHANGES.inc(view=view)
                 self.screen = {"view": view, "body": body, "at": time.time()}
+        for v in VIEWS:
+            am.VIEW.set(1 if v == view else 0, view=v)
+        am.BODY.set(body)
         return True
 
 
@@ -99,6 +105,7 @@ class Panel:
         return now >= self._awake_until and self.quiet.is_quiet(datetime.fromtimestamp(now))
 
     def wake(self, now: float) -> None:
+        am.WAKES.inc()
         with self._lock:
             if self.quiet.is_quiet(datetime.fromtimestamp(now)):
                 self._awake_until = now + self.wake_seconds
@@ -106,11 +113,16 @@ class Panel:
 
     def update(self, now: float) -> None:
         with self._lock:
-            if self.asleep(now):
+            asleep = self.asleep(now)
+            if asleep:
                 self.light.off()
+                level = 0.0
             else:
                 dim = in_window(self.dim_window, datetime.fromtimestamp(now))
-                self.light.set_fraction(self.dim_level if dim else self.day_level)
+                level = self.dim_level if dim else self.day_level
+                self.light.set_fraction(level)
+        am.ASLEEP.set(1 if asleep else 0)
+        am.BRIGHTNESS.set(level)
 
 
 def panel_from_env() -> Panel:
@@ -124,11 +136,19 @@ def poll(state: State, panel: Panel) -> None:
     tracker = collect.Tracker()
     seconds = float(env("POLL_SECONDS", "10"))
     while True:
+        started = time.monotonic()
+        tracker.new = []
         try:
             state.set(collect.snapshot(prom, tracker))
+            am.POLLS.inc(result="ok")
         except Exception as e:  # network errors, bad responses: keep the last picture
             log.warning("poll failed: %s", e)
             state.fail(str(e))
+            am.POLLS.inc(result="error")
+        for e in tracker.new:
+            am.EVENTS.inc(kind=e.kind)
+        am.POLL_SECONDS.set(time.monotonic() - started)
+        am.POLLED_AT.set(time.time())
         panel.update(time.time())
         time.sleep(seconds)
 
@@ -138,10 +158,15 @@ def serve(state: State, host: str, port: int, rotate: int, panel: Panel | None =
         def do_GET(self):
             if self.path == "/api/state":
                 now = time.time()
+                kiosk = is_kiosk(self.client_address[0], self.headers)
+                if kiosk:
+                    am.KIOSK_SEEN.set(now)
                 body = json.dumps({"boot": BOOT, "rotate": rotate, "now": now,
-                                   "kiosk": is_kiosk(self.client_address[0], self.headers),
+                                   "kiosk": kiosk,
                                    "asleep": bool(panel and panel.asleep(now)), **state.get()})
                 self._send(200, "application/json", body.encode())
+            elif self.path == "/metrics":
+                self._send(200, am.CONTENT_TYPE, am.REGISTRY.render().encode())
             elif self.path in ("/", "/index.html"):
                 self._send(200, "text/html; charset=utf-8", (STATIC / "index.html").read_bytes())
             elif self.path.startswith("/art/") and (art := art_file(self.path)):
@@ -172,6 +197,7 @@ def serve(state: State, host: str, port: int, rotate: int, panel: Panel | None =
                 self._send(400, "text/plain", b"unknown view")
 
         def _send(self, code: int, ctype: str, body: bytes) -> None:
+            am.HTTP.inc(path=am.http_path(self.path), code=str(code))
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Cache-Control", "no-store")

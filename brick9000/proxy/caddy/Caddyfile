@@ -5,6 +5,11 @@
 	# The redirects to HTTPS are written out below; the automatic ones would
 	# also catch the old plain-HTTP names.
 	auto_https disable_redirects
+	# Request counts, sizes and durations for each name, scraped by
+	# Prometheus from :9180 (below).
+	metrics {
+		per_host
+	}
 }
 
 # The cluster's apps, through Traefik on either node, which routes by the same
@@ -112,4 +117,10 @@ http://jenkins.local {
 # redirects to the board's mirror.
 :80 {
 	redir https://status.brick.nozdormu.cloud{uri} 308
+}
+
+# Caddy's own metrics for Prometheus (brick-k8s-config scrapes
+# brick9000:9180). Plain HTTP on the LAN, like node-exporter's :9100.
+http://:9180 {
+	metrics /metrics
 }
