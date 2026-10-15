@@ -58,6 +58,66 @@ def title(stem: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", bare.lower())
 
 
+# Tags label() takes off a game's name. The files keep them: RetroArch names
+# saves after the file, and brick2000's copy is the one sync-roms mirrors.
+_REGION_CODES = re.compile(r"[UEJWFGSIKABCHNDR4]{1,4}")  # GoodTools: (U), (JUE), (4)
+_REGIONS = {"usa", "europe", "japan", "world", "asia", "australia", "brazil", "canada", "china", "france",
+            "germany", "italy", "korea", "netherlands", "spain", "sweden", "uk", "taiwan", "hong kong"}
+_LANGUAGES = {"en", "fr", "de", "es", "it", "ja", "nl", "pt", "sv", "no", "da", "fi", "zh", "ko", "pl", "ru",
+              "fre", "ger", "spa", "ita", "chinese", "english", "french", "german", "spanish", "japanese", "unl"}
+_NOISE = re.compile(r"(rev|v|version)\s*[\d.a-z]*|[a-z]{3} \d{4}|\d{4}-\d{2}-\d{2}|ntsc(-[uj])?|pal|"
+                    r"s[lc][eu]s-\d+|en,.*|.*(,\s*)(en|fr|de|es|it|ja)\b.*", re.IGNORECASE)
+
+
+def _noise(tag: str) -> bool:
+    t = tag.strip()
+    if _REGION_CODES.fullmatch(t) or _NOISE.fullmatch(t):
+        return True
+    parts = [x.strip().lower() for x in t.split(",")]
+    return all(x in _REGIONS or x in _LANGUAGES for x in parts)
+
+
+def label(stem: str) -> str:
+    """A game's name for the list, from its file name: "7th Saga, The (U) [!]"
+    is "7th Saga, The". Region, language, revision and date tags and GoodTools'
+    dump marks ([!], [a1], [b1], [p1], [f1], [c], [S]) go; what says something
+    stays: (Beta), (Proto), (Disc 2), a multicart's name, and translations and
+    hacks as "(Translated)" and "(Hack)"."""
+    name = stem if " " in stem else stem.replace("_", " ")
+    extra = []
+    for tag in re.findall(r"\[([^\]]*)\]", name):
+        if re.match(r"T[+-]", tag):
+            extra.append("(Translated)")
+        elif re.fullmatch(r"h\d*.*", tag):
+            extra.append("(Hack)")
+    name = re.sub(r"\[[^\]]*\]", " ", name)
+    name = re.sub(r"\(([^)]*)\)", lambda m: " " if _noise(m.group(1)) else m.group(0), name)
+    name = re.sub(r"\s+,", ",", re.sub(r"\s+", " ", name)).strip(" -")
+    for e in extra:
+        if e not in name:
+            name = f"{name} {e}"
+    return name or stem
+
+
+def _unique(entries: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
+    """Clean labels, putting a tag back where two games would look the same
+    (ActRaiser (U) and ActRaiser (E)): first the region, else the file name."""
+    labels = [label(name) for _, name in entries]
+    counts: dict[str, int] = {}
+    for lb in labels:
+        counts[lb] = counts.get(lb, 0) + 1
+    out = []
+    for (path, name), lb in zip(entries, labels):
+        if counts[lb] > 1:
+            tags = [t for t in re.findall(r"\(([^)]*)\)", name) if _noise(t)]
+            lb = f"{lb} ({tags[0]})" if tags else name
+        out.append((path, lb))
+    seen: dict[str, int] = {}
+    for i, (path, lb) in enumerate(out):  # still the same (two "(U)" dumps): the file name
+        seen[lb] = seen.get(lb, 0) + 1
+    return [(path, entries[i][1] if seen[lb] > 1 else lb) for i, (path, lb) in enumerate(out)]
+
+
 def cue_files(cue: Path) -> list[Path]:
     """The track files a cue sheet names."""
     names = re.findall(r'^\s*FILE\s+"(.+?)"', cue.read_text(errors="replace"), re.MULTILINE)
@@ -118,7 +178,7 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
     """(file, label) for each of a system's games."""
     folder = rom_dir / system.folder
     if system.discs:
-        return disc_games(folder, system.extensions, m3u_dir / system.folder)
+        return _unique(disc_games(folder, system.extensions, m3u_dir / system.folder))
     # The same game in two places (brick2000's SNES folder has many both at
     # the top and in an A-Z subfolder) is one entry: RetroArch keys saves by
     # file name, so both copies share one save anyway.
@@ -127,7 +187,7 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
         if p.stem.lower() not in seen:
             seen.add(p.stem.lower())
             entries.append((p, p.stem))
-    return entries
+    return _unique(entries)
 
 
 def playlist(system: System, rom_dir: Path, core_dir: Path, m3u_dir: Path) -> dict:
