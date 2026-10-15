@@ -21,7 +21,7 @@ import urllib.request
 
 # name -> the statuses that mean "up" (logins redirect or refuse)
 NAMES = {"status": {200}, "arena": {200}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200},
-         "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403}, "dashboard": {200}}
+         "homeassistant": {200, 302}, "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403}, "dashboard": {200}}
 SERVICES = {"brick9000": [("--user", "brick-status"), ("", "docker")],
             "brick1982": [("--user", "brick-arena"), ("", "brick-kiosk")]}
 FRESH = {"status": "/api/state", "arena": "/api/state"}
