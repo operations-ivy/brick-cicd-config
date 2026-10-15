@@ -206,10 +206,34 @@ def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
     return checks
 
 
+def upnp_checks(prom: Prometheus) -> list[Check]:
+    """The router's UPnP port forwards, from overwatch's UPnP watch: a forward
+    that isn't on overwatch's allowed list means something on the LAN opened a
+    port to the internet. The details (port, device) stay on overwatch's page."""
+    def value(promql: str) -> float | None:
+        r = prom.query(promql)
+        return r[0][1] if r else None
+
+    unexpected = value("max(overwatch_upnp_unexpected)")
+    reachable = value("max(overwatch_upnp_reachable)")
+    forwards = value("max(overwatch_upnp_mappings)")
+    if unexpected is None or reachable is None:
+        check = Check("cluster", "upnp forwards", UNKNOWN, "no data from overwatch")
+    elif unexpected > 0:
+        n = int(unexpected)
+        check = Check("cluster", "upnp forwards", FAIL, f"{n} unexpected forward{'s' if n != 1 else ''}: see overwatch")
+    elif reachable < 1:
+        check = Check("cluster", "upnp forwards", WARN, "router not answering UPnP")
+    else:
+        n = int(forwards or 0)
+        check = Check("cluster", "upnp forwards", OK, "none" if n == 0 else f"{n} allowed")
+    return [check]
+
+
 def collect(prom: Prometheus, jenkins: Jenkins, internet: bool = True) -> list[Check]:
     """Run every check. A group whose Prometheus queries fail becomes one unknown check."""
     checks = build_checks(jenkins)
-    for group, fn in [("cluster", lambda p: cluster_checks(p, internet)),
+    for group, fn in [("cluster", lambda p: cluster_checks(p, internet) + upnp_checks(p)),
                       ("wigle", wigle_checks)]:
         try:
             checks.extend(fn(prom))

@@ -37,6 +37,8 @@ HOLDS = {
     "node": 30 * 60,
     "wigle": 10 * 3600,
     "disk": 3600,
+    # A port opened to the internet from inside: no waiting.
+    "upnp": 0,
 }
 DISK_LIMIT = 85.0
 
@@ -84,6 +86,12 @@ def find_problems(summary: dict, internet: bool, vitals: list[dict]) -> tuple[li
             seen.add("node")
             found += [Problem("node", c["name"]) for c in nodes if c["detail"] == "NotReady"]
 
+    upnp = next((c for c in cluster if c["name"] == "upnp forwards"), None)
+    if upnp and upnp["state"] != UNKNOWN:
+        seen.add("upnp")
+        if upnp["state"] == FAIL:
+            found.append(Problem("upnp"))
+
     last = next((c for c in wigle if c["name"] == "last sync"), None)
     if last and last["state"] != UNKNOWN:
         seen.add("wigle")
@@ -125,6 +133,10 @@ PAGES = {
         "wigle-sync's been failin' for {held}. Them files are pilin' up on brick69 like tailings.",
         "No color in the pan for {held}: wigle-sync can't get its files out.",
     ], "electric_plug,warning", "plugs-disconnected"),
+    "upnp": ("A door's open to the outside", [
+        "Somethin' on the claim just pried a door open to the outside world through the router. Go see who on overwatch.",
+        "Somebody asked the router for a door to the outside, and it said yes. Check overwatch for who.",
+    ], "rotating_light,door", "server-warn"),
     "disk": ("{subject} is fillin' up", [
         "{subject}'s disk is near full and has been for {held}. Clear some ore out before she's stuffed.",
         "{subject} is runnin' out of room. Been that way {held}.",
@@ -136,6 +148,7 @@ CLEARS = {
     "node": ("{subject} is back", "{subject} got back on its feet after {held}.", "server-ok"),
     "wigle": ("wigle-sync is syncin'", "The plugs are back in after {held}. Files are movin'.", "plugs-connected"),
     "disk": ("{subject} has room again", "{subject}'s disk is back under the line after {held}.", "server-ok"),
+    "upnp": ("That door's shut", "The outside door's closed again after {held}, or it's been allowed.", "server-ok"),
 }
 
 

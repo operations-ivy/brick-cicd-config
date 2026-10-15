@@ -722,6 +722,47 @@ class FindProblemsTest(unittest.TestCase):
         self.assertNotIn("node", seen)
 
 
+class UpnpTest(unittest.TestCase):
+    """overwatch's UPnP watch on the board, and the page it sends."""
+
+    def check(self, **results):
+        prom = FakeProm({f"overwatch_upnp_{k}": [({}, v)] for k, v in results.items()})
+        return checks.upnp_checks(prom)[0]
+
+    def test_states(self):
+        c = self.check(unexpected=0, reachable=1, mappings=0)
+        self.assertEqual((c.group, c.name, c.state, c.detail), ("cluster", "upnp forwards", "ok", "none"))
+        self.assertEqual(self.check(unexpected=0, reachable=1, mappings=2).detail, "2 allowed")
+        bad = self.check(unexpected=1, reachable=1, mappings=1)
+        self.assertEqual((bad.state, bad.detail), ("fail", "1 unexpected forward: see overwatch"))
+        self.assertEqual(self.check(unexpected=0, reachable=0, mappings=0).state, "warn")
+        self.assertEqual(checks.upnp_checks(FakeProm({}))[0].state, "unknown")
+
+    def test_an_unexpected_forward_pages_at_once_and_clears(self):
+        bad = cluster_summary(("brick420", "ok", "Ready"), ("upnp forwards", "fail", "1 unexpected forward: see overwatch"))
+        found, seen = notify.find_problems(bad, True, [])
+        self.assertEqual([p.key for p in found], ["upnp"])
+        self.assertIn("upnp", seen)
+        import random
+        import tempfile
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d))
+        pager = notify.Pager(d / "n.json", d / "i.jsonl", notify.HOLDS, random.Random(1))
+        pager.observe(found, seen, 0)
+        self.assertEqual([m["title"] for m in pager.take()], ["A door's open to the outside"])
+        for m in pager.take():
+            pager.sent(m)
+        ok = cluster_summary(("brick420", "ok", "Ready"), ("upnp forwards", "ok", "none"))
+        pager.observe(*notify.find_problems(ok, True, []), 120)
+        self.assertEqual([m["title"] for m in pager.take()], ["That door's shut"])
+
+    def test_no_overwatch_data_neither_pages_nor_clears(self):
+        summary = cluster_summary(("brick420", "ok", "Ready"), ("upnp forwards", "unknown", "no data from overwatch"))
+        found, seen = notify.find_problems(summary, True, [])
+        self.assertEqual(found, [])
+        self.assertNotIn("upnp", seen)
+
+
 class PagerTest(unittest.TestCase):
     def setUp(self):
         import tempfile
