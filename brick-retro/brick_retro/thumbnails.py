@@ -15,6 +15,7 @@ shared); a game with no match isn't asked about again for MISS_DAYS.
     python3 -m brick_retro thumbnails
 """
 
+import difflib
 import json
 import logging
 import re
@@ -43,14 +44,87 @@ def file_name(label: str) -> str:
     return UNSAFE.sub("_", label) + ".png"
 
 
+# Roman numerals in titles, as digits ("Mega Man VII" and "Mega Man 7"). Not
+# "I" or "X": too many titles use them as letters ("Mega Man X", "X-Men").
+ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9"}
+SKIP_WORDS = {"the", "a", "an", "and"}
+FUZZY = 0.9  # difflib ratio for the last-resort match
+
+
+def _words(name: str) -> list[str]:
+    bare = re.sub(r"\(.*?\)|\[.*?\]", " ", name).lower().replace("'", "")
+    words = re.findall(r"[a-z0-9]+", re.sub(r"[&_]", " ", bare))
+    return [ROMAN.get(w, w) for w in words if w not in SKIP_WORDS]
+
+
 def key(name: str) -> str:
-    """A title without tags, articles or punctuation, to match across naming
-    schemes: "7th Saga, The (U) [!]" and "7th Saga, The (USA)" agree. The
-    server's own names have "_" for "&", ":" and the rest, so those and "and"
-    all count the same (as nothing)."""
-    bare = re.sub(r"\(.*?\)|\[.*?\]", " ", name).lower()
-    bare = re.sub(r"[&_]|\b(the|and)\b", " ", bare)
-    return re.sub(r"[^a-z0-9]+", "", bare)
+    """A title without tags, articles, numbering style or punctuation, to
+    match across naming schemes: "7th Saga, The (U) [!]" and "7th Saga, The
+    (USA)" agree, as do "A Nightmare on Elm Street" and "Nightmare on Elm
+    Street, A", and "Mega Man VII" and "Mega Man 7". The server's own names
+    have "_" for "&", ":" and the rest, so those and "and" count as nothing."""
+    return "".join(_words(name))
+
+
+def base(name: str) -> str:
+    """The key of the title before any " - subtitle"."""
+    return key(re.split(r" - ", re.sub(r"_", " ", name), maxsplit=1)[0])
+
+
+class Index:
+    """A system's server names for one kind, looked up several ways."""
+
+    def __init__(self, names: list[str]):
+        self.names = names
+        self.by_key: dict[str, list[str]] = {}
+        self.by_base: dict[str, set[str]] = {}
+        self.base_of: dict[str, str] = {}
+        for n in names:
+            self.by_key.setdefault(key(n), []).append(n)
+            self.by_base.setdefault(base(n), set()).add(key(n))
+            self.base_of[key(n)] = base(n)
+
+    def candidates(self, name: str) -> list[str]:
+        """Server names for one game, from the surest way that finds any:
+        the same title; the same title where only one side has a subtitle;
+        the title without a "Disney's"-style prefix; then a near spelling.
+        Only when exactly one title fits, so a guess never picks between
+        games."""
+        k = key(name)
+        if not k:
+            return []
+        if k in self.by_key:
+            return self.by_key[k]
+        # One side has a subtitle, the other none ("Street Fighter II - The
+        # World Warrior" and "Street Fighter II"; "super_mario_advance_2" and
+        # "Super Mario Advance 2 - Super Mario World"). Two different
+        # subtitles are two different games.
+        mine_has_sub = base(name) != k
+        for keys in (self.by_base.get(base(name), set()) if mine_has_sub else set(),
+                     self.by_base.get(k, set()) if not mine_has_sub else set()):
+            keys = {sk for sk in keys if mine_has_sub != (self.base_of[sk] != sk)}
+            # One game under longer and shorter names ("Super Mario World"
+            # and "Super Mario World + Mario Brothers") is still one game.
+            shortest = min(keys, key=len, default="")
+            if keys and all(sk.startswith(shortest) for sk in keys):
+                return [n for sk in sorted(keys) for n in self.by_key[sk]]
+        words = _words(name)
+        if len(words) > 1 and re.search(r"\w's\b", name.split(" ")[0]):
+            rest = "".join(words[1:])
+            if rest in self.by_key:
+                return self.by_key[rest]
+        # A near spelling, for typos ("Daedalean"/"Daedalian"): long enough to
+        # mean something, and never a different number ("NHL Hockey 96" is
+        # not "95", "Super Mario Advance 2" not "Super Mario Advance").
+        if len(k) < 8:
+            return []
+        digits = re.findall(r"\d+", k)
+        close = [c for c in difflib.get_close_matches(k, list(self.by_key), n=5, cutoff=FUZZY)
+                 if re.findall(r"\d+", c) == digits][:2]
+        if len(close) == 1 or (len(close) == 2 and difflib.SequenceMatcher(None, k, close[0]).ratio()
+                               > difflib.SequenceMatcher(None, k, close[1]).ratio() + 0.03):
+            return self.by_key[close[0]]
+        return []
 
 
 def regions(name: str) -> list[str]:
@@ -64,18 +138,18 @@ def regions(name: str) -> list[str]:
     return found
 
 
-def best(label: str, by_key: dict[str, list[str]]) -> str | None:
-    """The server name to use for a game, or None."""
-    names = by_key.get(key(label))
+def best(name: str, index: "Index") -> str | None:
+    """The server name to use for a game (its ROM's file name), or None."""
+    names = index.candidates(name)
     if not names:
         return None
-    wanted = regions(label) + [r for r in REGIONS if r not in regions(label)]
+    wanted = regions(name) + [r for r in REGIONS if r not in regions(name)]
 
-    def rank(name: str) -> tuple:
-        theirs = regions(name)
+    def rank(n: str) -> tuple:
+        theirs = regions(n)
         place = min((wanted.index(r) for r in theirs if r in wanted), default=len(wanted))
         # Released before unreleased, the wanted region first, the plainest name.
-        return (bool(UNRELEASED.search(name)), place, len(name), name)
+        return (bool(UNRELEASED.search(n)), place, len(n), n)
 
     return min(names, key=rank)
 
@@ -112,49 +186,76 @@ def fetch(system: str, kind: str, name: str, target: Path, limiter: Limiter, tim
     limiter.took(len(data))
 
 
+# Bump when matching changes: the remembered misses are tried again.
+MATCHER = 2
+
+
+def playlist_games(lpl: Path) -> dict[str, str]:
+    """Each game's label and the file name it's matched by (its ROM's, with
+    the region and other tags games.label() takes off the label)."""
+    out: dict[str, str] = {}
+    for item in json.loads(lpl.read_text()).get("items", []):
+        out.setdefault(item["label"], Path(item.get("path", item["label"])).stem)
+    return out
+
+
+def adopt(folder: Path, label: str, source: str) -> None:
+    """Rename a thumbnail fetched under the game's old label (its file name,
+    before games.label() cleaned labels up) to the new one, rather than
+    downloading it again."""
+    target = folder / file_name(label)
+    if target.is_file():
+        return
+    for old in (source, source.replace("_", " ")):
+        if old != label and (folder / file_name(old)).is_file():
+            (folder / file_name(old)).rename(target)
+            return
+
+
 def sync(playlist_dir: Path, thumb_dir: Path, state: Path, rate: float = 1_000_000,
          now: float | None = None, index_fn=index, fetch_fn=fetch) -> dict[str, dict[str, int]]:
     """Fetch every missing thumbnail for every playlist. Returns, per system,
     how many games have each kind and how many games there are."""
     now = time.time() if now is None else now
     try:
-        misses = json.loads(state.read_text())
+        saved = json.loads(state.read_text())
     except (OSError, ValueError):
-        misses = {}
+        saved = {}
+    misses = saved.get("misses", {}) if saved.get("matcher") == MATCHER else {}
     misses = {k: t for k, t in misses.items() if now - t < MISS_DAYS * 86400}
     limiter = Limiter(rate)
     counts: dict[str, dict[str, int]] = {}
     for lpl in sorted(playlist_dir.glob("*.lpl")):
         system = lpl.stem
-        labels = sorted({item["label"] for item in json.loads(lpl.read_text()).get("items", [])})
-        have = counts.setdefault(system, {"games": len(labels)})
+        games = playlist_games(lpl)
+        have = counts.setdefault(system, {"games": len(games)})
         for kind in KINDS:
-            missing = [lb for lb in labels if not (thumb_dir / system / kind / file_name(lb)).is_file()
+            folder = thumb_dir / system / kind
+            for label, source in games.items():
+                adopt(folder, label, source)
+            missing = [lb for lb in sorted(games) if not (folder / file_name(lb)).is_file()
                        and f"{system}/{kind}/{lb}" not in misses]
             if missing:
                 try:
-                    names = index_fn(system, kind)
+                    found = Index(index_fn(system, kind))
                 except Exception as e:  # the server's down or we're offline: try tomorrow
                     log.warning("no thumbnail list for %s %s: %s", system, kind, e)
-                    names = []
-                by_key: dict[str, list[str]] = {}
-                for n in names:
-                    by_key.setdefault(key(n), []).append(n)
+                    found = None
                 fetched = 0
                 for label in missing:
-                    name = best(label, by_key) if names else None
+                    name = best(games[label], found) if found else None
                     if name is None:
-                        if names:
+                        if found:
                             misses[f"{system}/{kind}/{label}"] = now
                         continue
                     try:
-                        fetch_fn(system, kind, name, thumb_dir / system / kind / file_name(label), limiter)
+                        fetch_fn(system, kind, name, folder / file_name(label), limiter)
                         fetched += 1
                     except Exception as e:
                         log.warning("thumbnail not fetched (%s): %s", name, e)
                 if fetched:
                     log.info("%s %s: fetched %d", system, kind, fetched)
-            have[kind] = sum(1 for lb in labels if (thumb_dir / system / kind / file_name(lb)).is_file())
+            have[kind] = sum(1 for lb in games if (folder / file_name(lb)).is_file())
     state.parent.mkdir(parents=True, exist_ok=True)
-    state.write_text(json.dumps(misses))
+    state.write_text(json.dumps({"matcher": MATCHER, "misses": misses}))
     return counts

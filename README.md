@@ -547,18 +547,27 @@ pinned commit into `/usr/local/lib/libretro`.
   only read `/extra/games` (`rrsync -ro`); `install.sh` prints the line to
   authorize. A game in two folders (brick2000's SNES folder has many both
   at the top and in an A-Z subfolder) is one entry.
+- **Names:** the list shows clean names ("7th Saga, The (U) [!]" is "7th
+  Saga, The"; `games.label()`): region, language, revision and date tags
+  and GoodTools' dump marks go; (Beta), (Proto), (Disc 2), a multicart's
+  name, translations and hacks stay. Two versions of one game keep their
+  region to tell them apart. The files keep their names: RetroArch names
+  saves after the file, and sync-roms mirrors brick2000's copies.
 - **Thumbnails:** after the playlists, `python3 -m brick_retro thumbnails`
   fetches box art, title screens and screenshots for every game that hasn't
   got them, from libretro's thumbnail server, at about 1 MB/s
   (`BRICK_RETRO_THUMB_RATE`). RetroArch looks thumbnails up by the playlist
   label, and its own updater (Online Updater, Playlist Thumbnails Updater)
-  asks the server for exactly that, but the labels are ROM file names
-  ("7th Saga, The (U) [!]") and the server uses No-Intro names ("7th Saga,
-  The (USA)"), so most would miss. `brick_retro/thumbnails.py` matches by
-  bare title, preferring the game's own region, then USA, and saves each
-  image under the name RetroArch looks for. About 86% of the games match
-  (2026-10-14); the rest are unlicensed carts, hacks and odd file names. A
-  game with no match isn't asked about again for 30 days.
+  asks the server for exactly that, but the server uses No-Intro names ("7th
+  Saga, The (USA)"), so most would miss. `brick_retro/thumbnails.py`
+  matches the ROM's file name to the server's names: the same title (tags,
+  articles, punctuation and roman numerals aside), then the same title where
+  only one side has a subtitle, then without a "Disney's"-style prefix, then
+  a near spelling with the same numbers; only ever when exactly one game
+  fits. It prefers the game's own region, then USA, and saves each image
+  under the label. 1920 of 2089 games match (2026-10-14); the rest are
+  unlicensed carts, hacks and odd file names. A game with no match isn't
+  asked about again for 30 days (sooner when the matcher changes).
   `brick_retro_thumbnails{system,kind}` counts them.
 - **PlayStation:** one entry per game. A `.chd` hides a `.bin`/`.cue` copy of
   the same game, a multi-disc game is one `.m3u` (`~/games/m3u`, so it keeps

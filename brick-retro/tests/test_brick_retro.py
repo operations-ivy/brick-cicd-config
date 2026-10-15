@@ -180,7 +180,7 @@ class GamesTests(unittest.TestCase):
         # its cue sheet's; SaGa is still .ecm-packed and Lost's track is gone;
         # GT2's .cue and .ccd are one image; SCPH1001 is a BIOS.
         self.assertEqual([i["label"] for i in psx],
-                         ["Ace Combat 3", "Final Fantasy VII (USA)", "GT2", "R4", "Tekken 3", "WipEout (USA)"])
+                         ["Ace Combat 3", "Final Fantasy VII", "GT2", "R4", "Tekken 3", "WipEout"])
         self.assertEqual(Path(psx[2]["path"]).suffix, ".cue")
         self.assertEqual(psx[0]["core_path"], games.PCSX_REARMED)
         ff7 = Path(psx[1]["path"])
@@ -194,7 +194,7 @@ class GamesTests(unittest.TestCase):
         (self.roms / "psx/Final Fantasy VII (USA) (Disc 2).chd").unlink()
         self.write()
         self.assertEqual(list((self.root / "m3u/psx").iterdir()), [])
-        self.assertIn("Final Fantasy VII (USA) (Disc 1)", [i["label"] for i in self.items("Sony - PlayStation")])
+        self.assertIn("Final Fantasy VII (Disc 1)", [i["label"] for i in self.items("Sony - PlayStation")])
 
     def test_systems_without_games_get_no_playlist(self):
         self.write()
@@ -267,10 +267,7 @@ class ThumbnailTests(unittest.TestCase):
               "Kirby _ The Amazing Mirror (USA)"]
 
     def by_key(self):
-        out = {}
-        for n in self.SERVER:
-            out.setdefault(thumbnails.key(n), []).append(n)
-        return out
+        return thumbnails.Index(self.SERVER)
 
     def test_goodtools_and_bare_names_match_no_intro(self):
         b = self.by_key()
@@ -282,6 +279,36 @@ class ThumbnailTests(unittest.TestCase):
         self.assertEqual(thumbnails.best("Zelda (U)", b), "Zelda (Europe)")  # a release over a beta
         self.assertIsNone(thumbnails.best("Not On The Server", b))
 
+    def test_the_fallbacks(self):
+        b = thumbnails.Index(["Nightmare on Elm Street, A (USA)", "Mega Man 7 (USA)",
+                              "Adventure Island II - Aliens in Paradise (USA, Europe)",
+                              "Super Mario Advance 2 - Super Mario World (USA)", "Aladdin (USA)",
+                              "Bugs Bunny Crazy Castle, The (USA)", "Bugs Bunny Crazy Castle II, The (USA)",
+                              "Street Fighter II (USA)"])
+        self.assertEqual(thumbnails.best("A Nightmare on Elm Street", b), "Nightmare on Elm Street, A (USA)")
+        self.assertEqual(thumbnails.best("Mega Man VII (U)", b), "Mega Man 7 (USA)")
+        self.assertEqual(thumbnails.best("Adventure Island II (UE) [!]", b),
+                         "Adventure Island II - Aliens in Paradise (USA, Europe)")
+        self.assertEqual(thumbnails.best("super_mario_advance_2", b), "Super Mario Advance 2 - Super Mario World (USA)")
+        self.assertEqual(thumbnails.best("Disney's Aladdin", b), "Aladdin (USA)")
+        self.assertEqual(thumbnails.best("Street Fighter II - The World Warrior", b), "Street Fighter II (USA)")
+        self.assertIsNone(thumbnails.best("Bugs Bunny", b))  # two games start like that: no guess
+
+    def test_longer_names_of_one_game_are_one_game(self):
+        b = thumbnails.Index(["Super Mario Advance 2 - Super Mario World (USA, Australia)",
+                              "Super Mario Advance 2 - Super Mario World + Mario Brothers (Japan)"])
+        self.assertEqual(thumbnails.best("super_mario_advance_2", b),
+                         "Super Mario Advance 2 - Super Mario World (USA, Australia)")
+
+    def test_no_guess_across_numbers_short_names_or_two_subtitles(self):
+        b = thumbnails.Index(["Super Mario Advance (USA)", "NHL Hockey 95 (USA)", "ReBoot (USA)",
+                              "Battle Tank 2000 (Hack)", "Spider-Man _ Venom - Maximum Carnage (World)",
+                              "Daedalian Opus (USA)"])
+        for name in ("super_mario_advance_2", "NHL Hockey '96 (U)", "EBOOT", "Battle Tank",
+                     "Spider-Man and Venom - Separation Anxiety"):
+            self.assertIsNone(thumbnails.best(name, b), name)
+        self.assertEqual(thumbnails.best("Daedalean Opus (U)", b), "Daedalian Opus (USA)")  # a typo is fine
+
     def test_file_name_like_retroarch(self):
         self.assertEqual(thumbnails.file_name("Mario & Wario: Go?"), "Mario _ Wario_ Go_.png")
 
@@ -289,7 +316,8 @@ class ThumbnailTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             (d / "pl").mkdir()
-            items = [{"label": "ActRaiser"}, {"label": "ActRaiser"}, {"label": "Nope"}]
+            items = [{"label": "ActRaiser", "path": "/r/ActRaiser.smc"}, {"label": "ActRaiser", "path": "/r/M/ActRaiser.smc"},
+                     {"label": "Nope", "path": "/r/Nope.smc"}]
             (d / "pl" / "Nintendo - Super Nintendo Entertainment System.lpl").write_text(json.dumps({"items": items}))
             fetched, listed = [], []
 
@@ -323,7 +351,7 @@ class ThumbnailTests(unittest.TestCase):
                 raise OSError("offline")
 
             thumbnails.sync(d / "pl", d / "th", d / "state.json", index_fn=down)
-            self.assertEqual(json.loads((d / "state.json").read_text()), {})
+            self.assertEqual(json.loads((d / "state.json").read_text())["misses"], {})
 
     def test_thumbnail_metrics(self):
         text = retro_metrics.thumbnails_text({"X": {"games": 3, "Named_Boxarts": 2}})
@@ -364,3 +392,47 @@ class WallpaperTests(unittest.TestCase):
     def test_retroarch_config_names_the_wallpaper(self):
         cfg = (Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg").read_text()
         self.assertIn('menu_wallpaper = "~/brick-cicd-config/brick9000/retroarch/wallpaper.png"', cfg)
+
+
+class LabelTests(unittest.TestCase):
+    def test_tags_that_say_nothing_go(self):
+        for stem, want in [("7th Saga, The (U) [!]", "7th Saga, The"),
+                           ("Mickey Mouse - Fantasia (U) (REV 00) [!]", "Mickey Mouse - Fantasia"),
+                           ("Gauntlet 4 (UE) (Sep 1993)", "Gauntlet 4"),
+                           ("Zelda (USA, Europe) (En,Fr,De)", "Zelda"),
+                           ("Gran Turismo 2 - Arcade Mode [NTSC-U] [SCUS-94455]", "Gran Turismo 2 - Arcade Mode"),
+                           ("Adventures of Lolo III , The", "Adventures of Lolo III, The"),
+                           ("LOZ_minish_cap", "LOZ minish cap")]:
+            self.assertEqual(games.label(stem), want, stem)
+
+    def test_tags_that_say_something_stay(self):
+        for stem, want in [("Bare Knuckle II (Beta)", "Bare Knuckle II (Beta)"),
+                           ("Metal Gear Solid (USA) (Disc 1)", "Metal Gear Solid (Disc 1)"),
+                           ("2nd Space (Sachen 4-in-1 Vol. 6) (Unl) [!]", "2nd Space (Sachen 4-in-1 Vol. 6)"),
+                           ("Front Mission - Gun Hazard (J) [T+Eng1.01_AGTP]", "Front Mission - Gun Hazard (Translated)"),
+                           ("Air Busters (U) [h1]", "Air Busters (Hack)")]:
+            self.assertEqual(games.label(stem), want, stem)
+
+    def test_two_versions_keep_their_region(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "roms"
+            for name in ("ActRaiser (U) [!].smc", "ActRaiser (E).smc", "Zelda (U) [!].smc", "Zelda (U) [a1].smc"):
+                (root / "snes").mkdir(parents=True, exist_ok=True)
+                (root / "snes" / name).write_bytes(b"x")
+            snes = next(s for s in games.SYSTEMS if s.folder == "snes")
+            labels = sorted(lb for _, lb in games.games(snes, root, Path(d) / "m3u"))
+        self.assertEqual(labels, ["ActRaiser (E)", "ActRaiser (U)", "Zelda (U) [!]", "Zelda (U) [a1]"])
+
+    def test_old_thumbnails_are_renamed_not_fetched_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "pl").mkdir()
+            items = [{"label": "7th Saga, The", "path": "/r/7th Saga, The (U) [!].smc"}]
+            (d / "pl" / "S.lpl").write_text(json.dumps({"items": items}))
+            for kind in thumbnails.KINDS:
+                (d / "th" / "S" / kind).mkdir(parents=True)
+                (d / "th" / "S" / kind / "7th Saga, The (U) [!].png").write_bytes(b"png")
+            counts = thumbnails.sync(d / "pl", d / "th", d / "state.json",
+                                     index_fn=lambda *a: self.fail("asked the server"))
+            self.assertEqual(counts["S"]["Named_Boxarts"], 1)
+            self.assertTrue((d / "th" / "S" / "Named_Boxarts" / "7th Saga, The.png").is_file())
