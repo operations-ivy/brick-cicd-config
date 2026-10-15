@@ -1,7 +1,8 @@
 #!/bin/sh
-# Point brick1982's deploy (brick-arena) at BRANCH (empty: main) and start it
-# now, instead of at its 2-hourly timer. Its result is in brick1982's journal,
-# not in this build's log. The timer keeps following the branch.
+# Point brick1982's LCARS panel (operations-ivy/rpi_lcars, its deploy/deploy)
+# at BRANCH (empty: master) and deploy it now, instead of at its 2-hourly
+# timer. Its result is in brick1982's journal, not in this build's log. The
+# timer keeps following the branch.
 set -eu
 . "$(dirname "$0")/lib.sh"
-start_deploy "$BRICK1982" .config/brick-arena/env "${BRANCH:-}"
+start_deploy "$BRICK1982" .config/lcars/env "${BRANCH:-}" rpi_lcars LCARS_DEPLOY_BRANCH lcars-deploy.service master

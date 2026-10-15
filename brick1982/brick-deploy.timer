@@ -1,6 +1,6 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 [Unit]
-Description=Check GitHub for a new brick-arena every 2 hours
+Description=Check GitHub for a new brick-cicd-config every 2 hours
 
 [Timer]
 OnBootSec=5min

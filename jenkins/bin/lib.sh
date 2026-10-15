@@ -4,8 +4,8 @@
 BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
 # brick9000, the status board, outside the cluster (reached over SSH).
 BRICK9000=${BRICK9000:-192.168.1.221}
-# brick1982, the touchscreen (brick-arena), outside the cluster (reached over
-# SSH).
+# brick1982, the touchscreen (the LCARS panel, operations-ivy/rpi_lcars),
+# outside the cluster (reached over SSH).
 BRICK1982=${BRICK1982:-192.168.1.222}
 # The local clones mirror-repos keeps: in Jenkins' home, or wherever the
 # caller says (brick9000's brick-mirror.timer keeps its own).
@@ -52,27 +52,30 @@ wait_for_job() {  # <namespace> <job>
     return $result
 }
 
-# Point a host's deploy (brick9000/deploy, brick1982/deploy) at a branch of
-# brick-cicd-config and start it. An empty branch means main.
-start_deploy() {  # <host> <env file on the host> <branch>
-    branch=${3:-main}
+# Point a host's deploy at a branch and start it: by default brick-cicd-config
+# (brick9000/deploy, BRICK_DEPLOY_BRANCH, brick-deploy.service); the extra
+# arguments name another repo's (rpi_lcars: LCARS_DEPLOY_BRANCH,
+# lcars-deploy.service, master). An empty branch means the default branch.
+start_deploy() {  # <host> <env file on the host> <branch> [repo] [variable] [unit] [default branch]
+    repo=${4:-brick-cicd-config} var=${5:-BRICK_DEPLOY_BRANCH} unit=${6:-brick-deploy.service}
+    branch=${3:-${7:-main}}
     case $branch in
         -*|*[!A-Za-z0-9._/-]*) echo "not a branch name: $branch" >&2; return 1 ;;
     esac
-    if ! git ls-remote --exit-code --heads "$GITHUB/brick-cicd-config" "$branch" >/dev/null; then
-        echo "no branch $branch on GitHub (push it first)" >&2
+    if ! git ls-remote --exit-code --heads "$GITHUB/$repo" "$branch" >/dev/null; then
+        echo "no branch $branch in $repo on GitHub (push it first)" >&2
         return 1
     fi
-    # Replace the BRICK_DEPLOY_BRANCH line, or add one.
-    ssh "$1" sh -s -- "$2" "$branch" <<'REMOTE'
+    # Replace the variable's line, or add one.
+    ssh "$1" sh -s -- "$2" "$branch" "$var" "$unit" <<'REMOTE'
 set -eu
 env_file=$HOME/$1
-if grep -q '^BRICK_DEPLOY_BRANCH=' "$env_file"; then
-    sed -i "s|^BRICK_DEPLOY_BRANCH=.*|BRICK_DEPLOY_BRANCH=$2|" "$env_file"
+if grep -q "^$3=" "$env_file"; then
+    sed -i "s|^$3=.*|$3=$2|" "$env_file"
 else
-    echo "BRICK_DEPLOY_BRANCH=$2" >>"$env_file"
+    echo "$3=$2" >>"$env_file"
 fi
-systemctl --user start --no-block brick-deploy.service
+systemctl --user start --no-block "$4"
 REMOTE
-    echo "Deploying $branch; follow it on the host with: journalctl _SYSTEMD_USER_UNIT=brick-deploy.service -f"
+    echo "Deploying $repo $branch; follow it on the host with: journalctl _SYSTEMD_USER_UNIT=$unit -f"
 }

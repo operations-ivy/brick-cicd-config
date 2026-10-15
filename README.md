@@ -16,7 +16,7 @@ shows how that's going.
 | `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
-| `brick1982` (host) | 7" touchscreen kiosk, `brick-arena` daemon | Needs the screen; left the cluster 2026-10-14 to become a wall display |
+| `brick1982` (host) | 7" touchscreen: the LCARS panel (operations-ivy/rpi_lcars); host tooling from here | Needs the screen; left the cluster 2026-10-14 to become a wall display |
 
 ### brick9000 is not a cluster node
 
@@ -185,7 +185,6 @@ the front door for every web UI in the homelab, each at its own name under
 | Name | Goes to |
 | --- | --- |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
-| `arena.brick.nozdormu.cloud` | brick1982's touchscreen page (brick-arena) on `192.168.1.222:8766` |
 | `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `radar.`, `reader.`, `overwatch.`, `homeassistant.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
@@ -490,19 +489,17 @@ Tests (standard library `unittest`, no hardware needed):
 scripts/test
 ```
 
-It runs brick-status' and brick-arena's unit tests, then the functional
-tests in `functional/`, which run the real things against stubs: brick-arena's
-HTTP server against a stub Prometheus over real HTTP (who may set the view,
-what `/art/` serves), both deploy scripts against throwaway git repos (a
+It runs brick-status' and brick-retro's unit tests, then the functional
+tests in `functional/`, which run the real things against stubs: both deploy
+scripts against throwaway git repos (a
 passing commit deploys, a failing one is refused and not retried, branches
 are followed and left, brick9000's lights and proxy step), and Jenkins'
 `start_deploy` with `ssh` and `git ls-remote` faked (no bad branch name reaches
-a host).
+a host; rpi_lcars' deploy for brick1982 too).
 
 After a deploy, `scripts/smoke` checks the live result, read-only: every
 `*.brick.nozdormu.cloud` name answers through the proxy, the services on
-brick9000 and brick1982 are running, and the board's and the arena's data is
-fresh. It exits 1 if anything is down.
+brick9000 and brick1982 are running, and the board's data is fresh. It exits 1 if anything is down.
 
 ## Games (brick-retro, on brick9000)
 
@@ -591,71 +588,38 @@ bluetoothctl
   connect <MAC>
 ```
 
-## brick-arena (the touchscreen on brick1982)
+## brick1982 (the touchscreen)
 
 `brick1982` (192.168.1.222, static lease) is a Raspberry Pi 4 8GB with the
-official 7" DSI touchscreen (800x480). Unlike brick9000 it **is** a k3s worker:
-it's an ambient display rather than the place to find out the cluster is
-down, so it doesn't need to outlive the cluster. Its page shows "STALE" or "NO
-DATA" when Prometheus stops answering.
+official 7" DSI touchscreen (800x480). It left the cluster on 2026-10-14 to
+become a wall display. Since 2026-10-15 its screen shows the **LCARS panel**,
+Home Assistant's thermostat in LCARS, from its own repo:
+[operations-ivy/rpi_lcars](https://github.com/operations-ivy/rpi_lcars),
+which carries its kiosk unit, deploy timer and `install.sh` (`deploy/`).
+The Jenkins job `deploy-brick1982` deploys that panel from a branch of
+rpi_lcars (empty: `master`).
 
-`brick-arena` (`brick-arena/`, standard library only) polls Prometheus every
-10s and serves a page on port 8766, which Chromium shows full screen
-under cage (`brick1982/brick-kiosk.service`, on tty1 in place of the login
-prompt, with a transparent cursor theme from `brick1982/blank-cursors` so no
-arrow sits on the panel). The page changes view every 45s, coming back to
-the main view between each of the others (main, arena, main, weather); a
-tap moves on and holds that view for two minutes:
+brick-arena, the Chromium kiosk that was here before (pixel planets, the pod
+arena, packet weather, and `arena.brick.nozdormu.cloud`), was retired for it
+on 2026-10-15; it's in this repo's history.
 
-- **Main**: a pixel-art planet turning over a twinkling starfield, its name,
-  and a one-line cluster summary. Each time the view comes round it's the
-  next of 21: the Earth ("Pixel Earth Animation" by Slime Games Studios), then
-  the twenty "N64 Planets" by n64guy, plain and ringed (both CC0;
-  `brick-arena/brick_arena/static/art/README.md`). Scaled by a whole number
-  with smoothing off, so the pixels stay square. Viewers follow the panel's
-  planet as well as its view.
-- **The arena**: one ring per node with CPU, memory and temperature bars, and
-  a block per pod, coloured by namespace (DaemonSet pods are counted, not
-  drawn). When a workload's new pod lands on another node, the block flies
-  from the old ring to the new one and a banner names the move. A move takes
-  over the screen whatever view is up. The ticker lists the last moves and
-  restarts (10 minutes).
-- **Packet weather**: wind is the nodes' combined network throughput, rain is
-  CoreDNS queries per second, a cloud per node darkens with its CPU, and
-  lightning strikes when a pod restarts or a new one starts. The caption is a
-  one-line forecast ("Light breeze, drizzle").
-- The wardrive radar that used to be a view here lives in wigle-console now,
-  full screen at `https://radar.brick.nozdormu.cloud` (wigle-sync's README).
-
-The panel dims to 8% from 23:00 to 07:00 (`BRICK_ARENA_DIM`), through
-`/sys/class/backlight`, which `brick1982/90-backlight.rules` makes writable by
-the video group. It turns off on brick9000's quiet schedule: the same format
-and, unless `BRICK_ARENA_QUIET` is set, the same default as brick-status
-(`DEFAULT_QUIET` in `brick-status/brick_status/config.py`): off Monday to
-Friday until 16:00, on through the evening and all weekend. Change the two
-together. A tap while it's off turns it on for 30 minutes from the last tap
-(`BRICK_ARENA_WAKE_SECONDS`), like brick9000's side button; that tap doesn't
-change the view.
-
-The same page, read only, is at `https://arena.brick.nozdormu.cloud` (through
-brick9000's proxy), for watching from a laptop. Each browser rotates and
-animates on its own, and a tap there only changes that browser's view.
-
-Set up, once, on brick1982:
+What stays here is the host's tooling, which `brick1982/install.sh` sets up:
+node-exporter on `:9100`, `brick-units.timer` (its failed user units for
+brick9000's board), and `brick-deploy.timer`, which keeps the clone at
+`~/brick-cicd-config` following `BRICK_DEPLOY_BRANCH` in
+`~/.config/brick-cicd-config/env` (`brick1982/deploy`: test in a scratch
+worktree, switch only if the tests pass; nothing restarts, since the units run
+from the clone). Changes under `brick1982/` need `install.sh` run again.
 
 ```bash
 git clone https://github.com/operations-ivy/brick-cicd-config.git ~/brick-cicd-config
 ~/brick-cicd-config/brick1982/install.sh
 ```
 
-After that `brick-deploy.timer` follows `BRICK_DEPLOY_BRANCH` in
-`~/.config/brick-arena/env` like brick9000 does (`brick1982/deploy`: test
-in a scratch worktree, switch only if the tests pass, restart `brick-arena`).
-Changes under `brick1982/` need `install.sh` run again. To see what the
-panel shows from elsewhere:
+To see what the panel shows from elsewhere:
 
 ```bash
-ssh zaphod@brick1982 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim -' > arena.png
+ssh zaphod@brick1982 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 grim -' > panel.png
 ```
 
 ## Metrics
@@ -664,14 +628,14 @@ Everything here that can be measured is, for Prometheus (scrape jobs in
 brick-k8s-config's `kube-prometheus-stack-values.yaml`) and the "Brick
 boards" Grafana dashboard (`dashboards/`, `kubectl apply -f dashboards/`).
 No pip packages on the hosts: `brick_status/metrics.py` writes the text
-format, and brick-arena and brick-retro import it from the same checkout.
+format, and brick-retro imports it from the same checkout.
 
 | What | Where Prometheus gets it | Metrics |
 | --- | --- | --- |
 | brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the proxy; it listens on localhost) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
-| brick-arena | `brick1982:8766/metrics` | `brick_arena_*`: polls, pod events animated, panel view and backlight, taps, kiosk browser last seen, requests |
+| The LCARS panel (rpi_lcars) | `brick1982:8767/metrics` | `lcars_*`: Home Assistant link and requests, codes entered, relocks, changes sent, taps, screen, backlight, frame time |
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
-| Oneshot user units (`brick-deploy` on both hosts, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
+| Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
 | brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
 | brick1982 itself | node-exporter on `:9100` (`brick1982/install.sh`; systemd units too) | `node_*` |
 | Caddy | `brick9000:9180/metrics` | `caddy_*`, per name |
@@ -680,7 +644,7 @@ The textfile directory is `/var/lib/node-exporter-textfile` on both hosts,
 like the cluster's DaemonSet. brick1982 has its own node-exporter too (the
 same install as brick9000's, `brick1982/install.sh`), scraped as
 `brick1982-node` since it left the cluster on 2026-10-14. The board's vitals
-strip and brick-arena's weather only use the cluster's node-exporter
+strip only uses the cluster's node-exporter
 (`job="node-exporter"`): brick9000, brick1982 and brick69 are scraped too,
 but aren't nodes.
 

@@ -24,7 +24,8 @@ class StartDeploy(unittest.TestCase):
             "ssh": f'echo "ssh $1" >> {self.log}; shift; HOME={self.home} exec "$@"\n',
             "systemctl": f'echo "systemctl $*" >> {self.log}\n',
             "git": ('if [ "$1" = ls-remote ]; then\n'
-                    '  case "$5" in main|feature/radar) exit 0 ;; *) exit 2 ;; esac\n'
+                    '  case "$4 $5" in */brick-cicd-config\ main|*/brick-cicd-config\ feature/radar) exit 0 ;;\n'
+                    '    */rpi_lcars\ master|*/rpi_lcars\ ha-panel) exit 0 ;; *) exit 2 ;; esac\n'
                     'fi\nexec /usr/bin/git "$@"\n'),
         })
 
@@ -34,6 +35,12 @@ class StartDeploy(unittest.TestCase):
     def start(self, branch: str, env_file: Path | None = None) -> subprocess.CompletedProcess:
         rel = (env_file or self.env_file).relative_to(self.home)
         script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick9000 {rel} "$1"'
+        return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
+                              env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
+
+    def start_lcars(self, branch: str) -> subprocess.CompletedProcess:
+        script = (f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick1982 .config/lcars/env "$1" '
+                  'rpi_lcars LCARS_DEPLOY_BRANCH lcars-deploy.service master')
         return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
                               env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
 
@@ -62,6 +69,20 @@ class StartDeploy(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, branch)
         self.assertFalse(self.log.exists())  # no ssh, no systemctl
         self.assertIn("BRICK_DEPLOY_BRANCH=main", self.lines())
+
+    def test_another_repos_deploy(self):
+        """deploy-brick1982: rpi_lcars' variable and unit, master by default."""
+        lcars = self.home / ".config/lcars/env"
+        lcars.parent.mkdir(parents=True)
+        lcars.write_text("HA_TOKEN=x\nLCARS_DEPLOY_BRANCH=master\n")
+        result = self.start_lcars("ha-panel")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(lcars.read_text().splitlines(), ["HA_TOKEN=x", "LCARS_DEPLOY_BRANCH=ha-panel"])
+        self.assertIn("systemctl --user start --no-block lcars-deploy.service", self.log.read_text())
+        self.assertEqual(self.start_lcars("").returncode, 0)
+        self.assertIn("LCARS_DEPLOY_BRANCH=master", lcars.read_text())
+        # A brick-cicd-config branch isn't an rpi_lcars one.
+        self.assertNotEqual(self.start_lcars("feature/radar").returncode, 0)
 
 
 if __name__ == "__main__":

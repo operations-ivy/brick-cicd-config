@@ -1107,7 +1107,7 @@ class UnitsTest(unittest.TestCase):
                                 ({"instance": "c:19100", "nodename": "brick420"}, 1)],
             "node_systemd_unit_state": [({"instance": "a:19100", "name": "influxdb.service"}, 1),
                                         ({"instance": "c:19100", "name": "k3s.service"}, 1)],
-            "brick_systemd_unit_problem": [({"instance": "b:19100", "unit": "brick-arena.service",
+            "brick_systemd_unit_problem": [({"instance": "b:19100", "unit": "lcars-deploy.service",
                                              "problem": "failed"}, 1)],
             "brick_systemd_report_timestamp_seconds": [({"instance": "b:19100"}, NOW - 60)],
         })
@@ -1116,7 +1116,7 @@ class UnitsTest(unittest.TestCase):
             # Known failures stay ok, with why; the host still gets its ok row.
             "brick2000: influxdb.service": ("ok", "expected: pironman5 runs its own influxd"),
             "brick2000": ("ok", "no failed units"),
-            "brick1982: brick-arena.service": ("warn", "failed"),
+            "brick1982: lcars-deploy.service": ("warn", "failed"),
         })
 
     def test_a_stale_textfile_report_is_a_problem(self):
@@ -1134,9 +1134,9 @@ class UnitsTest(unittest.TestCase):
         self.assertEqual([(c.name, c.state) for c in cs], [("brick9000", "ok"), ("other hosts", "unknown")])
 
     def test_textfile_metrics_parse_and_replace_atomically(self):
-        text = units.metrics("user", [("brick-arena.service", "failed", "failed"),
+        text = units.metrics("user", [("lcars-deploy.service", "failed", "failed"),
                                       ('we"ird.timer', "overdue", "")], NOW)
-        self.assertIn('brick_systemd_unit_problem{scope="user",unit="brick-arena.service",problem="failed"} 1', text)
+        self.assertIn('brick_systemd_unit_problem{scope="user",unit="lcars-deploy.service",problem="failed"} 1', text)
         self.assertIn('unit="we\\"ird.timer"', text)
         self.assertIn('brick_systemd_report_timestamp_seconds{scope="user"} 1800000000', text)
         d = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))

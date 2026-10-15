@@ -1,6 +1,6 @@
 # systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
 # Started by brick-units.timer. node-exporter's systemd collector sees only
-# system units; this reports zaphod's (brick-arena, brick-deploy) through its
+# system units; this reports zaphod's (brick-deploy, lcars-deploy) through its
 # textfile collector, for brick9000's board (README, "Services").
 [Unit]
 Description=Report failed user units to node-exporter
