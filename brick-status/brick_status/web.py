@@ -1,8 +1,10 @@
-"""The board page Chromium shows, the JSON state it polls, and the CRT window's stream."""
+"""The board page Chromium shows, the JSON state it polls, the CRT window's
+stream, and the volume page."""
 
 import base64
 import json
 import mimetypes
+import subprocess
 import time
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import board_metrics as bm
-from . import matrix
+from . import matrix, volume
 from .metrics import CONTENT_TYPE
 
 STATIC = (Path(__file__).parent / "static").resolve()
@@ -18,6 +20,15 @@ STATIC = (Path(__file__).parent / "static").resolve()
 # reloads itself when it sees a new one, so it always runs the latest code.
 BOOT = str(time.time())
 mimetypes.add_type("font/woff2", ".woff2")
+# The volume page's own name. status.brick.nozdormu.cloud stays a read-only
+# mirror: the volume can only be changed through this one (or locally).
+VOLUME_HOST = "volume.brick.nozdormu.cloud"
+
+
+def can_set_volume(headers) -> bool:
+    if not headers.get("X-Forwarded-For"):
+        return True  # brick9000 itself
+    return (headers.get("Host") or "").split(":")[0].lower() == VOLUME_HOST
 
 
 def crt_playlist(settings) -> dict:
@@ -62,6 +73,10 @@ def serve(settings, board, status) -> None:
                     self._matrix(parse_qs(url.query))
             elif url.path == "/metrics":
                 self._send(200, CONTENT_TYPE, bm.REGISTRY.render().encode())
+            elif url.path == "/volume":
+                self._file(STATIC / "volume.html")
+            elif url.path == "/api/volume":
+                self._volume()
             elif url.path in ("/", "/index.html"):
                 self._file(STATIC / "index.html")
             elif url.path.startswith("/static/"):
@@ -72,6 +87,41 @@ def serve(settings, board, status) -> None:
                     self._send(404, "text/plain", b"not found")
             else:
                 self._send(404, "text/plain", b"not found")
+
+        def do_POST(self):
+            if urlsplit(self.path).path != "/api/volume":
+                self._send(404, "text/plain", b"not found")
+            elif not can_set_volume(self.headers):
+                self._send(403, "text/plain", f"change the volume at https://{VOLUME_HOST}".encode())
+            else:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(min(length, 1024)) or b"{}")
+                    if not isinstance(body, dict):
+                        raise ValueError("not an object")
+                    if "level" in body:
+                        level = float(body["level"])
+                        if level != level:  # NaN
+                            raise ValueError("level is NaN")
+                        volume.set_level(settings.wpctl, settings.max_volume, level)
+                    if "muted" in body:
+                        volume.set_muted(settings.wpctl, bool(body["muted"]))
+                except (ValueError, TypeError) as e:
+                    self._send(400, "text/plain", f"bad request: {e}".encode())
+                    return
+                except (OSError, subprocess.SubprocessError):
+                    self._send(503, "text/plain", b"couldn't reach PipeWire")
+                    return
+                self._volume()
+
+        def _volume(self) -> None:
+            try:
+                state = volume.get(settings.wpctl, settings.max_volume)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                self._send(503, "text/plain", b"couldn't reach PipeWire")
+                return
+            state["can_set"] = can_set_volume(self.headers)
+            self._send(200, "application/json", json.dumps(state).encode())
 
         def _matrix(self, query: dict) -> None:
             """Server-sent events, one base64 chunk of terminal output per event."""

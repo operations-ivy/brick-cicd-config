@@ -62,7 +62,7 @@ def one_hot(metric, label: str, current: str, choices) -> None:
 
 
 # Only these paths get their own series; anything else counts as "other".
-HTTP_PATHS = {"/", "/index.html", "/api/state", "/api/matrix", "/metrics"}
+HTTP_PATHS = {"/", "/index.html", "/api/state", "/api/matrix", "/metrics", "/volume", "/api/volume"}
 
 
 def http_path(path: str) -> str:

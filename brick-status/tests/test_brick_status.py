@@ -13,7 +13,8 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import board_metrics, build, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify, patterns, units, web
+from brick_status import (board_metrics, build, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify,
+                          patterns, units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -550,6 +551,118 @@ class MirrorTest(unittest.TestCase):
             text = r.read().decode()
         self.assertIn("# TYPE brick_status_polls_total counter", text)
         self.assertRegex(text, r'brick_status_http_requests_total\{path="/api/state",code="200"\} [1-9]')
+
+
+class VolumeTest(unittest.TestCase):
+    """The volume page's API, against a stand-in wpctl that keeps its state in a file."""
+
+    def setUp(self):
+        import json as _json
+        import tempfile
+        import shutil
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.state = self.dir / "state.json"
+        self.state.write_text(_json.dumps({"volume": 0.25, "muted": False}))
+        self.calls = self.dir / "calls"
+        fake = self.dir / "wpctl"
+        fake.write_text(f"""#!/usr/bin/env python3
+import json, sys
+state = json.load(open({str(self.state)!r}))
+open({str(self.calls)!r}, "a").write(" ".join(sys.argv[1:]) + "\\n")
+args = sys.argv[1:]
+if args[0] == "get-volume":
+    print(f"Volume: {{state['volume']:.2f}}" + (" [MUTED]" if state["muted"] else ""))
+elif args[0] == "set-volume":
+    limit = float(args[args.index("-l") + 1])
+    state["volume"] = min(limit, float(args[-1]))
+elif args[0] == "set-mute":
+    state["muted"] = args[-1] == "1"
+json.dump(state, open({str(self.state)!r}, "w"))
+""")
+        fake.chmod(0o755)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        settings = Settings(http_host="127.0.0.1", http_port=port, wpctl=str(fake), max_volume=0.5)
+        board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
+        status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
+        threading.Thread(target=web.serve, args=(settings, board, status), daemon=True).start()
+        self.base = f"http://127.0.0.1:{port}"
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(self.base + "/api/state", timeout=1)
+                break
+            except OSError:
+                pytime.sleep(0.05)
+
+    def request(self, path, body=None, host=None, proxied=False):
+        import json as _json
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        if proxied:
+            headers["X-Forwarded-For"] = "192.168.1.50"
+        if host:
+            headers["Host"] = host
+        data = (body if isinstance(body, bytes) else _json.dumps(body).encode()) if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_parse(self):
+        self.assertEqual(volume.parse("Volume: 0.25\n"), (0.25, False))
+        self.assertEqual(volume.parse("Volume: 0.40 [MUTED]"), (0.40, True))
+        with self.assertRaises(ValueError):
+            volume.parse("Failed to connect to PipeWire")
+
+    def test_get_is_a_fraction_of_the_cap(self):
+        import json as _json
+        code, body = self.request("/api/volume")
+        self.assertEqual(code, 200)
+        self.assertEqual(_json.loads(body), {"level": 0.5, "muted": False, "max": 0.5, "can_set": True})
+
+    def test_set_level_maps_onto_the_cap_and_is_clamped(self):
+        import json as _json
+        code, body = self.request("/api/volume", {"level": 0.8}, host=web.VOLUME_HOST, proxied=True)
+        self.assertEqual(code, 200)
+        self.assertEqual(_json.loads(body)["level"], 0.8)
+        self.assertIn("set-volume -l 0.5 @DEFAULT_AUDIO_SINK@ 0.400", self.calls.read_text())
+        code, body = self.request("/api/volume", {"level": 7}, host=web.VOLUME_HOST, proxied=True)
+        self.assertEqual(_json.loads(body)["level"], 1.0)
+        self.assertEqual(_json.loads(self.state.read_text())["volume"], 0.5)  # never past the cap
+
+    def test_mute_and_unmute(self):
+        import json as _json
+        _, body = self.request("/api/volume", {"muted": True}, host=web.VOLUME_HOST, proxied=True)
+        self.assertTrue(_json.loads(body)["muted"])
+        _, body = self.request("/api/volume", {"muted": False, "level": 0.2}, host=web.VOLUME_HOST, proxied=True)
+        self.assertEqual(_json.loads(body)["muted"], False)
+
+    def test_the_status_mirror_stays_read_only(self):
+        import json as _json
+        code, body = self.request("/api/volume", {"level": 1}, host="status.brick.nozdormu.cloud", proxied=True)
+        self.assertEqual(code, 403)
+        self.assertEqual(_json.loads(self.state.read_text())["volume"], 0.25)
+        code, body = self.request("/api/volume", host="status.brick.nozdormu.cloud", proxied=True)
+        self.assertEqual(_json.loads(body)["can_set"], False)
+
+    def test_bad_bodies_are_400(self):
+        for body in (b"not json", b"[1]", {"level": "loud"}, {"level": float("nan")}):
+            code, _ = self.request("/api/volume", body, host=web.VOLUME_HOST, proxied=True)
+            self.assertEqual(code, 400, body)
+        self.assertFalse(self.calls.exists())  # none of them reached wpctl
+
+    def test_pipewire_down_is_503(self):
+        self.state.write_text("broken")
+        code, _ = self.request("/api/volume")
+        self.assertEqual(code, 503)
+
+    def test_page_is_served(self):
+        code, body = self.request("/volume", host=web.VOLUME_HOST, proxied=True)
+        self.assertEqual(code, 200)
+        self.assertIn(b'type="range"', body)
 
 
 class MetricsTest(unittest.TestCase):
