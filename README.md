@@ -186,7 +186,7 @@ the front door for every web UI in the homelab, each at its own name under
 | --- | --- |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
 | `volume.brick.nozdormu.cloud` | brick-status's volume page (`/volume`), the only name it takes volume changes through |
-| `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `radar.`, `reader.`, `overwatch.`, `homeassistant.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
+| `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `radar.`, `reader.`, `overwatch.`, `homeassistant.`, `argocd.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
 Plain HTTP to any of them redirects to HTTPS. brick9000 is the front door
