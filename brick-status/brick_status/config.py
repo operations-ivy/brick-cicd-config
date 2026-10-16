@@ -72,6 +72,10 @@ class Settings:
     retro_flag: str = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "brick-retro.playing")
     input_device_name: str = "gpio_keys"
     wlopm: str = "wlopm"
+    # The volume page: wpctl, and the loudest its 100% goes as a fraction of the
+    # DAC's full volume. Keep it the same as BRICK_RETRO_MAX_VOLUME.
+    wpctl: str = "wpctl"
+    max_volume: float = 0.5
     # Phone pages (notify.py). The topic name is the only thing keeping others
     # from reading or sending pages, so it lives in its own file, made by
     # install.sh; with no file, nothing is sent.
@@ -105,6 +109,8 @@ class Settings:
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.retro_flag = env("BRICK_STATUS_RETRO_FLAG", s.retro_flag)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)
+        s.wpctl = env("BRICK_STATUS_WPCTL", s.wpctl)
+        s.max_volume = float(env("BRICK_STATUS_MAX_VOLUME", s.max_volume))
         s.cmatrix = env("BRICK_STATUS_CMATRIX", s.cmatrix)
         if v := env("BRICK_STATUS_CRT_PROGRAMS"):
             s.crt_programs = [n.strip() for n in v.split(",") if n.strip()]

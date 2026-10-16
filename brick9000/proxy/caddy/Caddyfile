@@ -42,6 +42,14 @@
 		reverse_proxy 127.0.0.1:8765
 	}
 
+	# brick9000's speaker volume: brick-status's volume page, the only name
+	# it accepts volume changes through (web.py, VOLUME_HOST).
+	@volume host volume.brick.nozdormu.cloud
+	handle @volume {
+		rewrite / /volume
+		reverse_proxy 127.0.0.1:8765
+	}
+
 	# Jenkins runs on the cluster (brick-cicd-config/jenkins).
 	@jenkins host jenkins.brick.nozdormu.cloud
 	handle @jenkins {

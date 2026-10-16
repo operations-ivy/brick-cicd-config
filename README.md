@@ -185,6 +185,7 @@ the front door for every web UI in the homelab, each at its own name under
 | Name | Goes to |
 | --- | --- |
 | `status.brick.nozdormu.cloud` | the board's read-only mirror on `127.0.0.1:8765` |
+| `volume.brick.nozdormu.cloud` | brick-status's volume page (`/volume`), the only name it takes volume changes through |
 | `jenkins.`, `grafana.`, `prometheus.`, `wigle.`, `radar.`, `reader.`, `overwatch.`, `homeassistant.brick.nozdormu.cloud` | Traefik on either node, port 80, which routes by the same name |
 | `dashboard.brick.nozdormu.cloud` | Traefik's HTTPS entrypoint (the Dashboard's self-signed backend) |
 
@@ -527,7 +528,10 @@ pinned commit into `/usr/local/lib/libretro`.
   opens the games.
 - **Volume:** hold Home and press the D-pad up or down. Ten notches up to
   `BRICK_RETRO_MAX_VOLUME` (half the DAC's range: the Picade's speaker is very
-  loud); it starts at 15% and WirePlumber remembers it.
+  loud); it starts at 15% and WirePlumber remembers it. Or from any browser
+  at home: `https://volume.brick.nozdormu.cloud`, a slider whose 100% is the
+  same cap (`BRICK_STATUS_MAX_VOLUME`, keep it equal), plus a mute button.
+  It follows changes made with the pad.
 - **Bluetooth drops:** the game pauses, and brick-retro asks the controller to
   reconnect every 30 seconds. Battery saves are written every 10 seconds, and
   a state is saved on quit and loaded on start. After 15 minutes with no

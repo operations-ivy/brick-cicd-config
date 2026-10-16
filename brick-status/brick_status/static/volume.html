@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brick9000 volume</title>
+<style>
+  @font-face { font-family: "Barlow Condensed"; font-weight: 600; src: url(/static/vendor/fonts/barlow-condensed-600.woff2) format("woff2"); }
+  @font-face { font-family: "Barlow Condensed"; font-weight: 800; src: url(/static/vendor/fonts/barlow-condensed-800.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 500; src: url(/static/vendor/fonts/ibm-plex-mono-500.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 700; src: url(/static/vendor/fonts/ibm-plex-mono-700.woff2) format("woff2"); }
+  /* The board's palette (index.html). */
+  :root {
+    --bunker: #0e1411; --panel: #161e19; --panel-edge: #232e27; --crt: #07100b;
+    --bone: #d9d3bf; --dim: #7a857c; --phosphor: #2ee84a; --orange: #d9822b; --rust: #c4442c;
+    --fill: 0%;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bunker); color: var(--bone);
+    font-family: "Barlow Condensed", "DejaVu Sans Condensed", sans-serif; font-weight: 600;
+    display: grid; place-items: center; min-height: 100vh; padding: 16px;
+  }
+  main {
+    width: min(560px, 100%); background: var(--panel); border: 1px solid var(--panel-edge);
+    padding: 1.4em 1.6em 1.6em;
+    clip-path: polygon(1.2em 0, 100% 0, 100% calc(100% - 1.2em), calc(100% - 1.2em) 100%, 0 100%, 0 1.2em);
+  }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; }
+  h1 { margin: 0; font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-weight: 700;
+       font-size: 1.5em; letter-spacing: 0.04em; text-transform: uppercase; }
+  .host { color: var(--dim); font-size: 1.05em; letter-spacing: 0.08em; text-transform: uppercase; }
+  .readout { display: flex; align-items: baseline; gap: 0.4em; margin: 0.9em 0 0.3em;
+             font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; }
+  #pct { font-size: 4.2em; font-weight: 700; line-height: 1; color: var(--phosphor);
+         text-shadow: 0 0 12px rgb(46 232 74 / 0.35); font-variant-numeric: tabular-nums; }
+  #pct.muted { color: var(--dim); text-shadow: none; }
+  .unit { color: var(--dim); font-size: 1.4em; }
+
+  /* The slider: a chunky knob on a phosphor track, dragged with the mouse or a finger. */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 64px; margin: 0.6em 0 0;
+    background: transparent; cursor: pointer; touch-action: none;
+  }
+  input[type=range]:focus-visible { outline: 2px solid var(--orange); outline-offset: 4px; }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 18px; border: 1px solid var(--panel-edge);
+    background: linear-gradient(90deg, var(--phosphor) var(--fill), var(--crt) var(--fill));
+  }
+  input[type=range]::-moz-range-track { height: 18px; border: 1px solid var(--panel-edge); background: var(--crt); }
+  input[type=range]::-moz-range-progress { height: 18px; background: var(--phosphor); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 34px; height: 56px; margin-top: -20px;
+    background: var(--bone); border: 3px solid var(--bunker); box-shadow: 0 0 0 1px var(--dim);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 28px; height: 50px; border-radius: 0;
+    background: var(--bone); border: 3px solid var(--bunker); box-shadow: 0 0 0 1px var(--dim);
+  }
+  input[type=range].muted::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, var(--dim) var(--fill), var(--crt) var(--fill));
+  }
+  input[type=range].muted::-moz-range-progress { background: var(--dim); }
+  input[type=range]:disabled { cursor: not-allowed; opacity: 0.5; }
+  .scale { display: flex; justify-content: space-between; color: var(--dim);
+           font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 0.85em; margin-top: 0.2em; }
+
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 1em; margin-top: 1.3em; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 1.15em; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--bone); background: var(--crt); border: 1px solid var(--dim); padding: 0.45em 1.2em; cursor: pointer;
+  }
+  button:hover { border-color: var(--bone); }
+  button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+  button[aria-pressed=true] { color: var(--bunker); background: var(--orange); border-color: var(--orange); }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  .note { color: var(--dim); font-size: 1em; }
+  #msg { min-height: 1.4em; margin-top: 0.9em; color: var(--dim); }
+  #msg.bad { color: var(--rust); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Volume</h1>
+    <span class="host">brick9000 speaker</span>
+  </header>
+  <div class="readout"><span id="pct">--</span><span class="unit">%</span></div>
+  <input id="slider" type="range" min="0" max="100" step="1" value="0" aria-label="Volume" disabled>
+  <div class="scale"><span>0</span><span>50</span><span>100</span></div>
+  <div class="row">
+    <button id="mute" type="button" aria-pressed="false" disabled>Mute</button>
+    <span class="note" id="cap"></span>
+  </div>
+  <div id="msg" role="status"></div>
+</main>
+<script>
+"use strict";
+const slider = document.getElementById("slider");
+const pct = document.getElementById("pct");
+const mute = document.getElementById("mute");
+const msg = document.getElementById("msg");
+const cap = document.getElementById("cap");
+let dragging = false, muted = false, sending = null, queued = null, lastSent = 0;
+
+function show(level, isMuted) {
+  const p = Math.round(level * 100);
+  if (!dragging) slider.value = p;
+  slider.style.setProperty("--fill", slider.value + "%");
+  pct.textContent = isMuted ? "MUTE" : slider.value;
+  pct.classList.toggle("muted", isMuted);
+  slider.classList.toggle("muted", isMuted);
+  mute.setAttribute("aria-pressed", String(isMuted));
+  mute.textContent = isMuted ? "Unmute" : "Mute";
+  muted = isMuted;
+}
+
+function apply(state) {
+  show(state.level, state.muted);
+  cap.textContent = `100% = ${Math.round(state.max * 100)}% of the DAC's full volume`;
+  slider.disabled = mute.disabled = !state.can_set;
+  if (!state.can_set) say("Read-only here: open volume.brick.nozdormu.cloud to change it.");
+  else if (!msg.classList.contains("bad")) say("");
+}
+
+function say(text, bad = false) {
+  msg.textContent = text;
+  msg.classList.toggle("bad", bad);
+}
+
+async function call(method, body) {
+  const r = await fetch("/api/volume", {
+    method, cache: "no-store",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+
+// While dragging, send at most one change every 120 ms, always ending on the last.
+function send(body) {
+  queued = { ...(queued || {}), ...body };
+  if (sending) return;
+  const wait = Math.max(0, 120 - (Date.now() - lastSent));
+  sending = setTimeout(async () => {
+    const next = queued; queued = null; lastSent = Date.now();
+    try {
+      const state = await call("POST", next);
+      say("");
+      if (!queued) apply(state);
+    } catch (e) {
+      say(`Couldn't set the volume: ${e.message}`, true);
+    }
+    sending = null;
+    if (queued) send({});
+  }, wait);
+}
+
+slider.addEventListener("pointerdown", () => { dragging = true; });
+window.addEventListener("pointerup", () => { dragging = false; });
+slider.addEventListener("input", () => {
+  slider.style.setProperty("--fill", slider.value + "%");
+  pct.textContent = slider.value;
+  pct.classList.remove("muted");
+  const body = { level: slider.value / 100 };
+  if (muted) {  // moving the knob unmutes
+    body.muted = false;
+    show(slider.value / 100, false);
+  }
+  send(body);
+});
+slider.addEventListener("change", () => { dragging = false; });
+mute.addEventListener("click", () => {
+  show(slider.value / 100, !muted);
+  send({ muted });
+});
+
+// Follow changes made elsewhere (Home + D-pad, another browser).
+async function poll() {
+  if (!dragging && !sending && !queued) {
+    try {
+      apply(await call("GET"));
+    } catch (e) {
+      say(`Can't reach brick9000's audio: ${e.message}`, true);
+    }
+  }
+}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
