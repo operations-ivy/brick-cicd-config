@@ -1,0 +1,3 @@
+# Real values only here; never committed (secrets.example.yaml shows the keys).
+secrets.yaml
+.esphome/

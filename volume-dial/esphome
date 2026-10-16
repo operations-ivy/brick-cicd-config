@@ -1,0 +1,19 @@
+#!/bin/sh
+# ESPHome for the volume dial, pinned, in Docker (nothing to install):
+#   volume-dial/esphome compile dial.yaml
+#   volume-dial/esphome run dial.yaml --device /dev/ttyACM0   # first flash, over USB-C
+#   volume-dial/esphome run dial.yaml --device <its address>  # after that, over Wi-Fi
+#   volume-dial/esphome logs dial.yaml --device <its address>
+# The toolchain is cached in ~/.cache/esphome-docker. A USB serial port, if
+# one is plugged in, is passed through.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+image=esphome/esphome:2026.9.1
+mkdir -p "$HOME/.cache/esphome-docker"
+devices=""
+for d in /dev/ttyACM* /dev/ttyUSB*; do
+    [ -e "$d" ] && devices="$devices --device $d"
+done
+# shellcheck disable=SC2086
+exec docker run --rm -it --network host $devices \
+    -v "$here":/config -v "$HOME/.cache/esphome-docker":/cache "$image" "$@"
