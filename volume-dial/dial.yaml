@@ -1,0 +1,268 @@
+# The volume dial: an M5Stack Dial v1.1 (ESP32-S3, 1.28" round screen, a
+# rotary encoder around it) parked next to brick9000. Turning it sets
+# brick9000's speaker volume, pressing the screen mutes, and it follows
+# changes made anywhere else (the pad, the web page). It talks only to
+# brick-status's /api/volume through volume.brick.nozdormu.cloud: no Home
+# Assistant, no cluster. See README.md here.
+substitutions:
+  api_url: https://volume.brick.nozdormu.cloud/api/volume
+  # One click of the encoder; 20 clicks from silent to the cap.
+  step: "0.05"
+
+esphome:
+  name: volume-dial
+  friendly_name: Volume dial
+  on_boot:
+    priority: 600
+    then:
+      - light.turn_on:
+          id: backlight
+          brightness: 100%
+
+esp32:
+  variant: esp32s3
+  board: esp32-s3-devkitc-1
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # A Wi-Fi drop shouldn't reboot it every few minutes; it shows "no Wi-Fi"
+  # and keeps trying.
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+http_request:
+  # volume.brick.nozdormu.cloud has a Let's Encrypt certificate; the ESP-IDF
+  # certificate bundle verifies it.
+  verify_ssl: true
+  timeout: 4s
+
+globals:
+  # 0-1 of the cap, as /api/volume reports it.
+  - id: level
+    type: float
+    initial_value: "0"
+  - id: muted
+    type: bool
+    initial_value: "false"
+  # Set once a GET has succeeded; until then the screen says so.
+  - id: known
+    type: bool
+    initial_value: "false"
+  - id: online
+    type: bool
+    initial_value: "false"
+  # When the dial was last turned or pressed (millis): polls wait until it's
+  # been left alone, so a slow GET can't drag the level back mid-turn.
+  - id: touched
+    type: uint32_t
+    initial_value: "0"
+
+script:
+  # Turning sends the new level 150 ms after the last click (restart mode), so
+  # a fast spin is one request, not twenty.
+  - id: send_level
+    mode: restart
+    then:
+      - delay: 150ms
+      - http_request.post:
+          url: ${api_url}
+          json: |-
+            root["level"] = id(level);
+            if (id(muted)) root["muted"] = false;
+          on_response:
+            then:
+              - lambda: |-
+                  id(online) = response->status_code == 200;
+                  if (id(online)) id(muted) = false;
+          on_error:
+            then:
+              - lambda: id(online) = false;
+      - component.update: screen
+  - id: send_mute
+    mode: queued
+    then:
+      - http_request.post:
+          url: ${api_url}
+          json: |-
+            root["muted"] = id(muted);
+          on_response:
+            then:
+              - lambda: id(online) = response->status_code == 200;
+          on_error:
+            then:
+              - lambda: id(online) = false;
+      - component.update: screen
+  - id: wake
+    then:
+      - lambda: id(touched) = millis();
+      - light.turn_on:
+          id: backlight
+          brightness: 100%
+          transition_length: 0s
+
+sensor:
+  - platform: rotary_encoder
+    id: knob
+    pin_a: GPIO40
+    pin_b: GPIO41
+    resolution: 1
+    on_clockwise:
+      - lambda: |-
+          id(level) = std::min(1.0f, id(level) + ${step}f);
+          id(known) = true;
+      - script.execute: wake
+      - component.update: screen
+      - script.execute: send_level
+    on_anticlockwise:
+      - lambda: |-
+          id(level) = std::max(0.0f, id(level) - ${step}f);
+          id(known) = true;
+      - script.execute: wake
+      - component.update: screen
+      - script.execute: send_level
+
+binary_sensor:
+  # The button under the screen: press to mute or unmute.
+  - platform: gpio
+    pin:
+      number: GPIO42
+      inverted: true
+    id: press
+    on_press:
+      - lambda: id(muted) = !id(muted);
+      - script.execute: wake
+      - component.update: screen
+      - script.execute: send_mute
+
+interval:
+  # Follow changes made elsewhere, unless the dial was used in the last 2 s.
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            lambda: return millis() - id(touched) > 2000;
+          then:
+            - http_request.get:
+                url: ${api_url}
+                capture_response: true
+                on_response:
+                  then:
+                    - lambda: |-
+                        if (response->status_code != 200) {
+                          id(online) = false;
+                          return;
+                        }
+                        // Ignore it if the dial was turned while the request was out.
+                        if (millis() - id(touched) <= 2000) return;
+                        bool ok = json::parse_json(body, [](JsonObject root) -> bool {
+                          if (!root["level"].is<float>()) return false;
+                          id(level) = root["level"].as<float>();
+                          id(muted) = root["muted"].as<bool>();
+                          return true;
+                        });
+                        id(online) = ok;
+                        id(known) |= ok;
+                    - component.update: screen
+                on_error:
+                  then:
+                    - lambda: id(online) = false;
+                    - component.update: screen
+  # Dim the screen after a minute untouched; turning or pressing wakes it.
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: return millis() - id(touched) > 60000;
+          then:
+            - light.turn_on:
+                id: backlight
+                brightness: 25%
+                transition_length: 1s
+
+output:
+  - platform: ledc
+    pin: GPIO9
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    id: backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+
+spi:
+  clk_pin: GPIO6
+  mosi_pin: GPIO5
+  interface: hardware
+
+# The board's palette (brick-status/brick_status/static/index.html).
+color:
+  - id: bunker
+    hex: "0e1411"
+  - id: track
+    hex: "232e27"  # --panel-edge: the arc's unlit part
+  - id: bone
+    hex: "d9d3bf"
+  - id: dim
+    hex: "7a857c"
+  - id: phosphor
+    hex: "2ee84a"
+  - id: rust
+    hex: "c4442c"
+
+font:
+  - file: "gfonts://IBM Plex Mono@700"
+    id: big
+    size: 64
+    glyphs: "0123456789-"
+  - file: "gfonts://Barlow Condensed@600"
+    id: small
+    size: 22
+
+display:
+  - platform: mipi_spi
+    id: screen
+    model: GC9A01A
+    cs_pin: GPIO7
+    dc_pin: GPIO4
+    reset_pin: GPIO8
+    invert_colors: true
+    data_rate: 40MHz
+    # Redrawn on every change, and with each poll.
+    update_interval: never
+    lambda: |-
+      const int cx = 120, cy = 120;
+      it.fill(id(bunker));
+      // A 270-degree arc from 7:30 to 4:30, like a knob's travel.
+      const float start = 135.0f, sweep = 270.0f;
+      const int steps = 90;
+      int lit = (int) roundf(id(level) * steps);
+      auto on = id(muted) ? id(dim) : id(phosphor);
+      for (int i = 0; i <= steps; i++) {
+        float a = (start + sweep * i / steps) * M_PI / 180.0f;
+        int x = cx + (int) roundf(100 * cosf(a));
+        int y = cy + (int) roundf(100 * sinf(a));
+        it.filled_circle(x, y, 6, i <= lit && id(level) > 0 ? on : id(track));
+      }
+      if (!id(known)) {
+        it.print(cx, cy, id(small), id(dim), TextAlign::CENTER, id(online) ? "..." : "NO SIGNAL");
+        return;
+      }
+      if (id(muted)) {
+        it.print(cx, cy - 6, id(small), id(dim), TextAlign::CENTER, "MUTED");
+      } else {
+        it.printf(cx, cy - 8, id(big), id(phosphor), TextAlign::CENTER, "%d", (int) roundf(id(level) * 100));
+      }
+      it.print(cx, cy + 46, id(small), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
+               id(online) ? "BRICK9000" : "OFFLINE");
