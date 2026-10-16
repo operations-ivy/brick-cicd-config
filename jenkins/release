@@ -1,15 +1,23 @@
 #!/bin/sh
-# Install or upgrade the cluster's Jenkins, from the laptop (README, "Jenkins").
+# Release the cluster's Jenkins, from the laptop (README, "Jenkins").
+# Argo CD deploys it (brick-k8s-config's argocd/apps/jenkins.yaml, chart
+# pinned there): a merge to main is the deploy. This does the two halves Argo
+# can't:
+#
+#   jenkins/release           before merging: build and push the image tag
+#   jenkins/release --check   after merging: wait for Argo CD to run that tag,
+#                             then check every job loaded (restart once if not)
 #
 # The image tag in values.yaml names one build of this directory. If Docker
 # Hub doesn't have it yet, build it natively on brick2000's BuildKit (the
 # brick2000-arm64 builder, see brick-k8s-config's README) and push it; if it
-# does, check it was built from the same files. Then helm upgrade --install.
-# Run it from a clean, committed tree, so the image matches a commit.
+# does, check it was built from the same files. Run it from a clean,
+# committed tree, so the image matches a commit.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-CHART_VERSION=5.9.68
 export KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}
+check=false
+[ "${1:-}" = --check ] && check=true
 
 if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
     echo "release: commit the changes under jenkins/ first" >&2
@@ -21,6 +29,7 @@ image=docker.io/whitepatrick/brick-jenkins:$tag
 # the files the image doesn't carry).
 revision=$(git -C "$here" log -1 --format=%H -- . ':!values.yaml' ':!namespace.yaml' ':!release' ':!seal-secrets')
 
+if [ "$check" = false ]; then
 built=$(docker buildx imagetools inspect "$image" \
     --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}' 2>/dev/null || true)
 if [ -z "$built" ]; then
@@ -36,14 +45,26 @@ else
     echo "release: $image is already on Docker Hub"
 fi
 
-kubectl apply -f "$here/namespace.yaml"
-if ! kubectl -n jenkins get secret brick-jenkins >/dev/null 2>&1; then
-    echo "release: no brick-jenkins Secret yet; run jenkins/seal-secrets and apply what it makes" >&2
+echo "release: $image is ready; merge, and Argo CD deploys it. Then: jenkins/release --check"
+exit 0
+fi
+
+# After the merge: Argo CD has to be running this tag before the jobs can be
+# checked. (The brick-jenkins Secret comes from brick-k8s-secrets, which
+# Argo CD syncs too.)
+echo "release: waiting for Argo CD to run $image"
+for i in $(seq 1 120); do
+    running=$(kubectl -n jenkins get statefulset jenkins \
+        -o jsonpath='{.spec.template.spec.containers[?(@.name=="jenkins")].image}' 2>/dev/null || true)
+    state=$(kubectl -n argocd get application jenkins \
+        -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null || true)
+    [ "$running" = "$image" ] && [ "$state" = Synced/Healthy ] && break
+    sleep 10
+done
+if [ "$running" != "$image" ] || [ "$state" != Synced/Healthy ]; then
+    echo "release: after 20 minutes Jenkins runs ${running:-nothing} and Argo CD says ${state:-no app}" >&2
     exit 1
 fi
-helm repo add jenkins https://charts.jenkins.io --force-update >/dev/null
-helm upgrade --install jenkins jenkins/jenkins --version "$CHART_VERSION" \
-    --namespace jenkins --values "$here/values.yaml" --wait --timeout 10m
 
 # Jobs the seed adds at start-up can be dropped: configuration as code runs the
 # seed while Jenkins is still loading jobs from disk, and the load replaces
