@@ -55,6 +55,11 @@
 	handle @jenkins {
 		import traefik
 	}
+	# Argo CD, deploying the cluster's workloads from git (brick-k8s-config argocd/).
+	@argocd host argocd.brick.nozdormu.cloud
+	handle @argocd {
+		import traefik
+	}
 	@grafana host grafana.brick.nozdormu.cloud
 	handle @grafana {
 		import traefik
