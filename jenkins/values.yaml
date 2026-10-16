@@ -1,7 +1,7 @@
 # Helm values for the cluster's Jenkins: the jenkinsci/jenkins chart, release
-# "jenkins" in the jenkins namespace. Install or upgrade with jenkins/release,
-# which pins the chart version and builds the image tag below if it isn't on
-# Docker Hub yet.
+# "jenkins" in the jenkins namespace. Argo CD deploys it from main
+# (brick-k8s-config's argocd/apps/jenkins.yaml pins the chart); jenkins/release
+# builds the image tag below before the merge and checks the jobs after.
 #
 # Served at https://jenkins.brick.nozdormu.cloud: brick9000's proxy sends the
 # name to Traefik, which routes it to the Ingress below.
@@ -140,6 +140,9 @@ serviceAccountAgent:
 
 persistence:
   size: 20Gi
+  # JENKINS_HOME: Argo CD never prunes or deletes it (brick-k8s-config#42).
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 
 # What the maintenance jobs do to the cluster, as the jenkins ServiceAccount:
 # wigle-sync-now starts a Job from wigle-sync's CronJob, and chuck-importer

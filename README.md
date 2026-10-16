@@ -162,19 +162,23 @@ so Jenkins can reach it again.
 
 ### Releasing
 
-Any change under `jenkins/` other than `values.yaml` changes the image, so
-bump `controller.image.tag` in `values.yaml` along with it (`<Jenkins
-version>-<n>`). After merging, from the laptop:
+Argo CD deploys Jenkins from `main` (brick-k8s-config's
+`argocd/apps/jenkins.yaml` pins the chart; the values and `namespace.yaml`
+come from here), so a merge is the deploy. Any change under `jenkins/` other
+than `values.yaml` changes the image, so bump `controller.image.tag` in
+`values.yaml` along with it (`<Jenkins version>-<n>`), and **build the image
+before merging**, from the branch:
 
 ```bash
-jenkins/release
+jenkins/release           # build and push the tag (brick2000's BuildKit)
+# merge; Argo CD deploys within a few minutes
+jenkins/release --check   # wait for that tag to run, check every job loaded
 ```
 
-It builds and pushes the tag on brick2000's BuildKit if Docker Hub doesn't
-have it (refusing a tag already built from different files), then runs
-`helm upgrade --install` with the chart version it pins. Configuration
-changes apply when the pod restarts, which the upgrade does. Logs:
-`kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
+It refuses a tag already built from different files. `--check` restarts
+Jenkins once if the seed's jobs didn't load (see the script). To try a
+values change before merging: `scripts/trial-branch jenkins <branch>` in
+brick-k8s-config. Logs: `kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
 
 ### Ports 80 and 443: the proxy
 
