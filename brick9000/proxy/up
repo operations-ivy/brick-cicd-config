@@ -1,4 +1,6 @@
 #!/bin/sh
+# RETIRED 2026-10-17: brick9000 no longer runs the front door (proxy/retire);
+# kept for reference. The Dockerfile here builds the cluster's image.
 # Build the proxy image if anything in it changed, (re)start the container,
 # and reload its Caddyfile. Run by install.sh, and by deploy when
 # brick9000/proxy/ changes. A failed build leaves the running container alone.

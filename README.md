@@ -180,7 +180,32 @@ Jenkins once if the seed's jobs didn't load (see the script). To try a
 values change before merging: `scripts/trial-branch jenkins <branch>` in
 brick-k8s-config. Logs: `kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
 
-### Ports 80 and 443: the proxy
+### Ports 80 and 443: the proxy (retired from brick9000, 2026-10-17)
+
+**brick9000's hardware failed on 2026-10-17 and the front door moved onto
+the cluster**: brick-k8s-config `front-door/` runs this directory's image
+(`whitepatrick/brick-proxy`) at brick9000's old address, 192.168.1.221,
+held by kube-vip. brick9000 is now optional: the arcade and the board.
+`brick9000/proxy/retire` (run by install.sh and deploy) stops its own Caddy;
+`Dockerfile` here is still the image's source. What follows describes the
+proxy as it ran on brick9000, which the cluster's copy follows.
+
+#### When brick9000 comes back
+
+1. **Before it boots**, change its DHCP reservation on the router to a new
+   address (not 192.168.1.221: the cluster holds that one now).
+2. Boot it; its next deploy (or `brick9000/install.sh`) retires its Caddy.
+3. Point the cluster Caddyfile's `status` and `volume` blocks
+   (brick-k8s-config `front-door/caddy.yaml`) back at brick-status on
+   brick9000's new address, with brick-status listening beyond localhost.
+4. Update Prometheus' `brick9000-node` and `brick-status` scrape jobs
+   (brick-k8s-config) to the new address.
+5. `scripts/smoke`: brick9000's lines turn from `warn` to `ok`.
+
+Until Alertmanager pages (brick-k8s-config#19), brick9000's board is still
+the only thing that sends phone pages: it should come back on.
+
+#### As it ran on brick9000
 
 `brick9000/proxy/` runs Caddy (Docker, host networking, `caddy/Caddyfile`) as
 the front door for every web UI in the homelab, each at its own name under

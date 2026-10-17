@@ -139,9 +139,10 @@ fi
 if [ -f ~/.config/brick-status/env ] && ! grep -q '^BRICK_STATUS_JENKINS_PASSWORD=' ~/.config/brick-status/env; then
     echo "Add BRICK_STATUS_JENKINS_PASSWORD (the brick-jenkins Secret's brick-status-password) to ~/.config/brick-status/env"
 fi
-# Ports 80 and 443: the apps at <name>.brick.nozdormu.cloud, and redirects
-# from the old names (README, "Ports 80 and 443").
-"$here/proxy/up"
+# Ports 80 and 443 aren't brick9000's any more: the front door runs on the
+# cluster since brick9000's hardware failed (2026-10-17). Make sure the old
+# Caddy is gone (README, "Ports 80 and 443").
+"$here/proxy/retire"
 
 systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
