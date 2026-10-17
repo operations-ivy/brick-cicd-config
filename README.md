@@ -557,8 +557,9 @@ also wouldn't fit beside the rest on the SD card.
   RetroArch has lost the pad), shows the board again. With the controller already on, Home
   opens the games.
 - **Volume:** hold Home and press the D-pad up or down. Ten notches up to
-  `BRICK_RETRO_MAX_VOLUME` (half the DAC's range: the Picade's speaker is very
-  loud); it starts at 15% and WirePlumber remembers it. Or from any browser
+  `BRICK_RETRO_MAX_VOLUME` (0.8 of the DAC's range since 2026-10-17, was 0.5:
+  the Picade's speaker is very loud, so the user keeps the level low and
+  turns up from there); it starts at 15% and WirePlumber remembers it. Or from any browser
   at home: `https://volume.brick.nozdormu.cloud`, a slider whose 100% is the
   same cap (`BRICK_STATUS_MAX_VOLUME`, keep it equal), plus a mute button.
   It follows changes made with the pad.

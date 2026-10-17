@@ -75,7 +75,7 @@ class Settings:
     # The volume page: wpctl, and the loudest its 100% goes as a fraction of the
     # DAC's full volume. Keep it the same as BRICK_RETRO_MAX_VOLUME.
     wpctl: str = "wpctl"
-    max_volume: float = 0.5
+    max_volume: float = 0.8
     # Phone pages (notify.py). The topic name is the only thing keeping others
     # from reading or sending pages, so it lives in its own file, made by
     # install.sh; with no file, nothing is sent.
