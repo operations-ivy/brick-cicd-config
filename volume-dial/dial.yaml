@@ -46,6 +46,7 @@ http_request:
   timeout: 2s
 
 globals:
+  # What the dial shows: the target, set the instant it's turned or pressed.
   # 0-1 of the cap, as /api/volume reports it.
   - id: level
     type: float
@@ -53,6 +54,20 @@ globals:
   - id: muted
     type: bool
     initial_value: "false"
+  # What brick9000 last said it is (a GET, or the answer to a POST, which
+  # brick-status reads back from PipeWire after setting it). Until they match
+  # the target, the number is orange.
+  - id: live_level
+    type: float
+    initial_value: "-1"
+  - id: live_muted
+    type: bool
+    initial_value: "false"
+  # brick9000's cap (/api/volume's "max"): wpctl reports 2 decimals, so the
+  # level read back is only good to 0.005 / cap.
+  - id: cap
+    type: float
+    initial_value: "0.5"
   # Set once a GET has succeeded; until then the screen says so.
   - id: known
     type: bool
@@ -72,22 +87,46 @@ globals:
     initial_value: "true"
 
 script:
-  # Turning sends the new level 150 ms after the last click (restart mode), so
+  # Read an /api/volume answer into live_level/live_muted/cap.
+  - id: take_answer
+    parameters:
+      body: std::string
+    then:
+      - lambda: |-
+          bool ok = json::parse_json(body, [](JsonObject root) -> bool {
+            if (!root["level"].is<float>()) return false;
+            id(live_level) = root["level"].as<float>();
+            id(live_muted) = root["muted"].as<bool>();
+            if (root["max"].is<float>() && root["max"].as<float>() > 0) id(cap) = root["max"].as<float>();
+            return true;
+          });
+          id(online) = ok;
+          id(known) |= ok;
+          id(dirty) = true;
+  # Turning sends the new level 50 ms after the last click (restart mode), so
   # a fast spin is one request, not twenty.
   - id: send_level
     mode: restart
     then:
-      - delay: 150ms
+      - delay: 50ms
       - http_request.post:
           url: ${api_url}
+          capture_response: true
           json: |-
             root["level"] = id(level);
             if (id(muted)) root["muted"] = false;
           on_response:
             then:
-              - lambda: |-
-                  id(online) = response->status_code == 200;
-                  if (id(online)) id(muted) = false;
+              - if:
+                  condition:
+                    lambda: return response->status_code == 200;
+                  then:
+                    - lambda: id(muted) = false;
+                    - script.execute:
+                        id: take_answer
+                        body: !lambda return body;
+                  else:
+                    - lambda: id(online) = false;
           on_error:
             then:
               - lambda: id(online) = false;
@@ -97,11 +136,20 @@ script:
     then:
       - http_request.post:
           url: ${api_url}
+          capture_response: true
           json: |-
             root["muted"] = id(muted);
           on_response:
             then:
-              - lambda: id(online) = response->status_code == 200;
+              - if:
+                  condition:
+                    lambda: return response->status_code == 200;
+                  then:
+                    - script.execute:
+                        id: take_answer
+                        body: !lambda return body;
+                  else:
+                    - lambda: id(online) = false;
           on_error:
             then:
               - lambda: id(online) = false;
@@ -161,22 +209,25 @@ interval:
                 capture_response: true
                 on_response:
                   then:
-                    - lambda: |-
-                        if (response->status_code != 200) {
-                          id(online) = false;
-                          return;
-                        }
-                        // Ignore it if the dial was turned while the request was out.
-                        if (millis() - id(touched) <= 2000) return;
-                        bool ok = json::parse_json(body, [](JsonObject root) -> bool {
-                          if (!root["level"].is<float>()) return false;
-                          id(level) = root["level"].as<float>();
-                          id(muted) = root["muted"].as<bool>();
-                          return true;
-                        });
-                        id(online) = ok;
-                        id(known) |= ok;
-                    - lambda: id(dirty) = true;
+                    - if:
+                        condition:
+                          lambda: return response->status_code == 200;
+                        then:
+                          - script.execute:
+                              id: take_answer
+                              body: !lambda return body;
+                          # Left alone for 2 s: follow changes made elsewhere
+                          # (the pad, the web page), or a change that didn't take.
+                          - lambda: |-
+                              if (millis() - id(touched) > 2000 && id(live_level) >= 0) {
+                                id(level) = id(live_level);
+                                id(muted) = id(live_muted);
+                                id(dirty) = true;
+                              }
+                        else:
+                          - lambda: |-
+                              id(online) = false;
+                              id(dirty) = true;
                 on_error:
                   then:
                     - lambda: id(online) = false;
@@ -233,32 +284,17 @@ color:
     hex: "2ee84a"
   - id: rust
     hex: "c4442c"
-  - id: yellow
-    hex: "e3c23a"
   - id: orange
-    hex: "d9822b"
-  - id: crt
-    hex: "07100b"  # the CRT window's glass
-  - id: scanline
-    hex: "0c1a11"
-  - id: panel
-    hex: "161e19"
+    hex: "d9822b"  # a change sent, not yet live on brick9000
 
 font:
   - file: "gfonts://IBM Plex Mono@700"
     id: big
-    size: 60
-    bpp: 4
+    size: 64
     glyphs: "0123456789-"
   - file: "gfonts://Barlow Condensed@600"
     id: small
     size: 22
-    bpp: 4
-  - file: "gfonts://Barlow Condensed@600"
-    id: caption
-    size: 15
-    bpp: 4
-    glyphs: " .09BCEFIKLMNORSUV"
 
 display:
   - platform: mipi_spi
@@ -278,77 +314,31 @@ display:
     update_interval: never
     lambda: |-
       const int cx = 120, cy = 120;
-      const float start = 135.0f, sweep = 270.0f;  // 7:30 round to 4:30, like a knob
-      const float deg = M_PI / 180.0f;
-      const float lv = id(level);
-      const bool mute = id(muted);
       it.fill(id(bunker));
-
-      // The ring: 20 segments, one per click, green into yellow and orange
-      // toward the cap, like a VU meter. Grey when muted.
-      const int segs = 20;
-      const float gap = 2.5f, r_in = 95, r_out = 115;
-      auto heat = [&](float f) -> Color {
-        if (f <= 0.6f) return id(phosphor);
-        if (f <= 0.85f) return id(phosphor).gradient(id(yellow), (uint8_t) ((f - 0.6f) / 0.25f * 255));
-        return id(yellow).gradient(id(orange), (uint8_t) std::min(255.0f, (f - 0.85f) / 0.15f * 255));
-      };
-      for (int i = 0; i < segs; i++) {
-        float f0 = (float) i / segs, f1 = (float) (i + 1) / segs;
-        float a0 = (start + sweep * f0 + gap / 2) * deg, a1 = (start + sweep * f1 - gap / 2) * deg;
-        int ax = cx + r_in * cosf(a0), ay = cy + r_in * sinf(a0);
-        int bx = cx + r_out * cosf(a0), by = cy + r_out * sinf(a0);
-        int qx = cx + r_out * cosf(a1), qy = cy + r_out * sinf(a1);
-        int dx = cx + r_in * cosf(a1), dy = cy + r_in * sinf(a1);
-        bool lit = lv > f0 + 0.01f;
-        Color c = !lit ? id(track) : mute ? id(dim) : heat(f1);
-        it.filled_triangle(ax, ay, bx, by, qx, qy, c);
-        it.filled_triangle(ax, ay, qx, qy, dx, dy, c);
+      // A 270-degree arc from 7:30 to 4:30, like a knob's travel.
+      const float start = 135.0f, sweep = 270.0f;
+      const int steps = 90;
+      int lit = (int) roundf(id(level) * steps);
+      auto on = id(muted) ? id(dim) : id(phosphor);
+      for (int i = 0; i <= steps; i++) {
+        float a = (start + sweep * i / steps) * M_PI / 180.0f;
+        int x = cx + (int) roundf(100 * cosf(a));
+        int y = cy + (int) roundf(100 * sinf(a));
+        it.filled_circle(x, y, 6, i <= lit && id(level) > 0 ? on : id(track));
       }
-      // Ticks inside the ring: every click, longer every quarter.
-      for (int i = 0; i <= segs; i++) {
-        float a = (start + sweep * i / segs) * deg;
-        bool major = i % 5 == 0;
-        float r0 = major ? 83 : 87, r1 = 91;
-        it.line(cx + r0 * cosf(a), cy + r0 * sinf(a), cx + r1 * cosf(a), cy + r1 * sinf(a),
-                major ? id(bone) : id(dim));
-      }
-
-      // The CRT window: dark glass with scanlines, in a panel-edge bezel.
-      const int rg = 76;
-      for (int y = -rg; y <= rg; y++) {  // one pass: glass, every third row a scanline
-        int w = (int) sqrtf((float) (rg * rg - y * y));
-        it.horizontal_line(cx - w, cy + y, 2 * w + 1, (y + rg) % 3 == 1 ? id(scanline) : id(crt));
-      }
-      it.circle(cx, cy, rg + 1, id(panel));
-      it.circle(cx, cy, rg + 2, id(panel));
-      it.circle(cx, cy, rg + 3, id(track));
-
-      // The pointer, riding the end of the arc.
-      {
-        float a = (start + sweep * lv) * deg;
-        int px = cx + 105 * cosf(a), py = cy + 105 * sinf(a);
-        it.filled_circle(px, py, 8, id(bunker));
-        it.filled_circle(px, py, 6, mute ? id(dim) : id(bone));
-      }
-
       if (!id(known)) {
         it.print(cx, cy, id(small), id(dim), TextAlign::CENTER, id(online) ? "..." : "NO SIGNAL");
         return;
       }
-      it.print(cx, cy - 46, id(caption), id(dim), TextAlign::CENTER, "VOLUME");
-      if (muted) {
-        // A hazard band, like a failing tile on the board.
-        it.start_clipping(display::Rect(cx - 64, cy - 15, 128, 30));
-        for (int k = -96; k < 96; k += 14)
-          for (int t = 0; t < 6; t++)
-            it.line(cx + k + t, cy + 15, cx + k + t + 30, cy - 15, id(rust));
-        it.end_clipping();
-        it.filled_rectangle(cx - 38, cy - 12, 76, 24, id(crt));
-        it.print(cx, cy, id(small), id(bone), TextAlign::CENTER, "MUTED");
+      // Orange from the moment it's turned or pressed until brick9000 reports
+      // that level and mute (to within wpctl's 2 decimals: 0.005 / cap).
+      bool live = id(live_level) >= 0 && id(muted) == id(live_muted) &&
+                  fabsf(id(level) - id(live_level)) <= 0.005f / id(cap) + 0.001f;
+      if (id(muted)) {
+        it.print(cx, cy - 6, id(small), live ? id(dim) : id(orange), TextAlign::CENTER, "MUTED");
       } else {
-        it.printf(cx, cy - 2, id(big), heat(std::max(lv, 0.05f)), TextAlign::CENTER, "%d",
+        it.printf(cx, cy - 8, id(big), live ? id(phosphor) : id(orange), TextAlign::CENTER, "%d",
                   (int) roundf(id(level) * 100));
       }
-      it.print(cx, cy + 44, id(caption), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
+      it.print(cx, cy + 46, id(small), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
                id(online) ? "BRICK9000" : "OFFLINE");
