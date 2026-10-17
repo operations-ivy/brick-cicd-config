@@ -548,7 +548,11 @@ Sega CD uses PicoDrive, not Debian's Genesis Plus GX: that one is built
 without CHD support, and every Sega CD game on brick2000 is a `.chd`.
 Not added: PS2 (PCSX2 has no ARM build; Play! runs in single digits on
 comparable ARM chips), GameCube and Wii (Dolphin needs GPU features the Pi
-4's V3D lacks; few games reach full speed). Both libraries (80 and 73 GB)
+4's V3D lacks; few games reach full speed), and Saturn: YabaSanshiro
+(libretro, GLES, ARM64 dynarec) ran X-Men: Children of the Atom, Sega Rally
+and NiGHTS at about 1x unthrottled and took brick9000 to 79-80 °C within
+30 s (2026-10-17); the bar was PS1's headroom (3.4x at worst), so the user
+dropped it. Both libraries (80 and 73 GB)
 also wouldn't fit beside the rest on the SD card.
 
 - **Playing:** turn a paired controller on and RetroArch's game list opens
