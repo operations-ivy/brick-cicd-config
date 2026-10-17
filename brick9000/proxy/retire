@@ -1,0 +1,12 @@
+#!/bin/sh
+# Retire brick9000's own Caddy. The front door moved onto the cluster when
+# brick9000's hardware failed (2026-10-17; brick-k8s-config front-door/,
+# which runs this directory's image as whitepatrick/brick-proxy). Run by
+# install.sh, and by deploy when brick9000/proxy/ changes: stops and removes
+# the brick-proxy container, which otherwise restarts with Docker on every
+# boot and would keep renewing a certificate nobody uses. The Porkbun keys in
+# ~/.config/brick-proxy/secrets are no longer needed here.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+docker compose -f "$here/compose.yaml" down --remove-orphans 2>/dev/null || docker rm -f brick-proxy 2>/dev/null || true
+echo "proxy/retire: brick9000's Caddy is stopped; the front door runs on the cluster"

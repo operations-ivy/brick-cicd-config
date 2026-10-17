@@ -1,6 +1,6 @@
 """brick9000/deploy and brick1982/deploy, run for real against throwaway git
 repos: a bare "origin" standing in for GitHub and a clone standing in for the
-device, with systemctl (and brick9000's proxy/up) replaced by recorders.
+device, with systemctl (and brick9000's proxy/retire) replaced by recorders.
 
 Each commit carries a RESULT file; its scripts/test passes only when RESULT
 says "pass", so the tests can make a branch good or bad."""
@@ -59,8 +59,8 @@ class DeployHarness:
             p = self.work / touch
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(message)
-            if touch.endswith("/up"):
-                p.write_text(f'#!/bin/sh\necho "proxy up" >> {self.log}\n')
+            if touch.endswith("/retire"):
+                p.write_text(f'#!/bin/sh\necho "proxy retire" >> {self.log}\n')
                 p.chmod(0o755)
         git(self.work, "add", "-A")
         git(self.work, "commit", "-q", "-m", message)
@@ -186,10 +186,12 @@ class Brick9000Deploy(DeployScripts, unittest.TestCase):
         status = json.loads((self.h.home / "state" / "brick-build" / "deploy.json").read_text())
         self.assertEqual(status["state"], "failed")
 
-    def test_a_proxy_change_runs_proxy_up(self):
-        self.h.commit("pass", "proxy", touch="brick9000/proxy/up")
+    def test_a_proxy_change_retires_brick9000s_proxy(self):
+        # The front door runs on the cluster since 2026-10-17: a proxy change
+        # stops brick9000's own Caddy.
+        self.h.commit("pass", "proxy", touch="brick9000/proxy/retire")
         self.assertEqual(self.h.deploy().returncode, 0)
-        self.assertIn("proxy up", self.h.commands)
+        self.assertIn("proxy retire", self.h.commands)
 
 
 if __name__ == "__main__":
