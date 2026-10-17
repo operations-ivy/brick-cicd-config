@@ -384,6 +384,19 @@ class ThumbnailTests(unittest.TestCase):
             self.assertIsNone(thumbnails.best(name, b), name)
         self.assertEqual(thumbnails.best("Daedalean Opus (U)", b), "Daedalian Opus (USA)")  # a typo is fine
 
+    def test_32x_and_neo_geo_are_matched_by_clean_names(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "Sega - 32X.lpl").write_text(json.dumps({"items": [
+            {"path": "/r/sega32x/Doom 32X (JU) [!].32x", "label": "Doom"}]}))
+        (d / "SNK - Neo Geo.lpl").write_text(json.dumps({"items": [
+            {"path": "/r/neogeo/roms/M/mslug.zip", "label": "Metal Slug - Super Vehicle-001"}]}))
+        self.assertEqual(thumbnails.playlist_games(d / "Sega - 32X.lpl"), {"Doom": "Doom (JU) [!]"})
+        self.assertEqual(thumbnails.playlist_games(d / "SNK - Neo Geo.lpl"),
+                         {"Metal Slug - Super Vehicle-001": "Metal Slug - Super Vehicle-001"})
+        b = thumbnails.Index(["Doom (Japan, USA)", "Metal Slug - Super Vehicle-001 (World)"])
+        self.assertEqual(thumbnails.best("Doom (JU) [!]", b), "Doom (Japan, USA)")
+        self.assertEqual(thumbnails.best("Metal Slug - Super Vehicle-001", b), "Metal Slug - Super Vehicle-001 (World)")
+
     def test_file_name_like_retroarch(self):
         self.assertEqual(thumbnails.file_name("Mario & Wario: Go?"), "Mario _ Wario_ Go_.png")
 

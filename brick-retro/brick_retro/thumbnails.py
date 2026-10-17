@@ -24,6 +24,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import games
+
 log = logging.getLogger(__name__)
 
 SERVER = "https://thumbnails.libretro.com"
@@ -192,10 +194,19 @@ MATCHER = 2
 
 def playlist_games(lpl: Path) -> dict[str, str]:
     """Each game's label and the file name it's matched by (its ROM's, with
-    the region and other tags games.label() takes off the label)."""
+    the region and other tags games.label() takes off the label). Less what
+    the system drops from its labels ("Doom 32X (JU)" is "Doom (JU)"), and
+    for arcade zips ("mslug.zip") the label itself, from the core's list."""
+    system = next((s for s in games.SYSTEMS if s.playlist == lpl.stem), None)
     out: dict[str, str] = {}
     for item in json.loads(lpl.read_text()).get("items", []):
-        out.setdefault(item["label"], Path(item.get("path", item["label"])).stem)
+        label = item["label"]
+        source = Path(item.get("path", label)).stem
+        if system and system.arcade_dat:
+            source = label
+        elif system and system.drop:
+            source = re.sub(system.drop, "", source)
+        out.setdefault(label, source)
     return out
 
 
