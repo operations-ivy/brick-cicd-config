@@ -1,7 +1,11 @@
+import dataclasses
 import json
 import struct
 import tempfile
 import unittest
+import zipfile
+import zlib
+from unittest import mock
 from pathlib import Path
 
 from brick_retro import games, retro_metrics, thumbnails
@@ -156,7 +160,8 @@ class GamesTests(unittest.TestCase):
         self.roms = roms
 
     def write(self):
-        return games.write_playlists(self.roms, self.root / "playlists", Path("/cores"), self.root / "m3u")
+        return games.write_playlists(self.roms, self.root / "playlists", Path("/cores"), self.root / "m3u",
+                                     self.root / "system")
 
     def items(self, name):
         return json.loads((self.root / "playlists" / f"{name}.lpl").read_text())["items"]
@@ -164,7 +169,8 @@ class GamesTests(unittest.TestCase):
     def test_playlists_list_each_systems_games_by_name(self):
         counts = self.write()
         self.assertEqual(counts, {"nes": 2, "snes": 3, "gb": 1, "gbc": 0, "gba": 1, "megadrive": 1,
-                                  "mastersystem": 0, "psx": 6})
+                                  "mastersystem": 0, "psx": 6, "segacd": 0, "sega32x": 0, "psp": 0,
+                                  "Dreamcast": 0, "neogeo": 0})
         nes = json.loads((self.root / "playlists/Nintendo - Nintendo Entertainment System.lpl").read_text())
         self.assertEqual([i["label"] for i in nes["items"]], ["Adventure Island", "Bomberman"])
         self.assertEqual(nes["default_core_path"], "/cores/nestopia_libretro.so")
@@ -196,11 +202,83 @@ class GamesTests(unittest.TestCase):
         self.assertEqual(list((self.root / "m3u/psx").iterdir()), [])
         self.assertIn("Final Fantasy VII (Disc 1)", [i["label"] for i in self.items("Sony - PlayStation")])
 
+    def test_sega_cd_32x_psp_and_dreamcast(self):
+        for rel in ("segacd/Sonic CD (USA).chd", "sega32x/Doom 32X (JU) [!].32x",
+                    "sega32x/Metal Head 32X (JU) [!].bin", "sega32x/languages/template/makefile",
+                    "psp/Wipeout Pure (USA).iso", "psp/SLUS00664/EBOOT.PBP",
+                    "psp/Crisis_Core_Final_Fantasy_VII_USA_READNFO_PSP-Googlecus.iso",
+                    "psp/Breath.of.Fire.III.EUR.PSP-PGS.iso",
+                    "Dreamcast/Shenmue (USA) (Disc 1).chd", "Dreamcast/Shenmue (USA) (Disc 2).chd",
+                    "Dreamcast/Soulcalibur (USA).chd"):
+            (self.roms / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.roms / rel).write_text("x")
+        counts = self.write()
+        self.assertEqual([counts[s] for s in ("segacd", "sega32x", "psp", "Dreamcast")], [1, 2, 3, 2])
+        self.assertEqual(self.items("Sega - Mega-CD - Sega CD")[0]["core_path"], games.PICODRIVE)
+        self.assertEqual([i["label"] for i in self.items("Sega - 32X")], ["Doom", "Metal Head"])
+        self.assertEqual(self.items("Sega - 32X")[0]["core_path"], games.PICODRIVE)
+        # The PlayStation game converted for the PSP isn't a PSP game.
+        self.assertEqual([i["label"] for i in self.items("Sony - PlayStation Portable")],
+                         ["Breath of Fire III", "Crisis Core Final Fantasy VII", "Wipeout Pure"])
+        dc = self.items("Sega - Dreamcast")
+        self.assertEqual([i["label"] for i in dc], ["Shenmue", "Soulcalibur"])
+        self.assertEqual(Path(dc[0]["path"]), self.root / "m3u/Dreamcast/Shenmue (USA).m3u")
+        self.assertEqual(dc[0]["core_path"], games.FLYCAST)
+
+    def test_neo_geo_lists_the_games_the_core_will_start_once_its_bios_is_there(self):
+        def crc(data):
+            return f"{zlib.crc32(data):08x}"
+
+        def rom(name, data):
+            return f'<rom name="{name}" crc="{crc(data)}"/>'
+
+        def game(rel, files):
+            (self.roms / rel).parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(self.roms / rel, "w") as z:
+                for name, data in files.items():
+                    z.writestr(name, data)
+
+        # The core's list: one BIOS ROM (never needed in a game's zip), each
+        # game's own ROMs. joyjoy's zip is an older dump (another m1 ROM).
+        dat = self.root / "neogeo.dat"
+        dat.write_text(f"""<?xml version="1.0"?><datafile>
+            <game isbios="yes" name="neogeo"><description>Neo Geo</description>{rom("sm1.sm1", b"bios")}</game>
+            <game name="mslug" romof="neogeo"><description>Metal Slug - Super Vehicle-001</description>
+                {rom("201-p1.p1", b"ms")}{rom("sm1.sm1", b"bios")}</game>
+            <game name="kof98" romof="neogeo"><description>The King of Fighters '98 - The Slugfest / King of
+                Fighters '98 - Dream Match Never Ends (NGM-2420)</description>{rom("242-p1.p1", b"k98")}</game>
+            <game name="kof98k" cloneof="kof98" romof="kof98"><description>KOF 98 (Korean board)</description>
+                {rom("242-p1.p1", b"k98")}{rom("242-kp1.p1", b"k98k")}</game>
+            <game name="joyjoy" romof="neogeo"><description>Puzzled / Joy Joy Kid (NGM-021 ~ NGH-021)</description>
+                {rom("021-p1.p1", b"jj")}{rom("021-m1.m1", b"jj m1")}</game>
+            <game name="kof97pls" cloneof="kof97" romof="kof97"><description>KOF '97 Plus (bootleg)</description>
+                {rom("pls-p1.p1", b"k97p")}</game>
+            </datafile>""")
+        game("neogeo/roms/M/mslug.zip", {"201-p1.p1": b"ms"})
+        game("neogeo/roms/K/kof98.zip", {"242-p1.p1": b"k98"})
+        game("neogeo/roms/K/kof98k.zip", {"242-kp1.p1": b"k98k"})  # its parent's ROMs from kof98.zip
+        game("neogeo/roms/J/joyjoy.zip", {"021-p1.p1": b"jj", "021-m1.m1": b"old m1"})
+        game("neogeo/roms/K/kof97pls.zip", {"pls-p1.p1": b"k97p"})
+        game("neogeo/roms/N/neogeo.zip", {"sm1.sm1": b"bios"})
+        game("neogeo/NeoRAGEx5.0.zip", {"x": b"x"})
+        neogeo = next(s for s in games.SYSTEMS if s.folder == "neogeo")
+        with mock.patch.object(games, "SYSTEMS", (dataclasses.replace(neogeo, arcade_dat=str(dat)),)):
+            self.assertEqual(self.write(), {"neogeo": 0})  # no BIOS yet
+            self.assertFalse((self.root / "playlists/SNK - Neo Geo.lpl").exists())
+            (self.root / "system").mkdir()
+            (self.root / "system/neogeo.zip").write_text("x")
+            self.assertEqual(self.write(), {"neogeo": 3})
+        # kof98k's parent is listed; kof97pls's isn't there, so it stands in;
+        # joyjoy's old dump wouldn't start.
+        self.assertEqual([(Path(i["path"]).name, i["label"]) for i in self.items("SNK - Neo Geo")],
+                         [("kof97pls.zip", "KOF '97 Plus (bootleg)"), ("mslug.zip", "Metal Slug - Super Vehicle-001"),
+                          ("kof98.zip", "The King of Fighters '98 - The Slugfest")])
+
     def test_systems_without_games_get_no_playlist(self):
         self.write()
         self.assertFalse((self.root / "playlists/Nintendo - Game Boy Color.lpl").exists())
         counts = games.write_playlists(self.root / "nothing", self.root / "playlists", Path("/cores"),
-                                       self.root / "m3u")
+                                       self.root / "m3u", self.root / "system")
         self.assertEqual(set(counts.values()), {0})
         self.assertEqual(list((self.root / "playlists").iterdir()), [])
 
@@ -308,6 +386,19 @@ class ThumbnailTests(unittest.TestCase):
                      "Spider-Man and Venom - Separation Anxiety"):
             self.assertIsNone(thumbnails.best(name, b), name)
         self.assertEqual(thumbnails.best("Daedalean Opus (U)", b), "Daedalian Opus (USA)")  # a typo is fine
+
+    def test_32x_and_neo_geo_are_matched_by_clean_names(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "Sega - 32X.lpl").write_text(json.dumps({"items": [
+            {"path": "/r/sega32x/Doom 32X (JU) [!].32x", "label": "Doom"}]}))
+        (d / "SNK - Neo Geo.lpl").write_text(json.dumps({"items": [
+            {"path": "/r/neogeo/roms/M/mslug.zip", "label": "Metal Slug - Super Vehicle-001"}]}))
+        self.assertEqual(thumbnails.playlist_games(d / "Sega - 32X.lpl"), {"Doom": "Doom (JU) [!]"})
+        self.assertEqual(thumbnails.playlist_games(d / "SNK - Neo Geo.lpl"),
+                         {"Metal Slug - Super Vehicle-001": "Metal Slug - Super Vehicle-001"})
+        b = thumbnails.Index(["Doom (Japan, USA)", "Metal Slug - Super Vehicle-001 (World)"])
+        self.assertEqual(thumbnails.best("Doom (JU) [!]", b), "Doom (Japan, USA)")
+        self.assertEqual(thumbnails.best("Metal Slug - Super Vehicle-001", b), "Metal Slug - Super Vehicle-001 (World)")
 
     def test_file_name_like_retroarch(self):
         self.assertEqual(thumbnails.file_name("Mario & Wario: Go?"), "Mario _ Wario_ Go_.png")

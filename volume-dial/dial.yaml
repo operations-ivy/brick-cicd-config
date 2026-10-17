@@ -5,19 +5,25 @@
 # brick-status's /api/volume through volume.brick.nozdormu.cloud: no Home
 # Assistant, no cluster. See README.md here.
 substitutions:
-  api_url: https://volume.brick.nozdormu.cloud/api/volume
+  # Plain HTTP, LAN only (brick9000's Caddyfile): a TLS handshake takes the
+  # ESP32 ~2.7 s, and each request blocks the dial while it runs.
+  api_url: http://volume.brick.nozdormu.cloud/api/volume
   # One click of the encoder; 20 clicks from silent to the cap.
   step: "0.05"
 
 esphome:
   name: volume-dial
   friendly_name: Volume dial
+  # The network task (net.h): requests to brick9000 run off the main loop.
+  includes:
+    - net.h
   on_boot:
     priority: 600
     then:
       - light.turn_on:
           id: backlight
           brightness: 100%
+      - lambda: dialnet::start("${api_url}");
 
 esp32:
   variant: esp32s3
@@ -39,13 +45,13 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
+# Not used by name: it brings ESP-IDF's HTTP client into the build, which
+# net.h uses directly (ESPHome's http_request actions block the main loop).
 http_request:
-  # volume.brick.nozdormu.cloud has a Let's Encrypt certificate; the ESP-IDF
-  # certificate bundle verifies it.
-  verify_ssl: true
-  timeout: 4s
+  verify_ssl: false
 
 globals:
+  # What the dial shows: the target, set the instant it's turned or pressed.
   # 0-1 of the cap, as /api/volume reports it.
   - id: level
     type: float
@@ -53,7 +59,25 @@ globals:
   - id: muted
     type: bool
     initial_value: "false"
-  # Set once a GET has succeeded; until then the screen says so.
+  # What brick9000 last said it is (a GET, or the answer to a POST, which
+  # brick-status reads back from PipeWire after setting it). Until they match
+  # the target, the number is orange.
+  - id: live_level
+    type: float
+    initial_value: "-1"
+  - id: live_muted
+    type: bool
+    initial_value: "false"
+  # brick9000's cap (/api/volume's "max"): wpctl reports 2 decimals, so the
+  # level read back is only good to 0.005 / cap.
+  - id: cap
+    type: float
+    initial_value: "0.5"
+  # dialnet::answers when the main loop last read the task's answers.
+  - id: seen
+    type: uint32_t
+    initial_value: "0"
+  # Set once brick9000 has answered; until then the screen says so.
   - id: known
     type: bool
     initial_value: "false"
@@ -65,42 +89,13 @@ globals:
   - id: touched
     type: uint32_t
     initial_value: "0"
+  # The screen needs redrawing (the 20 ms interval below does it, once,
+  # however many clicks came in meanwhile).
+  - id: dirty
+    type: bool
+    initial_value: "true"
 
 script:
-  # Turning sends the new level 150 ms after the last click (restart mode), so
-  # a fast spin is one request, not twenty.
-  - id: send_level
-    mode: restart
-    then:
-      - delay: 150ms
-      - http_request.post:
-          url: ${api_url}
-          json: |-
-            root["level"] = id(level);
-            if (id(muted)) root["muted"] = false;
-          on_response:
-            then:
-              - lambda: |-
-                  id(online) = response->status_code == 200;
-                  if (id(online)) id(muted) = false;
-          on_error:
-            then:
-              - lambda: id(online) = false;
-      - component.update: screen
-  - id: send_mute
-    mode: queued
-    then:
-      - http_request.post:
-          url: ${api_url}
-          json: |-
-            root["muted"] = id(muted);
-          on_response:
-            then:
-              - lambda: id(online) = response->status_code == 200;
-          on_error:
-            then:
-              - lambda: id(online) = false;
-      - component.update: screen
   - id: wake
     then:
       - lambda: id(touched) = millis();
@@ -115,20 +110,23 @@ sensor:
     pin_a: GPIO40
     pin_b: GPIO41
     resolution: 1
+    # Turning sets the target and unmutes; the network task sends it.
     on_clockwise:
       - lambda: |-
           id(level) = std::min(1.0f, id(level) + ${step}f);
+          if (id(muted)) { id(muted) = false; dialnet::send_muted(false); }
+          dialnet::send_level(id(level));
           id(known) = true;
+          id(dirty) = true;
       - script.execute: wake
-      - component.update: screen
-      - script.execute: send_level
     on_anticlockwise:
       - lambda: |-
           id(level) = std::max(0.0f, id(level) - ${step}f);
+          if (id(muted)) { id(muted) = false; dialnet::send_muted(false); }
+          dialnet::send_level(id(level));
           id(known) = true;
+          id(dirty) = true;
       - script.execute: wake
-      - component.update: screen
-      - script.execute: send_level
 
 binary_sensor:
   # The button under the screen: press to mute or unmute.
@@ -138,44 +136,41 @@ binary_sensor:
       inverted: true
     id: press
     on_press:
-      - lambda: id(muted) = !id(muted);
+      - lambda: |-
+          id(muted) = !id(muted);
+          dialnet::send_muted(id(muted));
+          id(dirty) = true;
       - script.execute: wake
-      - component.update: screen
-      - script.execute: send_mute
 
 interval:
-  # Follow changes made elsewhere, unless the dial was used in the last 2 s.
-  - interval: 2s
+  # Read what the network task heard: live_* always; the dial's own number
+  # follows it (a change made elsewhere, or one that didn't take) once the
+  # dial's been left alone for 2 s.
+  - interval: 20ms
     then:
-      - if:
-          condition:
-            lambda: return millis() - id(touched) > 2000;
-          then:
-            - http_request.get:
-                url: ${api_url}
-                capture_response: true
-                on_response:
-                  then:
-                    - lambda: |-
-                        if (response->status_code != 200) {
-                          id(online) = false;
-                          return;
-                        }
-                        // Ignore it if the dial was turned while the request was out.
-                        if (millis() - id(touched) <= 2000) return;
-                        bool ok = json::parse_json(body, [](JsonObject root) -> bool {
-                          if (!root["level"].is<float>()) return false;
-                          id(level) = root["level"].as<float>();
-                          id(muted) = root["muted"].as<bool>();
-                          return true;
-                        });
-                        id(online) = ok;
-                        id(known) |= ok;
-                    - component.update: screen
-                on_error:
-                  then:
-                    - lambda: id(online) = false;
-                    - component.update: screen
+      - lambda: |-
+          bool on = dialnet::online;
+          if (on != id(online)) { id(online) = on; id(dirty) = true; }
+          uint32_t n = dialnet::answers;
+          if (n == id(seen)) return;
+          id(seen) = n;
+          id(live_level) = dialnet::live_level / 1000.0f;
+          id(live_muted) = dialnet::live_muted;
+          id(cap) = dialnet::cap / 1000.0f;
+          id(known) = true;
+          if (millis() - id(touched) > 2000) {
+            id(level) = id(live_level);
+            id(muted) = id(live_muted);
+          }
+          id(dirty) = true;
+  # Redraw when something changed, at most once per pass: a fast turn is one
+  # redraw, not one per click queued behind each other.
+  - interval: 20ms
+    then:
+      - lambda: |-
+          if (!id(dirty)) return;
+          id(dirty) = false;
+          id(screen).update();
   # Dim the screen after a minute untouched; turning or pressing wakes it.
   - interval: 5s
     then:
@@ -220,6 +215,8 @@ color:
     hex: "2ee84a"
   - id: rust
     hex: "c4442c"
+  - id: orange
+    hex: "d9822b"  # a change sent, not yet live on brick9000
 
 font:
   - file: "gfonts://IBM Plex Mono@700"
@@ -238,7 +235,12 @@ display:
     dc_pin: GPIO4
     reset_pin: GPIO8
     invert_colors: true
-    data_rate: 40MHz
+    # 80 MHz, as M5Stack's own library drives the Dial's GC9A01.
+    data_rate: 80MHz
+    # The whole screen in RAM (115 KB; the Dial has no PSRAM). With the
+    # default part-screen buffer the lambda ran once per strip, six times a
+    # frame: ~270 ms a redraw, too slow to animate and long enough to lag.
+    buffer_size: 100%
     # Redrawn on every change, and with each poll.
     update_interval: never
     lambda: |-
@@ -259,10 +261,15 @@ display:
         it.print(cx, cy, id(small), id(dim), TextAlign::CENTER, id(online) ? "..." : "NO SIGNAL");
         return;
       }
+      // Orange from the moment it's turned or pressed until brick9000 reports
+      // that level and mute (to within wpctl's 2 decimals: 0.005 / cap).
+      bool live = id(live_level) >= 0 && id(muted) == id(live_muted) &&
+                  fabsf(id(level) - id(live_level)) <= 0.005f / id(cap) + 0.001f;
       if (id(muted)) {
-        it.print(cx, cy - 6, id(small), id(dim), TextAlign::CENTER, "MUTED");
+        it.print(cx, cy - 6, id(small), live ? id(dim) : id(orange), TextAlign::CENTER, "MUTED");
       } else {
-        it.printf(cx, cy - 8, id(big), id(phosphor), TextAlign::CENTER, "%d", (int) roundf(id(level) * 100));
+        it.printf(cx, cy - 8, id(big), live ? id(phosphor) : id(orange), TextAlign::CENTER, "%d",
+                  (int) roundf(id(level) * 100));
       }
       it.print(cx, cy + 46, id(small), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
                id(online) ? "BRICK9000" : "OFFLINE");
