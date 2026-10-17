@@ -65,6 +65,10 @@ globals:
   - id: touched
     type: uint32_t
     initial_value: "0"
+  # The level the screen shows: it glides to `level` (interval below).
+  - id: shown
+    type: float
+    initial_value: "0"
 
 script:
   # Turning sends the new level 150 ms after the last click (restart mode), so
@@ -176,6 +180,14 @@ interval:
                   then:
                     - lambda: id(online) = false;
                     - component.update: screen
+  # Glide the arc to the new level: a third of the way each frame, ~150 ms.
+  - interval: 30ms
+    then:
+      - lambda: |-
+          float d = id(level) - id(shown);
+          if (d == 0.0f) return;
+          id(shown) = fabsf(d) < 0.004f ? id(level) : id(shown) + d * 0.35f;
+          id(screen).update();
   # Dim the screen after a minute untouched; turning or pressing wakes it.
   - interval: 5s
     then:
@@ -220,15 +232,32 @@ color:
     hex: "2ee84a"
   - id: rust
     hex: "c4442c"
+  - id: yellow
+    hex: "e3c23a"
+  - id: orange
+    hex: "d9822b"
+  - id: crt
+    hex: "07100b"  # the CRT window's glass
+  - id: scanline
+    hex: "0c1a11"
+  - id: panel
+    hex: "161e19"
 
 font:
   - file: "gfonts://IBM Plex Mono@700"
     id: big
-    size: 64
+    size: 60
+    bpp: 4
     glyphs: "0123456789-"
   - file: "gfonts://Barlow Condensed@600"
     id: small
     size: 22
+    bpp: 4
+  - file: "gfonts://Barlow Condensed@600"
+    id: caption
+    size: 15
+    bpp: 4
+    glyphs: " .09BCEFIKLMNORSUV"
 
 display:
   - platform: mipi_spi
@@ -239,30 +268,85 @@ display:
     reset_pin: GPIO8
     invert_colors: true
     data_rate: 40MHz
+    # The whole screen in RAM (115 KB; the Dial has no PSRAM). With the
+    # default part-screen buffer the lambda ran once per strip, six times a
+    # frame: ~270 ms a redraw, too slow to animate and long enough to lag.
+    buffer_size: 100%
     # Redrawn on every change, and with each poll.
     update_interval: never
     lambda: |-
       const int cx = 120, cy = 120;
+      const float start = 135.0f, sweep = 270.0f;  // 7:30 round to 4:30, like a knob
+      const float deg = M_PI / 180.0f;
+      const float lv = id(shown);
+      const bool mute = id(muted);
       it.fill(id(bunker));
-      // A 270-degree arc from 7:30 to 4:30, like a knob's travel.
-      const float start = 135.0f, sweep = 270.0f;
-      const int steps = 90;
-      int lit = (int) roundf(id(level) * steps);
-      auto on = id(muted) ? id(dim) : id(phosphor);
-      for (int i = 0; i <= steps; i++) {
-        float a = (start + sweep * i / steps) * M_PI / 180.0f;
-        int x = cx + (int) roundf(100 * cosf(a));
-        int y = cy + (int) roundf(100 * sinf(a));
-        it.filled_circle(x, y, 6, i <= lit && id(level) > 0 ? on : id(track));
+
+      // The ring: 20 segments, one per click, green into yellow and orange
+      // toward the cap, like a VU meter. Grey when muted.
+      const int segs = 20;
+      const float gap = 2.5f, r_in = 95, r_out = 115;
+      auto heat = [&](float f) -> Color {
+        if (f <= 0.6f) return id(phosphor);
+        if (f <= 0.85f) return id(phosphor).gradient(id(yellow), (uint8_t) ((f - 0.6f) / 0.25f * 255));
+        return id(yellow).gradient(id(orange), (uint8_t) std::min(255.0f, (f - 0.85f) / 0.15f * 255));
+      };
+      for (int i = 0; i < segs; i++) {
+        float f0 = (float) i / segs, f1 = (float) (i + 1) / segs;
+        float a0 = (start + sweep * f0 + gap / 2) * deg, a1 = (start + sweep * f1 - gap / 2) * deg;
+        int ax = cx + r_in * cosf(a0), ay = cy + r_in * sinf(a0);
+        int bx = cx + r_out * cosf(a0), by = cy + r_out * sinf(a0);
+        int qx = cx + r_out * cosf(a1), qy = cy + r_out * sinf(a1);
+        int dx = cx + r_in * cosf(a1), dy = cy + r_in * sinf(a1);
+        bool lit = lv > f0 + 0.01f;
+        Color c = !lit ? id(track) : mute ? id(dim) : heat(f1);
+        it.filled_triangle(ax, ay, bx, by, qx, qy, c);
+        it.filled_triangle(ax, ay, qx, qy, dx, dy, c);
       }
+      // Ticks inside the ring: every click, longer every quarter.
+      for (int i = 0; i <= segs; i++) {
+        float a = (start + sweep * i / segs) * deg;
+        bool major = i % 5 == 0;
+        float r0 = major ? 83 : 87, r1 = 91;
+        it.line(cx + r0 * cosf(a), cy + r0 * sinf(a), cx + r1 * cosf(a), cy + r1 * sinf(a),
+                major ? id(bone) : id(dim));
+      }
+
+      // The CRT window: dark glass with scanlines, in a panel-edge bezel.
+      const int rg = 76;
+      it.filled_circle(cx, cy, rg + 3, id(panel));
+      it.circle(cx, cy, rg + 3, id(track));
+      it.filled_circle(cx, cy, rg, id(crt));
+      for (int y = -rg + 1; y < rg; y += 3) {
+        int w = (int) sqrtf((float) (rg * rg - y * y));
+        it.horizontal_line(cx - w, cy + y, 2 * w, id(scanline));
+      }
+
+      // The pointer, riding the end of the arc.
+      {
+        float a = (start + sweep * lv) * deg;
+        int px = cx + 105 * cosf(a), py = cy + 105 * sinf(a);
+        it.filled_circle(px, py, 8, id(bunker));
+        it.filled_circle(px, py, 6, mute ? id(dim) : id(bone));
+      }
+
       if (!id(known)) {
         it.print(cx, cy, id(small), id(dim), TextAlign::CENTER, id(online) ? "..." : "NO SIGNAL");
         return;
       }
-      if (id(muted)) {
-        it.print(cx, cy - 6, id(small), id(dim), TextAlign::CENTER, "MUTED");
+      it.print(cx, cy - 46, id(caption), id(dim), TextAlign::CENTER, "VOLUME");
+      if (muted) {
+        // A hazard band, like a failing tile on the board.
+        it.start_clipping(display::Rect(cx - 64, cy - 15, 128, 30));
+        for (int k = -96; k < 96; k += 14)
+          for (int t = 0; t < 6; t++)
+            it.line(cx + k + t, cy + 15, cx + k + t + 30, cy - 15, id(rust));
+        it.end_clipping();
+        it.filled_rectangle(cx - 38, cy - 12, 76, 24, id(crt));
+        it.print(cx, cy, id(small), id(bone), TextAlign::CENTER, "MUTED");
       } else {
-        it.printf(cx, cy - 8, id(big), id(phosphor), TextAlign::CENTER, "%d", (int) roundf(id(level) * 100));
+        it.printf(cx, cy - 2, id(big), heat(std::max(lv, 0.05f)), TextAlign::CENTER, "%d",
+                  (int) roundf(id(level) * 100));
       }
-      it.print(cx, cy + 46, id(small), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
+      it.print(cx, cy + 44, id(caption), id(online) ? id(dim) : id(rust), TextAlign::CENTER,
                id(online) ? "BRICK9000" : "OFFLINE");
