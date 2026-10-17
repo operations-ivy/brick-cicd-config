@@ -508,9 +508,11 @@ brick9000 and brick1982 are running, and the board's data is fresh. It exits 1 i
 
 ## Games (brick-retro, on brick9000)
 
-NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, Genesis, Master System
-and PlayStation over the board with a Bluetooth controller (RetroArch with the
-Nestopia, Snes9x, Gambatte, mGBA, Genesis Plus GX and PCSX-ReARMed cores).
+NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, Genesis, Master System,
+PlayStation, Sega CD, 32X, PSP, Dreamcast and Neo Geo over the board with a
+Bluetooth controller (RetroArch with the Nestopia, Snes9x, Gambatte, mGBA,
+Genesis Plus GX, PCSX-ReARMed, PicoDrive, PPSSPP, Flycast and FinalBurn Neo
+cores).
 Every console gets crt-pi, a Raspberry Pi friendly CRT shader (scanlines, a
 slight curve; `brick9000/retroarch/shaders`, vendored with its GPL-2.0+
 credit), passed by brick-retro with `--set-shader` (`BRICK_RETRO_SHADER=` to
@@ -522,8 +524,32 @@ SwanStation (3.1-3.9x, software only) and Beetle PSX HW (0.8-1.7x) were
 tried: their GPU renderers can't run on the Pi 4 (Vulkan stalls; their
 OpenGL ones need more than its OpenGL 3.1, even with a desktop-GL RetroArch
 built to test), so neither could upscale.
-Debian has no PlayStation core, so `install.sh` builds PCSX-ReARMed from a
-pinned commit into `/usr/local/lib/libretro`.
+Debian has no PlayStation, 32X, PSP, Dreamcast or Neo Geo core, so
+`install.sh` builds PCSX-ReARMed, PicoDrive, PPSSPP, Flycast and FinalBurn Neo
+(its Neo Geo-only build) from pinned commits into `/usr/local/lib/libretro`,
+on two cores: brick9000 has no fan, and a three-core build held it at 77 °C.
+At two cores, with builds paused at 76 °C, PPSSPP took about two hours,
+Flycast 45 minutes, PicoDrive and FinalBurn Neo a few minutes each
+(2026-10-16). PPSSPP and Flycast are built for OpenGL ES: Debian's arm64
+RetroArch is built against GLES, and a desktop-GL core can't get a context.
+
+The newer consoles, measured on brick9000 (2026-10-16, with crt-pi, full
+speed is 1x; the board idles at 66-68 °C):
+
+| System | Core | Speed | Heat (title and attract screens, no input) |
+| --- | --- | --- | --- |
+| Sega CD | PicoDrive | 6.6x (Sonic CD) | peak 72 °C |
+| 32X | PicoDrive | 3.5-4x (Virtua Racing Deluxe, Doom) | |
+| Dreamcast | Flycast | 1.7-1.8x (Soulcalibur, Crazy Taxi) | 10 minutes of Soulcalibur at real speed: 70-72 °C, no throttling |
+| PSP | PPSSPP | 3.7x (Wipeout Pure), 0.9x (God of War: Chains of Olympus, among the heaviest; auto frameskip is on, untested) | 10 minutes of God of War at real speed: 69-71 °C, no throttling |
+| Neo Geo | FinalBurn Neo | (well within a Pi 4) | |
+
+Sega CD uses PicoDrive, not Debian's Genesis Plus GX: that one is built
+without CHD support, and every Sega CD game on brick2000 is a `.chd`.
+Not added: PS2 (PCSX2 has no ARM build; Play! runs in single digits on
+comparable ARM chips), GameCube and Wii (Dolphin needs GPU features the Pi
+4's V3D lacks; few games reach full speed). Both libraries (80 and 73 GB)
+also wouldn't fit beside the rest on the SD card.
 
 - **Playing:** turn a paired controller on and RetroArch's game list opens
   over the board. Start + Select opens RetroArch's menu; quitting RetroArch
@@ -579,6 +605,24 @@ pinned commit into `/usr/local/lib/libretro`.
   one memory card; swap discs from RetroArch's menu), and `.ecm`/`.7z`
   images stay on brick2000 until someone unpacks them. `psx/PS1/` on
   brick2000 duplicates the `.chd` files beside it and isn't copied.
+- **Sega CD, Dreamcast:** one entry per game as for the PlayStation (a
+  multi-disc Dreamcast game is one `.m3u`). sync-roms copies the Sega CD BIOS
+  (`bios_CD_U.bin`, `_E`, `_J`) and the Dreamcast's (`dc/dc_boot.bin`,
+  `dc/dc_flash.bin`) into `~/games/system`.
+- **PSP:** `.iso` and `.cso` only. The `EBOOT.PBP` folders in brick2000's
+  `psp/` are PlayStation games converted for the PSP, which PPSSPP can't run.
+  PPSSPP reads its fonts and UI art from `~/games/system/PPSSPP`, installed
+  from its build by `install.sh`.
+- **Neo Geo:** FinalBurn Neo checks every ROM's checksum, so brick-retro lists
+  only the zips that hold every ROM in FinalBurn Neo's list for that game
+  (`/usr/local/lib/libretro/fbneo_neogeo.dat`, from its build), by the
+  list's name ("Metal Slug - Super Vehicle-001" for `mslug.zip`); a clone (a
+  bootleg, another region) only when its parent isn't listed. Of brick2000's
+  212 known sets, 144 pass, 102 games once clones fold in (2026-10-16); the
+  rest are older dumps. It also needs a current `neogeo.zip` BIOS (with
+  `sm1.sm1`, `sfix.sfix`, `000-lo.lo`): brick2000's is MAME 0.78's, which
+  FinalBurn Neo refuses, so there's no Neo Geo list until a current one is
+  at brick2000's `/extra/games/BIOS/system/neogeo.zip` (sync-roms copies it).
 - **Controller mapping** is code: `brick9000/retroarch/autoconfig/*.cfg`,
   installed by `install.sh`; RetroArch's settings are
   `brick9000/retroarch/retroarch.cfg`. The pairing itself lives in BlueZ

@@ -4,12 +4,21 @@ old RetroPie saves."""
 import json
 import re
 import shutil
+import xml.etree.ElementTree as ET
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-# Built from source by install.sh: Debian packages no PlayStation core.
+# Built from source by install.sh: Debian packages none of these cores.
 PCSX_REARMED = "/usr/local/lib/libretro/pcsx_rearmed_libretro.so"
+PICODRIVE = "/usr/local/lib/libretro/picodrive_libretro.so"
+PPSSPP = "/usr/local/lib/libretro/ppsspp_libretro.so"
+FLYCAST = "/usr/local/lib/libretro/flycast_libretro.so"
+FBNEO = "/usr/local/lib/libretro/fbneo_neogeo_libretro.so"
+# FinalBurn Neo's list of the Neo Geo games it runs (its dats/ folder,
+# installed beside the core by install.sh): names the zips, says which are clones.
+FBNEO_NEOGEO_DAT = "/usr/local/lib/libretro/fbneo_neogeo.dat"
 
 
 @dataclass(frozen=True)
@@ -20,6 +29,8 @@ class System:
     core_name: str
     extensions: tuple[str, ...]
     discs: bool = False  # CD images: cue sheets, multi-disc sets (see disc_games)
+    arcade_dat: str = ""  # arcade zips: the core's game list (see arcade_games)
+    needs: str = ""  # a BIOS file in the system directory without which no game starts
 
 
 SYSTEMS = (
@@ -36,6 +47,19 @@ SYSTEMS = (
            "Genesis Plus GX", (".sms", ".zip")),
     System("psx", "Sony - PlayStation", PCSX_REARMED, "PCSX-ReARMed",
            (".chd", ".cue", ".ccd", ".pbp", ".bin"), discs=True),
+    # PicoDrive, not Debian's Genesis Plus GX: that one is built without CHD
+    # support, and every Sega CD game on brick2000 is a .chd. BIOS:
+    # bios_CD_U.bin (and _E, _J) in the system directory.
+    System("segacd", "Sega - Mega-CD - Sega CD", PICODRIVE, "PicoDrive", (".chd", ".cue"), discs=True),
+    System("sega32x", "Sega - 32X", PICODRIVE, "PicoDrive", (".32x", ".bin")),
+    # Only disc images: the .pbp files in brick2000's psp folder are
+    # PlayStation games converted for the PSP, which PPSSPP can't run.
+    System("psp", "Sony - PlayStation Portable", PPSSPP, "PPSSPP", (".iso", ".cso")),
+    System("Dreamcast", "Sega - Dreamcast", FLYCAST, "Flycast", (".chd", ".cue", ".gdi"), discs=True),
+    # FinalBurn Neo checks the BIOS's checksums, and brick2000's old
+    # neogeo.zip (MAME 0.78's) fails them: no list until a current one is there.
+    System("neogeo", "SNK - Neo Geo", FBNEO, "FinalBurn Neo", (".zip",), arcade_dat=FBNEO_NEOGEO_DAT,
+           needs="neogeo.zip"),
 )
 
 
@@ -174,9 +198,57 @@ def disc_games(folder: Path, extensions: tuple[str, ...], m3u_dir: Path) -> list
     return sorted(entries, key=lambda e: e[1].lower())
 
 
+_BOARD = re.compile(r"\s*\([A-Z]{3}-\d[^)]*\)")  # (NGM-2420), (NGM-063 ~ NGH-063)
+
+
+def _crcs(zip_path: Path) -> set[str]:
+    """The CRC32 of each file in a zip, from its directory (nothing is unpacked)."""
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            return {f"{i.CRC:08x}" for i in z.infolist()}
+    except (OSError, zipfile.BadZipFile):
+        return set()
+
+
+def arcade_games(folder: Path, dat: Path) -> list[tuple[Path, str]]:
+    """Arcade zips the core will start, by their name in its list ("Metal Slug -
+    Super Vehicle-001" for mslug.zip). The core checks every ROM's checksum, so
+    a zip is listed only when it (with its parent beside it, for a clone) holds
+    every ROM the list asks for, BIOS aside: an older dump of a game fails to
+    start. Its BIOS isn't a game, a zip it doesn't know is left out, and a
+    clone (a bootleg, another region) only shows when its parent doesn't.
+    Board numbers go, and of "Puzzled / Joy Joy Kid" the first name stays."""
+    known = {g.get("name"): g for g in ET.parse(dat).getroot().iter("game")}
+    bios = {r.get("crc") for g in known.values() if g.get("isbios") == "yes" for r in g.iter("rom")}
+    zips = {p.stem: p for p in roms(folder, (".zip",))}
+    playable = {}
+    for name, path in zips.items():
+        g = known.get(name)
+        if g is None or g.get("isbios") == "yes":
+            continue
+        have = _crcs(path)
+        parent = zips.get(g.get("cloneof", ""))
+        if parent is not None and parent.parent == path.parent:  # the core looks beside the clone
+            have |= _crcs(parent)
+        need = {r.get("crc") for r in g.iter("rom") if r.get("crc") and r.get("status") != "nodump"}
+        if need - bios <= have:
+            playable[name] = (path, g)
+    entries = []
+    for name, (path, g) in playable.items():
+        if g.get("cloneof") in playable:
+            continue
+        text = _BOARD.sub("", g.findtext("description", name))
+        entries.append((path, text.split(" / ")[0].strip()))
+    return sorted(entries, key=lambda e: e[1].lower())
+
+
 def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]]:
     """(file, label) for each of a system's games."""
     folder = rom_dir / system.folder
+    if system.arcade_dat:
+        if not folder.is_dir() or not Path(system.arcade_dat).is_file():
+            return []
+        return _unique(arcade_games(folder, Path(system.arcade_dat)))
     if system.discs:
         return _unique(disc_games(folder, system.extensions, m3u_dir / system.folder))
     # The same game in two places (brick2000's SNES folder has many both at
@@ -190,8 +262,9 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
     return _unique(entries)
 
 
-def playlist(system: System, rom_dir: Path, core_dir: Path, m3u_dir: Path) -> dict:
+def playlist(system: System, rom_dir: Path, core_dir: Path, m3u_dir: Path, system_dir: Path) -> dict:
     core = str(core_dir / system.core)
+    found = [] if system.needs and not (system_dir / system.needs).is_file() else games(system, rom_dir, m3u_dir)
     return {
         "version": "1.5",
         "default_core_path": core,
@@ -202,18 +275,19 @@ def playlist(system: System, rom_dir: Path, core_dir: Path, m3u_dir: Path) -> di
         "sort_mode": 0,
         "items": [{"path": str(p), "label": label, "core_path": core, "core_name": system.core_name,
                    "crc32": "DETECT", "db_name": f"{system.playlist}.lpl"}
-                  for p, label in games(system, rom_dir, m3u_dir)],
+                  for p, label in found],
     }
 
 
-def write_playlists(rom_dir: Path, playlist_dir: Path, core_dir: Path, m3u_dir: Path) -> dict[str, int]:
+def write_playlists(rom_dir: Path, playlist_dir: Path, core_dir: Path, m3u_dir: Path,
+                    system_dir: Path) -> dict[str, int]:
     """Rewrite each system's playlist; returns how many games each has. A
-    system with no games gets no playlist, so it isn't an empty entry in
-    RetroArch's list."""
+    system with no games (or without the BIOS it needs) gets no playlist, so
+    it isn't an empty or broken entry in RetroArch's list."""
     playlist_dir.mkdir(parents=True, exist_ok=True)
     counts = {}
     for system in SYSTEMS:
-        data = playlist(system, rom_dir, core_dir, m3u_dir)
+        data = playlist(system, rom_dir, core_dir, m3u_dir, system_dir)
         target = playlist_dir / f"{system.playlist}.lpl"
         counts[system.folder] = len(data["items"])
         if not data["items"]:

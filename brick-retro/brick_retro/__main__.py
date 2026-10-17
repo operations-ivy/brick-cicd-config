@@ -39,6 +39,8 @@ THUMB_DIR = Path(env("THUMB_DIR", str(HOME / ".config/retroarch/thumbnails")))
 # Which thumbnails thumbnails.py has looked for and the server doesn't have.
 THUMB_STATE = Path(env("THUMB_STATE", str(HOME / ".local/state/brick-retro/thumbnail-misses.json")))
 CORE_DIR = Path(env("CORE_DIR", "/usr/lib/aarch64-linux-gnu/libretro"))
+# BIOS files (sync-roms copies them; retroarch.cfg's system_directory).
+SYSTEM_DIR = Path(env("SYSTEM_DIR", str(HOME / "games/system")))
 APPEND_CONFIG = env("CONFIG", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg"))
 # A CRT look for every console: crt-pi, a Raspberry Pi friendly CRT shader
 # (brick9000/retroarch/shaders, vendored). BRICK_RETRO_SHADER= (empty) turns it off.
@@ -181,7 +183,7 @@ def daemon() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if sys.argv[1:] == ["games"]:
-        counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR)
+        counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR, SYSTEM_DIR)
         rm.write_games(counts)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
         log.info("playlists: %s; imported %d old save(s)", counts, len(copied))

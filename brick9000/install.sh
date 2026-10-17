@@ -52,22 +52,49 @@ grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/
 # brick-retro: retro games over the board with a Bluetooth controller
 # (README, "Games").
 sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x libretro-gambatte libretro-mgba \
-    libretro-genesisplusgx rsync build-essential git
-# Debian packages no PlayStation core: build PCSX-ReARMed from this commit
-# (about 2.5 minutes on a Pi 4), once per commit. games.py names the path.
-pcsx_commit=c8816799b50388e61cfe237fe2cdbb7d8175f20a
-pcsx_core=/usr/local/lib/libretro/pcsx_rearmed_libretro.so
-if [ "$(cat "$pcsx_core.commit" 2>/dev/null)" != "$pcsx_commit" ]; then
+    libretro-genesisplusgx rsync build-essential git cmake libgl-dev libegl-dev libgles-dev
+# Debian packages no PlayStation, 32X, PSP, Dreamcast or Neo Geo core: build
+# each from a pinned commit into /usr/local/lib/libretro, once per commit, on
+# two cores (brick9000 has no fan: three held it at 77 °C, 2026-10-16)
+# (the commit is kept beside the core). games.py names the paths.
+# core <name> <repo> <commit> <file the build makes, under its tree> <build command...>
+core() {
+    name=$1 repo=$2 commit=$3 built=$4
+    shift 4
+    target=/usr/local/lib/libretro/${name}_libretro.so
+    [ "$(cat "$target.commit" 2>/dev/null)" = "$commit" ] && return
+    echo "install.sh: building the $name core (see the README for how long)"
     build=$(mktemp -d)
     git -C "$build" init -q
-    git -C "$build" fetch -q --depth 1 https://github.com/libretro/pcsx_rearmed "$pcsx_commit"
+    git -C "$build" fetch -q --depth 1 "$repo" "$commit"
     git -C "$build" checkout -q FETCH_HEAD
-    nice make -C "$build" -f Makefile.libretro platform=rpi4_64 -j3 >"$build.log" 2>&1 ||
-        { tail -n 20 "$build.log"; exit 1; }
-    sudo install -D -m 644 "$build/pcsx_rearmed_libretro.so" "$pcsx_core"
-    echo "$pcsx_commit" | sudo tee "$pcsx_core.commit" >/dev/null
+    git -C "$build" submodule -q update --init --recursive --depth 1
+    (cd "$build" && nice "$@") >"$build.log" 2>&1 || { tail -n 20 "$build.log"; exit 1; }
+    sudo install -D -m 644 "$build/$built" "$target"
+    # PPSSPP's fonts and UI art, which its core reads from the system directory.
+    [ "$name" = ppsspp ] && rsync -a --delete "$build/assets/" "$HOME/games/system/PPSSPP/"
+    [ "$name" = fbneo_neogeo ] &&
+        sudo install -m 644 "$build/dats/FinalBurn Neo (ClrMame Pro XML, Neogeo only).dat" \
+            /usr/local/lib/libretro/fbneo_neogeo.dat
+    echo "$commit" | sudo tee "$target.commit" >/dev/null
     rm -rf "$build" "$build.log"
-fi
+}
+cmake_core='cmake -S . -B build -DLIBRETRO=ON -DCMAKE_BUILD_TYPE=Release "$@" && cmake --build build -j2'
+core pcsx_rearmed https://github.com/libretro/pcsx_rearmed c8816799b50388e61cfe237fe2cdbb7d8175f20a \
+    pcsx_rearmed_libretro.so make -f Makefile.libretro platform=rpi4_64 -j3
+core picodrive https://github.com/libretro/picodrive 1890c2932234c9d30f4cd3851d02228baae8f09e \
+    picodrive_libretro.so make -f Makefile.libretro platform=aarch64 -j2
+# PPSSPP and Flycast for OpenGL ES: Debian's arm64 RetroArch is built against
+# GLES, and a core built for desktop GL can't get a context from it.
+core ppsspp https://github.com/hrydgard/ppsspp fa50bb1976065c4f8b1b47af227d367fe9771555 \
+    build/lib/ppsspp_libretro.so sh -c "$cmake_core" - -DUSING_GLES2=ON
+core flycast https://github.com/flyinghead/flycast 5aa091fde632fb332c8d8c34e280d62dc951954c \
+    build/flycast_libretro.so sh -c "$cmake_core" - -DUSE_VULKAN=OFF -DUSE_GLES=ON
+# FinalBurn Neo's Neo Geo-only build (REGEN_HEADERS: the checked-in driver list
+# names every arcade game, so the link fails without it), and its list of the
+# games (games.py).
+core fbneo_neogeo https://github.com/libretro/FBNeo 68f0d3e47587f700c221392a0d565e2f9bfd728e \
+    src/burner/libretro/fbneo_neogeo_libretro.so make -C src/burner/libretro SUBSET=neogeo REGEN_HEADERS=1 platform=rpi4_64 -j2
 # Raspberry Pi OS starts every radio blocked (rfkill default_state=0) and
 # NetworkManager only unblocks Wi-Fi; systemd-rfkill keeps this across reboots.
 for r in /sys/class/rfkill/rfkill*; do

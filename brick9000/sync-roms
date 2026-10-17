@@ -48,21 +48,36 @@ sync gbc gbc zip
 sync gba gba zip
 sync megadrive md gen smd bin zip
 sync mastersystem sms zip
-# BIOS files: PlayStation (needed), Game Boy family and Sega (optional, used
-# when a core's option asks for them). -d: this folder's files, not its subfolders
+sync sega32x 32x bin
+# Arcade zips; brick-retro lists only those FinalBurn Neo knows.
+sync neogeo zip
+# BIOS files: PlayStation, Sega CD and Neo Geo (needed; brick2000 has no
+# Neo Geo one FinalBurn Neo accepts yet), Game Boy family and Sega (optional,
+# used when a core's option asks for them). -d: this folder's files, not its subfolders
 # (without it rsync skips the folder altogether).
 mkdir -p "$system_dir"
 rsync -dt -e "$ssh" \
     --include=scph5500.bin --include=scph5501.bin --include=scph5502.bin \
     --include=gb_bios.bin --include=gbc_bios.bin --include=gba_bios.bin \
-    --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin --exclude='*' \
+    --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin \
+    --include=bios_CD_U.bin --include=bios_CD_E.bin --include=bios_CD_J.bin \
+    --include=neogeo.zip --exclude='*' \
     "$src:BIOS/system/" "$system_dir/"
+# Dreamcast (Flycast boots without them, but fewer games work).
+mkdir -p "$system_dir/dc"
+rsync -dt -e "$ssh" --include=dc_boot.bin --include=dc_flash.bin --exclude='*' \
+    "$src:BIOS/system/dc/" "$system_dir/dc/"
 
 # The cartridge games are small; list them now rather than after the CD
 # images, whose first copy takes hours.
 playlists
 # CD images; .ecm and .7z need unpacking first, so they stay on brick2000.
 sync psx chd cue ccd img sub bin pbp
+sync segacd chd cue bin
+playlists
+sync Dreamcast chd cue gdi bin raw
+playlists
+sync psp iso cso
 playlists
 # Box art, title screens and screenshots for any game that hasn't got them,
 # from libretro's server at about 1 MB/s (brick_retro/thumbnails.py).
