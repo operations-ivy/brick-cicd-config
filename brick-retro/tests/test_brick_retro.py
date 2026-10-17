@@ -213,7 +213,7 @@ class GamesTests(unittest.TestCase):
         counts = self.write()
         self.assertEqual([counts[s] for s in ("segacd", "sega32x", "psp", "Dreamcast")], [1, 2, 1, 2])
         self.assertEqual(self.items("Sega - Mega-CD - Sega CD")[0]["core_path"], games.PICODRIVE)
-        self.assertEqual([i["label"] for i in self.items("Sega - 32X")], ["Doom 32X", "Metal Head 32X"])
+        self.assertEqual([i["label"] for i in self.items("Sega - 32X")], ["Doom", "Metal Head"])
         self.assertEqual(self.items("Sega - 32X")[0]["core_path"], games.PICODRIVE)
         # The PlayStation game converted for the PSP isn't a PSP game.
         self.assertEqual([i["label"] for i in self.items("Sony - PlayStation Portable")], ["Wipeout Pure"])

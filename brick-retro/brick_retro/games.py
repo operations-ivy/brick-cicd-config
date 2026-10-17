@@ -31,6 +31,7 @@ class System:
     discs: bool = False  # CD images: cue sheets, multi-disc sets (see disc_games)
     arcade_dat: str = ""  # arcade zips: the core's game list (see arcade_games)
     needs: str = ""  # a BIOS file in the system directory without which no game starts
+    drop: str = ""  # a regex taken out of each file name for its label
 
 
 SYSTEMS = (
@@ -51,7 +52,9 @@ SYSTEMS = (
     # support, and every Sega CD game on brick2000 is a .chd. BIOS:
     # bios_CD_U.bin (and _E, _J) in the system directory.
     System("segacd", "Sega - Mega-CD - Sega CD", PICODRIVE, "PicoDrive", (".chd", ".cue"), discs=True),
-    System("sega32x", "Sega - 32X", PICODRIVE, "PicoDrive", (".32x", ".bin")),
+    # GoodTools names carry the system ("Doom 32X (JU) [!]"): without it the
+    # label is "Doom", which the thumbnail server's "Doom (Japan, USA)" matches.
+    System("sega32x", "Sega - 32X", PICODRIVE, "PicoDrive", (".32x", ".bin"), drop=r"\s+32X\b"),
     # Only disc images: the .pbp files in brick2000's psp folder are
     # PlayStation games converted for the PSP, which PPSSPP can't run.
     System("psp", "Sony - PlayStation Portable", PPSSPP, "PPSSPP", (".iso", ".cso")),
@@ -258,7 +261,7 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
     for p in sorted(roms(folder, system.extensions), key=lambda p: (p.stem.lower(), len(p.parts), str(p))):
         if p.stem.lower() not in seen:
             seen.add(p.stem.lower())
-            entries.append((p, p.stem))
+            entries.append((p, re.sub(system.drop, "", p.stem) if system.drop else p.stem))
     return _unique(entries)
 
 
