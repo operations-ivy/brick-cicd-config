@@ -14,12 +14,16 @@ substitutions:
 esphome:
   name: volume-dial
   friendly_name: Volume dial
+  # The network task (net.h): requests to brick9000 run off the main loop.
+  includes:
+    - net.h
   on_boot:
     priority: 600
     then:
       - light.turn_on:
           id: backlight
           brightness: 100%
+      - lambda: dialnet::start("${api_url}");
 
 esp32:
   variant: esp32s3
@@ -41,9 +45,10 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
+# Not used by name: it brings ESP-IDF's HTTP client into the build, which
+# net.h uses directly (ESPHome's http_request actions block the main loop).
 http_request:
   verify_ssl: false
-  timeout: 2s
 
 globals:
   # What the dial shows: the target, set the instant it's turned or pressed.
@@ -68,7 +73,11 @@ globals:
   - id: cap
     type: float
     initial_value: "0.5"
-  # Set once a GET has succeeded; until then the screen says so.
+  # dialnet::answers when the main loop last read the task's answers.
+  - id: seen
+    type: uint32_t
+    initial_value: "0"
+  # Set once brick9000 has answered; until then the screen says so.
   - id: known
     type: bool
     initial_value: "false"
@@ -87,73 +96,6 @@ globals:
     initial_value: "true"
 
 script:
-  # Read an /api/volume answer into live_level/live_muted/cap.
-  - id: take_answer
-    parameters:
-      body: std::string
-    then:
-      - lambda: |-
-          bool ok = json::parse_json(body, [](JsonObject root) -> bool {
-            if (!root["level"].is<float>()) return false;
-            id(live_level) = root["level"].as<float>();
-            id(live_muted) = root["muted"].as<bool>();
-            if (root["max"].is<float>() && root["max"].as<float>() > 0) id(cap) = root["max"].as<float>();
-            return true;
-          });
-          id(online) = ok;
-          id(known) |= ok;
-          id(dirty) = true;
-  # Turning sends the new level 50 ms after the last click (restart mode), so
-  # a fast spin is one request, not twenty.
-  - id: send_level
-    mode: restart
-    then:
-      - delay: 50ms
-      - http_request.post:
-          url: ${api_url}
-          capture_response: true
-          json: |-
-            root["level"] = id(level);
-            if (id(muted)) root["muted"] = false;
-          on_response:
-            then:
-              - if:
-                  condition:
-                    lambda: return response->status_code == 200;
-                  then:
-                    - lambda: id(muted) = false;
-                    - script.execute:
-                        id: take_answer
-                        body: !lambda return body;
-                  else:
-                    - lambda: id(online) = false;
-          on_error:
-            then:
-              - lambda: id(online) = false;
-      - lambda: id(dirty) = true;
-  - id: send_mute
-    mode: queued
-    then:
-      - http_request.post:
-          url: ${api_url}
-          capture_response: true
-          json: |-
-            root["muted"] = id(muted);
-          on_response:
-            then:
-              - if:
-                  condition:
-                    lambda: return response->status_code == 200;
-                  then:
-                    - script.execute:
-                        id: take_answer
-                        body: !lambda return body;
-                  else:
-                    - lambda: id(online) = false;
-          on_error:
-            then:
-              - lambda: id(online) = false;
-      - lambda: id(dirty) = true;
   - id: wake
     then:
       - lambda: id(touched) = millis();
@@ -168,20 +110,23 @@ sensor:
     pin_a: GPIO40
     pin_b: GPIO41
     resolution: 1
+    # Turning sets the target and unmutes; the network task sends it.
     on_clockwise:
       - lambda: |-
           id(level) = std::min(1.0f, id(level) + ${step}f);
+          if (id(muted)) { id(muted) = false; dialnet::send_muted(false); }
+          dialnet::send_level(id(level));
           id(known) = true;
+          id(dirty) = true;
       - script.execute: wake
-      - lambda: id(dirty) = true;
-      - script.execute: send_level
     on_anticlockwise:
       - lambda: |-
           id(level) = std::max(0.0f, id(level) - ${step}f);
+          if (id(muted)) { id(muted) = false; dialnet::send_muted(false); }
+          dialnet::send_level(id(level));
           id(known) = true;
+          id(dirty) = true;
       - script.execute: wake
-      - lambda: id(dirty) = true;
-      - script.execute: send_level
 
 binary_sensor:
   # The button under the screen: press to mute or unmute.
@@ -191,47 +136,33 @@ binary_sensor:
       inverted: true
     id: press
     on_press:
-      - lambda: id(muted) = !id(muted);
+      - lambda: |-
+          id(muted) = !id(muted);
+          dialnet::send_muted(id(muted));
+          id(dirty) = true;
       - script.execute: wake
-      - lambda: id(dirty) = true;
-      - script.execute: send_mute
 
 interval:
-  # Follow changes made elsewhere, unless the dial was used in the last 2 s.
-  - interval: 2s
+  # Read what the network task heard: live_* always; the dial's own number
+  # follows it (a change made elsewhere, or one that didn't take) once the
+  # dial's been left alone for 2 s.
+  - interval: 20ms
     then:
-      - if:
-          condition:
-            lambda: return millis() - id(touched) > 2000;
-          then:
-            - http_request.get:
-                url: ${api_url}
-                capture_response: true
-                on_response:
-                  then:
-                    - if:
-                        condition:
-                          lambda: return response->status_code == 200;
-                        then:
-                          - script.execute:
-                              id: take_answer
-                              body: !lambda return body;
-                          # Left alone for 2 s: follow changes made elsewhere
-                          # (the pad, the web page), or a change that didn't take.
-                          - lambda: |-
-                              if (millis() - id(touched) > 2000 && id(live_level) >= 0) {
-                                id(level) = id(live_level);
-                                id(muted) = id(live_muted);
-                                id(dirty) = true;
-                              }
-                        else:
-                          - lambda: |-
-                              id(online) = false;
-                              id(dirty) = true;
-                on_error:
-                  then:
-                    - lambda: id(online) = false;
-                    - lambda: id(dirty) = true;
+      - lambda: |-
+          bool on = dialnet::online;
+          if (on != id(online)) { id(online) = on; id(dirty) = true; }
+          uint32_t n = dialnet::answers;
+          if (n == id(seen)) return;
+          id(seen) = n;
+          id(live_level) = dialnet::live_level / 1000.0f;
+          id(live_muted) = dialnet::live_muted;
+          id(cap) = dialnet::cap / 1000.0f;
+          id(known) = true;
+          if (millis() - id(touched) > 2000) {
+            id(level) = id(live_level);
+            id(muted) = id(live_muted);
+          }
+          id(dirty) = true;
   # Redraw when something changed, at most once per pass: a fast turn is one
   # redraw, not one per click queued behind each other.
   - interval: 20ms
