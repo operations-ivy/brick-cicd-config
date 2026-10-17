@@ -65,10 +65,11 @@ globals:
   - id: touched
     type: uint32_t
     initial_value: "0"
-  # The level the screen shows: it glides to `level` (interval below).
-  - id: shown
-    type: float
-    initial_value: "0"
+  # The screen needs redrawing (the 20 ms interval below does it, once,
+  # however many clicks came in meanwhile).
+  - id: dirty
+    type: bool
+    initial_value: "true"
 
 script:
   # Turning sends the new level 150 ms after the last click (restart mode), so
@@ -90,7 +91,7 @@ script:
           on_error:
             then:
               - lambda: id(online) = false;
-      - component.update: screen
+      - lambda: id(dirty) = true;
   - id: send_mute
     mode: queued
     then:
@@ -104,7 +105,7 @@ script:
           on_error:
             then:
               - lambda: id(online) = false;
-      - component.update: screen
+      - lambda: id(dirty) = true;
   - id: wake
     then:
       - lambda: id(touched) = millis();
@@ -124,14 +125,14 @@ sensor:
           id(level) = std::min(1.0f, id(level) + ${step}f);
           id(known) = true;
       - script.execute: wake
-      - component.update: screen
+      - lambda: id(dirty) = true;
       - script.execute: send_level
     on_anticlockwise:
       - lambda: |-
           id(level) = std::max(0.0f, id(level) - ${step}f);
           id(known) = true;
       - script.execute: wake
-      - component.update: screen
+      - lambda: id(dirty) = true;
       - script.execute: send_level
 
 binary_sensor:
@@ -144,7 +145,7 @@ binary_sensor:
     on_press:
       - lambda: id(muted) = !id(muted);
       - script.execute: wake
-      - component.update: screen
+      - lambda: id(dirty) = true;
       - script.execute: send_mute
 
 interval:
@@ -175,18 +176,18 @@ interval:
                         });
                         id(online) = ok;
                         id(known) |= ok;
-                    - component.update: screen
+                    - lambda: id(dirty) = true;
                 on_error:
                   then:
                     - lambda: id(online) = false;
-                    - component.update: screen
-  # Glide the arc to the new level: a third of the way each frame, ~150 ms.
-  - interval: 30ms
+                    - lambda: id(dirty) = true;
+  # Redraw when something changed, at most once per pass: a fast turn is one
+  # redraw, not one per click queued behind each other.
+  - interval: 20ms
     then:
       - lambda: |-
-          float d = id(level) - id(shown);
-          if (d == 0.0f) return;
-          id(shown) = fabsf(d) < 0.004f ? id(level) : id(shown) + d * 0.35f;
+          if (!id(dirty)) return;
+          id(dirty) = false;
           id(screen).update();
   # Dim the screen after a minute untouched; turning or pressing wakes it.
   - interval: 5s
@@ -267,7 +268,8 @@ display:
     dc_pin: GPIO4
     reset_pin: GPIO8
     invert_colors: true
-    data_rate: 40MHz
+    # 80 MHz, as M5Stack's own library drives the Dial's GC9A01.
+    data_rate: 80MHz
     # The whole screen in RAM (115 KB; the Dial has no PSRAM). With the
     # default part-screen buffer the lambda ran once per strip, six times a
     # frame: ~270 ms a redraw, too slow to animate and long enough to lag.
@@ -278,7 +280,7 @@ display:
       const int cx = 120, cy = 120;
       const float start = 135.0f, sweep = 270.0f;  // 7:30 round to 4:30, like a knob
       const float deg = M_PI / 180.0f;
-      const float lv = id(shown);
+      const float lv = id(level);
       const bool mute = id(muted);
       it.fill(id(bunker));
 
@@ -314,13 +316,13 @@ display:
 
       // The CRT window: dark glass with scanlines, in a panel-edge bezel.
       const int rg = 76;
-      it.filled_circle(cx, cy, rg + 3, id(panel));
-      it.circle(cx, cy, rg + 3, id(track));
-      it.filled_circle(cx, cy, rg, id(crt));
-      for (int y = -rg + 1; y < rg; y += 3) {
+      for (int y = -rg; y <= rg; y++) {  // one pass: glass, every third row a scanline
         int w = (int) sqrtf((float) (rg * rg - y * y));
-        it.horizontal_line(cx - w, cy + y, 2 * w, id(scanline));
+        it.horizontal_line(cx - w, cy + y, 2 * w + 1, (y + rg) % 3 == 1 ? id(scanline) : id(crt));
       }
+      it.circle(cx, cy, rg + 1, id(panel));
+      it.circle(cx, cy, rg + 2, id(panel));
+      it.circle(cx, cy, rg + 3, id(track));
 
       // The pointer, riding the end of the arc.
       {
