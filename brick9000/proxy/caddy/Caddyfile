@@ -114,6 +114,19 @@
 	}
 }
 
+# The volume dial (volume-dial/) reads and sets the volume over plain HTTP:
+# an ESP32 takes ~2.7 s per TLS handshake, and ESPHome's requests block the
+# dial while they run, so over HTTPS it lagged seconds behind every turn.
+# Only the API, only on the LAN; the page itself still redirects to HTTPS.
+http://volume.brick.nozdormu.cloud {
+	handle /api/volume {
+		reverse_proxy 127.0.0.1:8765
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
+
 http://*.brick.nozdormu.cloud {
 	redir https://{host}{uri} 308
 }

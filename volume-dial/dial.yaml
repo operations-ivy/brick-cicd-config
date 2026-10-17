@@ -5,7 +5,9 @@
 # brick-status's /api/volume through volume.brick.nozdormu.cloud: no Home
 # Assistant, no cluster. See README.md here.
 substitutions:
-  api_url: https://volume.brick.nozdormu.cloud/api/volume
+  # Plain HTTP, LAN only (brick9000's Caddyfile): a TLS handshake takes the
+  # ESP32 ~2.7 s, and each request blocks the dial while it runs.
+  api_url: http://volume.brick.nozdormu.cloud/api/volume
   # One click of the encoder; 20 clicks from silent to the cap.
   step: "0.05"
 
@@ -40,10 +42,8 @@ ota:
     password: !secret ota_password
 
 http_request:
-  # volume.brick.nozdormu.cloud has a Let's Encrypt certificate; the ESP-IDF
-  # certificate bundle verifies it.
-  verify_ssl: true
-  timeout: 4s
+  verify_ssl: false
+  timeout: 2s
 
 globals:
   # 0-1 of the cap, as /api/volume reports it.

@@ -9,9 +9,13 @@ seconds and dims after a minute untouched. It's drawn in the board's palette
 and typefaces.
 
 It talks only to brick-status's `/api/volume` through
-`https://volume.brick.nozdormu.cloud` (the same API as the web page), so it
+`http://volume.brick.nozdormu.cloud` (the same API as the web page), so it
 needs brick9000 and the router's DNS entry, but no cluster and no Home
-Assistant. The screen shows `OFFLINE` in red when it can't reach brick9000,
+Assistant. Plain HTTP, on the LAN only: over HTTPS each request took the
+ESP32 ~2.7 s of TLS handshake, and ESPHome's requests block the dial while
+they run, so it lagged seconds behind every turn (2026-10-17). brick9000's
+Caddy serves just `/api/volume` on that name over HTTP; the page still
+redirects to HTTPS. The screen shows `OFFLINE` in red when it can't reach brick9000,
 and `NO SIGNAL` before it has ever heard from it.
 
 - `dial.yaml`: the ESPHome config.
