@@ -206,17 +206,20 @@ class GamesTests(unittest.TestCase):
         for rel in ("segacd/Sonic CD (USA).chd", "sega32x/Doom 32X (JU) [!].32x",
                     "sega32x/Metal Head 32X (JU) [!].bin", "sega32x/languages/template/makefile",
                     "psp/Wipeout Pure (USA).iso", "psp/SLUS00664/EBOOT.PBP",
+                    "psp/Crisis_Core_Final_Fantasy_VII_USA_READNFO_PSP-Googlecus.iso",
+                    "psp/Breath.of.Fire.III.EUR.PSP-PGS.iso",
                     "Dreamcast/Shenmue (USA) (Disc 1).chd", "Dreamcast/Shenmue (USA) (Disc 2).chd",
                     "Dreamcast/Soulcalibur (USA).chd"):
             (self.roms / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.roms / rel).write_text("x")
         counts = self.write()
-        self.assertEqual([counts[s] for s in ("segacd", "sega32x", "psp", "Dreamcast")], [1, 2, 1, 2])
+        self.assertEqual([counts[s] for s in ("segacd", "sega32x", "psp", "Dreamcast")], [1, 2, 3, 2])
         self.assertEqual(self.items("Sega - Mega-CD - Sega CD")[0]["core_path"], games.PICODRIVE)
         self.assertEqual([i["label"] for i in self.items("Sega - 32X")], ["Doom", "Metal Head"])
         self.assertEqual(self.items("Sega - 32X")[0]["core_path"], games.PICODRIVE)
         # The PlayStation game converted for the PSP isn't a PSP game.
-        self.assertEqual([i["label"] for i in self.items("Sony - PlayStation Portable")], ["Wipeout Pure"])
+        self.assertEqual([i["label"] for i in self.items("Sony - PlayStation Portable")],
+                         ["Breath of Fire III", "Crisis Core Final Fantasy VII", "Wipeout Pure"])
         dc = self.items("Sega - Dreamcast")
         self.assertEqual([i["label"] for i in dc], ["Shenmue", "Soulcalibur"])
         self.assertEqual(Path(dc[0]["path"]), self.root / "m3u/Dreamcast/Shenmue (USA).m3u")

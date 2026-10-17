@@ -189,7 +189,7 @@ def fetch(system: str, kind: str, name: str, target: Path, limiter: Limiter, tim
 
 
 # Bump when matching changes: the remembered misses are tried again.
-MATCHER = 2
+MATCHER = 3
 
 
 def playlist_games(lpl: Path) -> dict[str, str]:
@@ -204,8 +204,8 @@ def playlist_games(lpl: Path) -> dict[str, str]:
         source = Path(item.get("path", label)).stem
         if system and system.arcade_dat:
             source = label
-        elif system and system.drop:
-            source = re.sub(system.drop, "", source)
+        elif system:
+            source = games.clean_name(system, source)
         out.setdefault(label, source)
     return out
 

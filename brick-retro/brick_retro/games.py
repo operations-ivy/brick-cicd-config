@@ -57,7 +57,10 @@ SYSTEMS = (
     System("sega32x", "Sega - 32X", PICODRIVE, "PicoDrive", (".32x", ".bin"), drop=r"\s+32X\b"),
     # Only disc images: the .pbp files in brick2000's psp folder are
     # PlayStation games converted for the PSP, which PPSSPP can't run.
-    System("psp", "Sony - PlayStation Portable", PPSSPP, "PPSSPP", (".iso", ".cso")),
+    # Scene names ("Crisis_Core_Final_Fantasy_VII_USA_READNFO_PSP-Googlecus")
+    # lose everything from the region on.
+    System("psp", "Sony - PlayStation Portable", PPSSPP, "PPSSPP", (".iso", ".cso"),
+           drop=r"[_.](?:USA|EUR|JPN|JAP|ASIA)(?:[_.].*)?$"),
     System("Dreamcast", "Sega - Dreamcast", FLYCAST, "Flycast", (".chd", ".cue", ".gdi"), discs=True),
     # FinalBurn Neo checks the BIOS's checksums, and brick2000's old
     # neogeo.zip (MAME 0.78's) fails them: no list until a current one is there.
@@ -245,6 +248,17 @@ def arcade_games(folder: Path, dat: Path) -> list[tuple[Path, str]]:
     return sorted(entries, key=lambda e: e[1].lower())
 
 
+def clean_name(system: System, stem: str) -> str:
+    """A ROM's file name less what its system drops ("Doom 32X (JU)" is "Doom
+    (JU)"); a name with no spaces left has its _ and . as spaces
+    ("Breath.of.Fire.III.EUR.PSP-PGS" is "Breath of Fire III"). The menu's
+    label and the thumbnail match both start from this."""
+    if not system.drop:
+        return stem
+    name = re.sub(system.drop, "", stem)
+    return name if " " in name else re.sub(r"[_.]", " ", name)
+
+
 def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]]:
     """(file, label) for each of a system's games."""
     folder = rom_dir / system.folder
@@ -261,7 +275,7 @@ def games(system: System, rom_dir: Path, m3u_dir: Path) -> list[tuple[Path, str]
     for p in sorted(roms(folder, system.extensions), key=lambda p: (p.stem.lower(), len(p.parts), str(p))):
         if p.stem.lower() not in seen:
             seen.add(p.stem.lower())
-            entries.append((p, re.sub(system.drop, "", p.stem) if system.drop else p.stem))
+            entries.append((p, clean_name(system, p.stem)))
     return _unique(entries)
 
 
