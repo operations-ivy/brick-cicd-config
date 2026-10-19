@@ -2,11 +2,14 @@
 
 # brick420, the k3s server.
 BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
-# brick9000, the status board, outside the cluster (reached over SSH).
-BRICK9000=${BRICK9000:-192.168.1.221}
-# brick1982, the touchscreen (the LCARS panel, operations-ivy/rpi_lcars),
-# outside the cluster (reached over SSH).
-BRICK1982=${BRICK1982:-192.168.1.222}
+# Hosts outside the cluster, reached over SSH by name: the router's DNS
+# resolves each from its DHCP lease, so a host that moves to a new address
+# needs no change here. brick9000's old address, 192.168.1.221, is the
+# front door's now (brick-k8s-config front-door/).
+# brick9000, the status board.
+BRICK9000=${BRICK9000:-brick9000}
+# brick1982, the touchscreen (the LCARS panel, operations-ivy/rpi_lcars).
+BRICK1982=${BRICK1982:-brick1982}
 # The local clones mirror-repos keeps: in Jenkins' home, or wherever the
 # caller says (brick9000's brick-mirror.timer keeps its own).
 MIRRORS=${MIRRORS:-${JENKINS_HOME:-/var/jenkins_home}/mirrors}
