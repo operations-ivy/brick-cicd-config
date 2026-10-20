@@ -20,7 +20,8 @@ shows how that's going.
 
 ### brick9000 is not a cluster node
 
-`brick9000` (192.168.1.221, static DHCP lease, `brick9000.local`) is a
+`brick9000` (192.168.1.223, static DHCP lease, from its return; it was
+192.168.1.221 until 2026-10-17, which is the front door's now) is a
 Raspberry Pi with a screen and plasma buttons, from a repurposed Pimoroni
 Picade. It deliberately does **not** join k3s:
 
@@ -151,8 +152,8 @@ To authorize Jenkins' key on each host, from a machine that can already
 reach them:
 
 ```bash
-key=$(ssh zaphod@brick9000.local cat .config/brick-jenkins/secrets/ssh_key.pub)
-for h in 192.168.1.183 192.168.1.170 192.168.1.221; do
+key=$(ssh-keygen -y -f ~/.config/brick-jenkins/secrets/ssh_key)
+for h in brick420 brick2000 brick666 brick1982 brick9000; do
     ssh zaphod@$h "grep -qxF '$key' ~/.ssh/authorized_keys || echo '$key' >>~/.ssh/authorized_keys"
 done
 ```
@@ -192,14 +193,22 @@ proxy as it ran on brick9000, which the cluster's copy follows.
 
 #### When brick9000 comes back
 
-1. **Before it boots**, change its DHCP reservation on the router to a new
-   address (not 192.168.1.221: the cluster holds that one now).
+1. **Before it boots**, move its DHCP reservation on the router from
+   192.168.1.221 to **192.168.1.223**. 192.168.1.221 is the front door's for
+   good (kube-vip, no DHCP lease): if brick9000 took it too, both would
+   answer ARP for it and every `*.brick` name would flicker between them
+   (brick-k8s-config's FrontDoorDown alert fires).
 2. Boot it; its next deploy (or `brick9000/install.sh`) retires its Caddy.
-3. Point the cluster Caddyfile's `status` and `volume` blocks
+   On the old SD card, Docker starts that Caddy once at boot first; on its
+   own address that's harmless.
+3. Nothing else needs its address: Jenkins (`jenkins/bin/lib.sh`), Prometheus'
+   `brick9000-node` job and `scripts/smoke` all reach it as `brick9000`,
+   which the router resolves from the lease. Jenkins' known_hosts has the
+   host key under the old address only, so the first job by name accepts
+   it.
+4. Point the cluster Caddyfile's `status` and `volume` blocks
    (brick-k8s-config `front-door/caddy.yaml`) back at brick-status on
-   brick9000's new address, with brick-status listening beyond localhost.
-4. Update Prometheus' `brick9000-node` and `brick-status` scrape jobs
-   (brick-k8s-config) to the new address.
+   `brick9000`, with brick-status listening beyond localhost.
 5. `scripts/smoke`: brick9000's lines turn from `warn` to `ok`.
 
 Until Alertmanager pages (brick-k8s-config#19), brick9000's board is still

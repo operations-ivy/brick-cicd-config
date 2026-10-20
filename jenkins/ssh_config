@@ -6,6 +6,10 @@ Host *
     IdentityFile /run/secrets/additional/ssh-key
     BatchMode yes
     ConnectTimeout 10
+    # Hosts are reached by name, and the router answers with their IPv6
+    # addresses too (link-local or the ISP's changing prefix); the cluster
+    # is IPv4 only.
+    AddressFamily inet
     # known_hosts is on the Jenkins home volume, so it survives restarts. A
     # reimaged host gets a new key; accept a host seen for the first time,
     # refuse one that changed (remove its known_hosts line after a reimage).
