@@ -1,7 +1,7 @@
 # Shared by the job scripts in this directory. Sourced, not run.
 
-# brick420, the k3s server.
-BRICK_SERVER=${BRICK_SERVER:-192.168.1.183}
+# brick420, the k3s server (its API certificate covers the name).
+BRICK_SERVER=${BRICK_SERVER:-brick420}
 # Hosts outside the cluster, reached over SSH by name: the router's DNS
 # resolves each from its DHCP lease, so a host that moves to a new address
 # needs no change here. brick9000's old address, 192.168.1.221, is the
