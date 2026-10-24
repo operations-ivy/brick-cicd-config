@@ -20,7 +20,7 @@ shows how that's going.
 
 ### brick9000 is not a cluster node
 
-`brick9000` (192.168.1.223, static DHCP lease, from its return; it was
+`brick9000` (192.168.1.224, static DHCP lease, from its return; it was
 192.168.1.221 until 2026-10-17, which is the front door's now) is a
 Raspberry Pi with a screen and plasma buttons, from a repurposed Pimoroni
 Picade. It deliberately does **not** join k3s:
@@ -194,7 +194,8 @@ proxy as it ran on brick9000, which the cluster's copy follows.
 #### When brick9000 comes back
 
 1. **Before it boots**, move its DHCP reservation on the router from
-   192.168.1.221 to **192.168.1.223**. 192.168.1.221 is the front door's for
+   192.168.1.221 to **192.168.1.224** (.223 is the volume dial's).
+   192.168.1.221 is the front door's for
    good (kube-vip, no DHCP lease): if brick9000 took it too, both would
    answer ARP for it and every `*.brick` name would flicker between them
    (brick-k8s-config's FrontDoorDown alert fires).
