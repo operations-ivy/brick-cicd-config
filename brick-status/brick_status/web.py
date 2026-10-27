@@ -2,6 +2,7 @@
 stream, and the volume page."""
 
 import base64
+import ipaddress
 import json
 import mimetypes
 import subprocess
@@ -25,8 +26,19 @@ mimetypes.add_type("font/woff2", ".woff2")
 VOLUME_HOST = "volume.brick.nozdormu.cloud"
 
 
-def can_set_volume(headers) -> bool:
-    if not headers.get("X-Forwarded-For"):
+def is_local(client: str, headers) -> bool:
+    """brick9000's own kiosk: a loopback client, not through the proxy. It
+    listens on the LAN too (for the cluster's front door), and a LAN client
+    without X-Forwarded-For is still a viewer, not the kiosk."""
+    try:
+        loopback = ipaddress.ip_address(client).is_loopback
+    except ValueError:
+        return False
+    return loopback and not headers.get("X-Forwarded-For")
+
+
+def can_set_volume(local: bool, headers) -> bool:
+    if local:
         return True  # brick9000 itself
     return (headers.get("Host") or "").split(":")[0].lower() == VOLUME_HOST
 
@@ -49,7 +61,7 @@ def serve(settings, board, status) -> None:
             url = urlsplit(self.path)
             if url.path == "/api/state":
                 now = time.time()
-                if not self.headers.get("X-Forwarded-For"):  # the kiosk, not the mirror
+                if self._local():  # the kiosk, not the mirror
                     bm.KIOSK_SEEN.set(now)
                 body = json.dumps({
                     "boot": BOOT,
@@ -67,7 +79,7 @@ def serve(settings, board, status) -> None:
                 # Only the kiosk runs cmatrix. Through the LAN proxy (the read-only
                 # status.brick.nozdormu.cloud mirror) it's refused: only one cmatrix runs at
                 # a time, so a viewer starting one would stop the kiosk's.
-                if self.headers.get("X-Forwarded-For"):
+                if not self._local():
                     self._send(403, "text/plain", b"cmatrix is for brick9000's own screen")
                 else:
                     self._matrix(parse_qs(url.query))
@@ -91,7 +103,7 @@ def serve(settings, board, status) -> None:
         def do_POST(self):
             if urlsplit(self.path).path != "/api/volume":
                 self._send(404, "text/plain", b"not found")
-            elif not can_set_volume(self.headers):
+            elif not can_set_volume(self._local(), self.headers):
                 self._send(403, "text/plain", f"change the volume at https://{VOLUME_HOST}".encode())
             else:
                 try:
@@ -114,13 +126,16 @@ def serve(settings, board, status) -> None:
                     return
                 self._volume()
 
+        def _local(self) -> bool:
+            return is_local(self.client_address[0], self.headers)
+
         def _volume(self) -> None:
             try:
                 state = volume.get(settings.wpctl, settings.max_volume)
             except (OSError, ValueError, subprocess.SubprocessError):
                 self._send(503, "text/plain", b"couldn't reach PipeWire")
                 return
-            state["can_set"] = can_set_volume(self.headers)
+            state["can_set"] = can_set_volume(self._local(), self.headers)
             self._send(200, "application/json", json.dumps(state).encode())
 
         def _matrix(self, query: dict) -> None:

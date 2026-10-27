@@ -36,8 +36,11 @@ mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 [ -f ~/.config/brick-status/env ] || cp "$here/brick-status.env.example" ~/.config/brick-status/env
 # The ntfy topic phone pages go to: anyone who knows it can read and send
 # pages, so it's long, random and never printed. Kept if it exists.
+# Not while pages are paused (pages-paused, README "Alerts"): a new topic
+# would quietly turn them back on.
 topic=~/.config/brick-status/ntfy_topic
-[ -s "$topic" ] || (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
+[ -s "$topic" ] || [ -e ~/.config/brick-status/pages-paused ] ||
+    (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
 cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \

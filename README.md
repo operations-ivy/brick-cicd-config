@@ -193,6 +193,9 @@ proxy as it ran on brick9000, which the cluster's copy follows.
 
 #### When brick9000 comes back
 
+Done on 2026-10-26 (new Picade X HAT; the wiring is in homelab-context's
+`docs/hosts.md`). Kept for the next time.
+
 1. **Before it boots**, move its DHCP reservation on the router from
    192.168.1.221 to **192.168.1.224** (.223 is the volume dial's).
    192.168.1.221 is the front door's for
@@ -207,13 +210,14 @@ proxy as it ran on brick9000, which the cluster's copy follows.
    which the router resolves from the lease. Jenkins' known_hosts has the
    host key under the old address only, so the first job by name accepts
    it.
-4. Point the cluster Caddyfile's `status` and `volume` blocks
-   (brick-k8s-config `front-door/caddy.yaml`) back at brick-status on
-   `brick9000`, with brick-status listening beyond localhost.
+4. The cluster Caddyfile's `status` and `volume` blocks (brick-k8s-config
+   `front-door/caddy.yaml`) proxy to brick-status at 192.168.1.224:8765,
+   which listens on the LAN (`BRICK_STATUS_HTTP_HOST=0.0.0.0`); while
+   brick9000 is down they fall back to Grafana and a 503.
 5. `scripts/smoke`: brick9000's lines turn from `warn` to `ok`.
 
-Until Alertmanager pages (brick-k8s-config#19), brick9000's board is still
-the only thing that sends phone pages: it should come back on.
+Phone pages stay paused (`pages-paused`, "Alerts") until the user says
+otherwise.
 
 #### As it ran on brick9000
 
@@ -414,6 +418,16 @@ startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
 60fps), so changing one needs only a restart, not a reinstall.
 
 ### Alerts
+
+**Paused (the user, 2026-10-26: nothing pages the phone until further
+notice).** While `~/.config/brick-status/pages-paused` exists, brick-status
+sends nothing whatever the topic file holds, drops pages instead of queueing
+them (so resuming sends no backlog; `incidents.jsonl` still logs every
+problem; `brick_status_pages_total{result="paused"}` counts them), and
+install.sh makes no new topic. On 2026-10-16 an install made a fresh topic
+while the old one was set aside as `ntfy_topic.paused`, which quietly turned
+pages back on to a topic nobody followed. To resume: remove `pages-paused`
+and put the subscribed topic back in `ntfy_topic`.
 
 The board shows everything, but from 2026-10-09 it's dark all work week. So
 brick-status also pages a phone, through [ntfy](https://ntfy.sh), for the few
@@ -724,7 +738,7 @@ format, and brick-retro imports it from the same checkout.
 
 | What | Where Prometheus gets it | Metrics |
 | --- | --- | --- |
-| brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the proxy; it listens on localhost) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
+| brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the cluster's front door to brick9000:8765) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
 | The LCARS panel (rpi_lcars) | `brick1982:8767/metrics` | `lcars_*`: Home Assistant link and requests, codes entered, relocks, changes sent, taps, screen, backlight, frame time |
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
 | Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |

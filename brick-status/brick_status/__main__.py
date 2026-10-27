@@ -79,7 +79,9 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
                           lambda problem: notify.facts(problem, summary, vitals))
-            if internet:  # otherwise each send would stall the poll until it timed out
+            if notify.paused(settings.pages_paused_file):
+                bm.PAGES.inc(notify.hold(pager), result="paused")
+            elif internet:  # otherwise each send would stall the poll until it timed out
                 sent, failed = notify.deliver(pager, ntfy)
                 bm.PAGES.inc(sent, result="sent")
                 bm.PAGES.inc(failed, result="failed")
