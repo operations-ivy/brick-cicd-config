@@ -106,7 +106,7 @@ def redial() -> None:
 
 # The Picade's speaker is very loud at full volume: never above MAX_VOLUME,
 # in ten even notches up to it.
-MAX_VOLUME = float(env("MAX_VOLUME", "0.8"))
+MAX_VOLUME = float(env("MAX_VOLUME", "0.5"))
 
 
 def change_volume(step: int) -> None:
