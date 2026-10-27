@@ -81,6 +81,10 @@ class Settings:
     # install.sh; with no file, nothing is sent.
     ntfy_url: str = "https://ntfy.sh"
     ntfy_topic_file: str = os.path.expanduser("~/.config/brick-status/ntfy_topic")
+    # While this file exists, no page goes out, whatever the topic file says,
+    # and pages made meanwhile are dropped rather than queued (the user's
+    # pause on everything that reaches the phone, 2026-10-26).
+    pages_paused_file: str = os.path.expanduser("~/.config/brick-status/pages-paused")
     # Where tapping a page goes: the board's mirror, which only opens at home
     # (the name points at a LAN address). Empty for nowhere.
     ntfy_click: str = "https://status.brick.nozdormu.cloud"
@@ -125,6 +129,7 @@ class Settings:
             s.button_slots = _ints(v)
         s.ntfy_url = env("BRICK_STATUS_NTFY_URL", s.ntfy_url).rstrip("/")
         s.ntfy_topic_file = env("BRICK_STATUS_NTFY_TOPIC_FILE", s.ntfy_topic_file)
+        s.pages_paused_file = env("BRICK_STATUS_PAGES_PAUSED_FILE", s.pages_paused_file)
         s.ntfy_click = env("BRICK_STATUS_NTFY_CLICK", s.ntfy_click)
         s.notify_dir = env("BRICK_STATUS_NOTIFY_DIR", s.notify_dir)
         return s

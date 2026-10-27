@@ -539,6 +539,15 @@ class MirrorTest(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code
 
+    def test_only_a_loopback_client_without_the_proxy_is_the_kiosk(self):
+        proxied = {"X-Forwarded-For": "192.168.1.50"}
+        self.assertTrue(web.is_local("127.0.0.1", {}))
+        self.assertFalse(web.is_local("127.0.0.1", proxied))
+        self.assertFalse(web.is_local("192.168.1.50", {}))   # a LAN client straight to the port
+        self.assertFalse(web.is_local("", {}))
+        self.assertFalse(web.can_set_volume(False, {"Host": "192.168.1.224:8765"}))
+        self.assertTrue(web.can_set_volume(False, {"Host": "volume.brick.nozdormu.cloud"}))
+
     def test_mirror_gets_page_and_state_but_no_cmatrix(self):
         self.assertEqual(self.get("/", proxied=True), 200)
         self.assertEqual(self.get("/api/state", proxied=True), 200)
@@ -941,6 +950,19 @@ class PagerTest(unittest.TestCase):
         p.observe([], {"wigle"}, 800)             # node readiness unknown: still open
         self.assertEqual(p.take(), [])
         self.assertFalse((self.dir / "incidents.jsonl").exists())
+
+    def test_paused_pages_are_dropped_not_queued(self):
+        p = self.pager()
+        p.observe([self.NODE], self.SEEN, 0)
+        p.observe([self.NODE], self.SEEN, 700)
+        self.assertFalse(notify.paused(str(self.dir / "pages-paused")))
+        (self.dir / "pages-paused").touch()
+        self.assertTrue(notify.paused(str(self.dir / "pages-paused")))
+        self.assertEqual(notify.hold(p), 1)
+        self.assertEqual(p.take(), [])
+        p.observe([], self.SEEN, 800)              # the all-clear is dropped too
+        self.assertEqual(notify.hold(p), 1)
+        self.assertEqual(len((self.dir / "incidents.jsonl").read_text().splitlines()), 1)
 
     def test_failed_sends_stay_queued(self):
         class Down:

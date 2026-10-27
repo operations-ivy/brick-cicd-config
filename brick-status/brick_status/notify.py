@@ -329,6 +329,21 @@ def read_topic(path: str) -> str:
         return ""
 
 
+def paused(path: str) -> bool:
+    return Path(path).exists()
+
+
+def hold(pager: Pager) -> int:
+    """Pages are paused: drop what's waiting, so resuming doesn't send a
+    backlog. The incidents log still has every problem. Returns how many."""
+    dropped = 0
+    for message in pager.take():
+        log.info("not paged (pages paused): %s", message["title"])
+        pager.sent(message)
+        dropped += 1
+    return dropped
+
+
 def deliver(pager: Pager, ntfy: Ntfy | None) -> tuple[int, int]:
     """Send what's waiting. A failure leaves it queued for the next poll.
     Returns how many were sent and how many sends failed."""

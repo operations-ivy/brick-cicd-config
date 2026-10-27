@@ -45,7 +45,7 @@ for s in ("off", "build", "active", "idle"):
     LIGHTS.set(0, state=s)
 for r in ("ok", "error"):
     POLLS.inc(0, result=r)
-for r in ("sent", "failed"):
+for r in ("sent", "failed", "paused"):
     PAGES.inc(0, result=r)
 
 
