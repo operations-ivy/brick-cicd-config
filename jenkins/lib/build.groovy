@@ -44,7 +44,7 @@ spec:
         requests: {cpu: 500m, memory: 512Mi}
         limits: {cpu: "2", memory: 2Gi}
     - name: tools
-      image: docker.io/whitepatrick/brick-jenkins:2.580.1-10
+      image: docker.io/whitepatrick/brick-jenkins:2.580.1-9
       command: [sleep]
       args: [infinity]
       resources:
