@@ -13,7 +13,7 @@ controller:
   image:
     registry: docker.io
     repository: whitepatrick/brick-jenkins
-    tag: "2.580.1-9"
+    tag: "2.580.1-10"
     pullPolicy: IfNotPresent
   # The chart's own plugin download would need the internet on every start;
   # the image has them instead. overwritePlugins clears the home's plugins on
@@ -145,8 +145,8 @@ persistence:
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
 
 # What the maintenance jobs do to the cluster, as the jenkins ServiceAccount:
-# wigle-sync-now starts a Job from wigle-sync's CronJob, and chuck-importer
-# replaces the chucks-wisdom importer Job. Both wait on the Job and read its logs.
+# wigle-sync-now and chuck-importer each start a Job from a (suspended, for
+# the importer) CronJob, overriding its parameters. Both wait and read logs.
 extraObjects:
   - apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
@@ -182,6 +182,9 @@ extraObjects:
       name: jenkins-jobs
       namespace: chuck
     rules:
+      - apiGroups: [batch]
+        resources: [cronjobs]
+        verbs: [get]
       - apiGroups: [batch]
         resources: [jobs]
         verbs: [get, list, watch, create, patch, delete]

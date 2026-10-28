@@ -1,28 +1,32 @@
 #!/bin/sh
 # Run the chucks-wisdom joke importer with this job's parameters as its
-# IMPORTER_* settings (see chucks-wisdom's k8s_config/CLUSTER_SETUP.md). A Job
-# can't be re-run in place, so delete it and apply it again from the
-# chucks-wisdom mirror. Unless WAIT=true, return once the importer is running:
-# a random import at the default pace takes many hours.
+# IMPORTER_* settings (see chucks-wisdom's k8s_config/CLUSTER_SETUP.md). The
+# importer is a suspended CronJob; start a one-shot Job from its template (like
+# wigle-sync-now) with the settings overridden. The image tag comes from the
+# CronJob, which Argo renders from chucks-wisdom's kustomization, so it is never
+# set here. Unless WAIT=true, return once the importer is running: a random
+# import at the default pace takes many hours.
 set -eu
 . "$(dirname "$0")/lib.sh"
 use_cluster
-manifest=$(mirror chucks-wisdom)/k8s_config/importer/importer-job.yaml
-# Build the new Job before deleting the old one, so a failure here leaves it be.
+# Build the Job from the live CronJob's template, override the settings, then
+# apply it. Build before deleting the old one, so a failure here leaves it be.
+base=$(mktemp)
 job=$(mktemp)
-trap 'rm -f "$job"' EXIT
-kubectl set env --local -f "$manifest" -o yaml \
+trap 'rm -f "$base" "$job"' EXIT
+kubectl -n chuck create job importer --from=cronjob/importer --dry-run=client -o yaml >"$base"
+kubectl set env --local -f "$base" -o yaml \
     IMPORTER_QUERY="${QUERY:-}" \
     IMPORTER_CATEGORIES="${CATEGORIES:-}" \
     IMPORTER_JOKES="${JOKES:-1000}" \
     IMPORTER_TRIES_PER_CATEGORY="${TRIES_PER_CATEGORY:-1000}" \
     IMPORTER_MAX_DUPLICATES="${MAX_DUPLICATES:-50}" \
     IMPORTER_SLEEP_SECONDS="${SLEEP_SECONDS:-60}" >"$job"
-# set env prints nothing when no value differs from the manifest's (all the
-# defaults): then the manifest is already the Job to run.
-[ -s "$job" ] || cp "$manifest" "$job"
+# set env prints nothing when no value differs from the template's (all the
+# defaults): then the template straight from the CronJob is the Job to run.
+[ -s "$job" ] || cp "$base" "$job"
 kubectl -n chuck delete job importer --ignore-not-found --wait
-kubectl apply -f "$job"
+kubectl -n chuck apply -f "$job"
 if [ "${WAIT:-false}" = true ]; then
     wait_for_job chuck importer
 else
