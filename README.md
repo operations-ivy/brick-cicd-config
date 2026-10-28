@@ -638,6 +638,15 @@ also wouldn't fit beside the rest on the SD card.
   name, translations and hacks stay. Two versions of one game keep their
   region to tell them apart. The files keep their names: RetroArch names
   saves after the file, and sync-roms mirrors brick2000's copies.
+- **Cheats:** libretro's `.cht` cheat database (Game Genie and raw memory
+  codes) for the systems the cabinet plays, under `~/games/cheats`. It was a
+  one-time copy from brick2000's `/extra/games/cheats` (not synced by
+  `sync-roms`); `retroarch.cfg`'s `cheat_database_path` points RetroArch at
+  it. In a game, Quick Menu → Cheats → Load Cheat File (Replace) opens there;
+  pick the system folder, then the title, and toggle individual cheats on.
+  Cheat files are named by their No-Intro title (`... (USA)`), which the ROMs'
+  older names (`... (U)`) don't match, so loading is by hand, not automatic.
+  No cheats for Game Boy Color, Master System or PSP (none in the database).
 - **Thumbnails:** after the playlists, `python3 -m brick_retro thumbnails`
   fetches box art, title screens and screenshots for every game that hasn't
   got them, from libretro's thumbnail server, at about 1 MB/s
