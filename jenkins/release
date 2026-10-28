@@ -35,6 +35,7 @@ built=$(docker buildx imagetools inspect "$image" \
 if [ -z "$built" ]; then
     echo "release: building $image at $revision"
     docker buildx build --builder brick2000-arm64 --platform linux/arm64 \
+        --build-arg "BRICK_JENKINS_TAG=$tag" \
         --label "org.opencontainers.image.revision=$revision" \
         --label "org.opencontainers.image.source=https://github.com/operations-ivy/brick-cicd-config" \
         -t "$image" --push "$here"

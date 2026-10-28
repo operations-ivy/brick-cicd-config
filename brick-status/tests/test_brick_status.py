@@ -1158,12 +1158,24 @@ class JenkinsJobsTest(unittest.TestCase):
                 self.assertIn("kubernetes {", text, job.name)
                 self.assertNotIn("label 'built-in'", text, job.name)
 
-    def test_pods_run_the_controller_image_they_ship_in(self):
-        # test-brick-cicd-config and the build pod's tools run this image: a
-        # stale tag would run old tools (hub-image-info, scripts/test's tools).
-        tag = re.search(r'^    tag: "(.+)"$', (JENKINS / "values.yaml").read_text(), re.M).group(1)
-        for f in [JENKINS / "jobs" / "test-brick-cicd-config.groovy", JENKINS / "lib" / "build.groovy"]:
-            self.assertIn(f"image: docker.io/whitepatrick/brick-jenkins:{tag}\n", f.read_text(), f.name)
+    def test_agent_pods_single_source_the_controller_tag(self):
+        # test-brick-cicd-config and the build pod's tools run the controller's
+        # image. Its tag is set in one place - values.yaml - and stamped into
+        # the pods at build time (ARG BRICK_JENKINS_TAG), so it can't drift and
+        # a stale copy can't run old tools (hub-image-info, scripts/test's).
+        values = (JENKINS / "values.yaml").read_text()
+        self.assertRegex(values, r'(?m)^    tag: ".+"$', "no controller image tag in values.yaml")
+        groovy = [JENKINS / "jobs" / "test-brick-cicd-config.groovy", JENKINS / "lib" / "build.groovy"]
+        for f in groovy:
+            text = f.read_text()
+            self.assertIn("image: docker.io/whitepatrick/brick-jenkins:@BRICK_JENKINS_TAG@", text, f.name)
+            self.assertNotRegex(text, r"brick-jenkins:\d", f.name)   # no literal tag left to drift
+        # jenkins/release passes the tag; the Dockerfile stamps it into both.
+        self.assertIn('--build-arg "BRICK_JENKINS_TAG=$tag"', (JENKINS / "release").read_text())
+        dockerfile = (JENKINS / "Dockerfile").read_text()
+        self.assertIn("ARG BRICK_JENKINS_TAG", dockerfile)
+        for f in groovy:
+            self.assertIn(f.name, dockerfile, f"{f.name} not stamped by the Dockerfile")
 
     def test_build_jobs_share_one_recipe_and_one_image_table(self):
         lib = (JENKINS / "lib" / "build.groovy").read_text()

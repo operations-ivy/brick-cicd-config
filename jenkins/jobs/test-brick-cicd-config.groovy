@@ -14,7 +14,7 @@ kind: Pod
 spec:
   containers:
     - name: tests
-      image: docker.io/whitepatrick/brick-jenkins:2.580.1-9
+      image: docker.io/whitepatrick/brick-jenkins:@BRICK_JENKINS_TAG@
       command: [sleep]
       args: [infinity]
       resources:

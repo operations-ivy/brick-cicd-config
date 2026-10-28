@@ -43,3 +43,17 @@ COPY --chown=root:root --chmod=644 seed.groovy /usr/share/brick-jenkins/seed.gro
 COPY --chown=root:root --chmod=755 jobs /usr/share/brick-jenkins/jobs
 COPY --chown=root:root --chmod=755 bin /usr/share/brick-jenkins/bin
 COPY --chown=root:root --chmod=755 lib /usr/share/brick-jenkins/lib
+
+# Stamp the image's own tag into the agent pods (build-image's tools container,
+# test-brick-cicd-config) so it's set in exactly one place - values.yaml's tag,
+# which jenkins/release passes here. Fail the build if it's missing rather than
+# bake an empty tag. As root: the copied files are root-owned, so sed -i can't
+# write its temp file as the jenkins user.
+ARG BRICK_JENKINS_TAG
+USER root
+RUN test -n "$BRICK_JENKINS_TAG" \
+    && sed -i "s/@BRICK_JENKINS_TAG@/$BRICK_JENKINS_TAG/g" \
+        /usr/share/brick-jenkins/lib/build.groovy \
+        /usr/share/brick-jenkins/jobs/test-brick-cicd-config.groovy \
+    && ! grep -rq '@BRICK_JENKINS_TAG@' /usr/share/brick-jenkins
+USER jenkins
