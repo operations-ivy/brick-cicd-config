@@ -322,7 +322,31 @@ class PlasmaTest(unittest.TestCase):
             try:
                 plasma.show("calm")  # same pattern again: must be retried
                 self.assertEqual(plasma.current, "calm")
-                self.assertEqual(os.read(reader, 100), b"brick-status/calm\n")
+                self.assertEqual(os.read(reader, 100), b"fps 2\nbrick-status/calm\n")
+            finally:
+                os.close(reader)
+
+    def test_only_a_change_of_pattern_changes_the_frame_rate(self):
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            fifo = os.path.join(d, "plasma")
+            os.mkfifo(fifo)
+            reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                plasma = lights.Plasma(fifo, d, "brick-status")
+                plasma.show("calm")
+                plasma.show("calm")
+                plasma.off()
+                plasma.off()
+                plasma.show("stage-build")
+                plasma.show("building")
+                self.assertEqual(os.read(reader, 200).decode().splitlines(), [
+                    "fps 2", "brick-status/calm",
+                    "fps 1", "0 0 0",
+                    "fps 30", "brick-status/stage-build",
+                    "brick-status/building"])
             finally:
                 os.close(reader)
 

@@ -37,12 +37,21 @@ def idle_pattern(checks: list[dict]) -> str:
     return "calm"
 
 
+# The daemon bit-bangs the LEDs from Python: a frame costs about 90 ms of CPU
+# and 220 ms of wall time, whatever its fps says, so 30 fps is really about 4
+# and a third of a core (brick-cicd-config#96). Off and the slow calm pulse
+# don't need that; everything else keeps the daemon's default.
+DEFAULT_FPS = 30
+PATTERN_FPS = {"off": 1, "calm": 2}
+
+
 class Plasma:
     def __init__(self, fifo: str, pattern_dir: str, prefix: str):
         self.fifo = fifo
         self.pattern_dir = pattern_dir
         self.prefix = prefix
         self.current = None
+        self.fps = None
 
     def install_patterns(self) -> None:
         os.makedirs(self.pattern_dir, exist_ok=True)
@@ -55,12 +64,18 @@ class Plasma:
             self._write(name, frames)
         elif name == self.current:
             return
+        self._set_fps(PATTERN_FPS.get(name, DEFAULT_FPS))
         # Only remember what was actually sent, so a missed command is retried.
         self.current = name if self._send(f"{self.prefix}/{name}") else None
 
     def off(self) -> None:
         if self.current != "off":
+            self._set_fps(PATTERN_FPS["off"])
             self.current = "off" if self._send("0 0 0") else None
+
+    def _set_fps(self, fps: int) -> None:
+        if fps != self.fps:
+            self.fps = fps if self._send(f"fps {fps}") else None
 
     def _write(self, name: str, frames: list) -> None:
         path = os.path.join(self.pattern_dir, f"{name}.png")
