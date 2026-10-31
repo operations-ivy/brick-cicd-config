@@ -12,6 +12,8 @@ pipeline {
         stage('Check') {
             steps {
                 script {
+                    // Named from the start: brick-status shows it on a running build.
+                    currentBuild.displayName = "#${currentBuild.number} ${params.IMAGE.split('/')[1]}:${params.TAG}"
                     checkBuildArgs(params.IMAGE, params.REF, params.TAG ?: null)
                     if (!params.TAG) {
                         error('build-image: TAG is required')
@@ -34,7 +36,6 @@ pipeline {
                     def revision = got[0]
                     def epoch = got[1]
                     def digest = buildImage(params.IMAGE, params.TAG, 'src', revision, epoch, params.PUSH)
-                    currentBuild.displayName = "#${currentBuild.number} ${params.IMAGE.split('/')[1]}:${params.TAG}"
                     echo "build-image: ${params.IMAGE}:${params.TAG} = ${digest} (from ${revision})"
                 }
             }

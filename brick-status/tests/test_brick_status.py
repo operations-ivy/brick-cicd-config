@@ -1451,6 +1451,16 @@ class PlasmaLibraryTest(unittest.TestCase):
         [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
         self.assertEqual((c.state, c.stage, c.detail), ("active", "install", "running 30s, install"))
 
+    def test_running_build_says_what_it_builds(self):
+        self.assertEqual(checks.build_label("#15 overwatch:0.8.3"), "overwatch:0.8.3")
+        self.assertEqual(checks.build_label("#15"), "")
+        self.assertEqual(checks.build_label(None), "")
+        jobs = [{"name": "build-image", "lastCompletedBuild": None,
+                 "lastBuild": {"building": True, "timestamp": 1000 * (NOW - 30),
+                               "displayName": "#15 overwatch:0.8.3", "description": "plasma:build"}}]
+        [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
+        self.assertEqual(c.detail, "overwatch:0.8.3, running 30s, build")
+
     def test_the_furthest_stage_wins_and_nightly_and_failures_outrank_stages(self):
         def build(name, stage):
             return {"group": "builds", "name": name, "state": "active", "stage": stage}
