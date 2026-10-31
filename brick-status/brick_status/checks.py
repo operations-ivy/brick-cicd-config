@@ -112,7 +112,7 @@ class Jenkins:
     """Jenkins on the cluster, read through its API (as brick-status' read-only
     user) rather than Prometheus, which only has build results by the minute."""
 
-    TREE = "jobs[name,lastBuild[number,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
+    TREE = "jobs[name,lastBuild[number,displayName,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
 
     def __init__(self, url: str, user: str, password: str, timeout: float = 5.0):
         self.url = url
@@ -139,6 +139,11 @@ def plasma_stage(description: str | None) -> str:
     return ""
 
 
+def build_label(display_name: str | None) -> str:
+    """What a build says it's working on: "overwatch:0.8.3" from "#15 overwatch:0.8.3", "" from a plain "#15"."""
+    return (display_name or "").partition(" ")[2].strip()
+
+
 def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
     """One row per Jenkins job: running (with how long), or its last result and when."""
     now = time.time() if now is None else now
@@ -154,9 +159,12 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
         last, done = job.get("lastBuild") or {}, job.get("lastCompletedBuild")
         if last.get("building"):
             stage = plasma_stage(last.get("description"))
-            checks.append(Check("builds", job["name"], ACTIVE,
-                                f"running {_ago(now - last['timestamp'] / 1000)}" + (f", {stage}" if stage else ""),
-                                stage))
+            label = build_label(last.get("displayName"))
+            detail = [label] if label else []
+            detail.append(f"running {_ago(now - last['timestamp'] / 1000)}")
+            if stage:
+                detail.append(stage)
+            checks.append(Check("builds", job["name"], ACTIVE, ", ".join(detail), stage))
         elif not done:
             checks.append(Check("builds", job["name"], OK, "not run yet"))
         else:
