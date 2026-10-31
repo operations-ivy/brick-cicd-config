@@ -33,8 +33,9 @@ def get(url: str, headers: dict | None = None):
 
 
 def newest_tag(repo: str) -> str | None:
-    _, page = get(f"https://hub.docker.com/v2/repositories/{repo}/tags?page_size=10&ordering=last_updated")
-    tags = [t["name"] for t in page.get("results", []) if t["name"] != "latest"]
+    _, page = get(f"https://hub.docker.com/v2/repositories/{repo}/tags?page_size=100&ordering=last_updated")
+    # dev-*: a branch's trial images (build-branches), not releases.
+    tags = [t["name"] for t in page.get("results", []) if t["name"] != "latest" and not t["name"].startswith("dev-")]
     return tags[0] if tags else None
 
 

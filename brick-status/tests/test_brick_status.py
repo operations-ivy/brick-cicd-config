@@ -299,6 +299,15 @@ class ChecksTest(unittest.TestCase):
                                ("prune-images", "fail", "failed 2h ago"),
                                ("wigle-sync-now", "active", "running 90s")])
 
+    def test_a_poller_at_work_shows_its_last_result_not_a_build(self):
+        now = 10_000.0
+        jenkins = FakeJenkins([
+            {"name": "build-branches", "lastBuild": {"building": True, "timestamp": (now - 1) * 1000},
+             "lastCompletedBuild": {"result": "SUCCESS", "timestamp": (now - 120) * 1000}},
+        ])
+        [check] = checks.build_checks(jenkins, now)
+        self.assertEqual((check.name, check.state), ("build-branches", "ok"))
+
     def test_jenkins_unreachable_is_no_data(self):
         # Jenkins is on the cluster: when it can't be reached, the cluster view
         # says why, and the builds themselves haven't failed.

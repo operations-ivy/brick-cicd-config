@@ -144,6 +144,10 @@ def build_label(display_name: str | None) -> str:
     return (display_name or "").partition(" ")[2].strip()
 
 
+# Run every couple of minutes to look for work: not a build to light up for.
+POLLERS = {"build-branches"}
+
+
 def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
     """One row per Jenkins job: running (with how long), or its last result and when."""
     now = time.time() if now is None else now
@@ -157,7 +161,7 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
     checks = []
     for job in sorted(jobs, key=lambda j: j["name"]):
         last, done = job.get("lastBuild") or {}, job.get("lastCompletedBuild")
-        if last.get("building"):
+        if last.get("building") and job["name"] not in POLLERS:
             stage = plasma_stage(last.get("description"))
             label = build_label(last.get("displayName"))
             detail = [label] if label else []
