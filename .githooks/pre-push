@@ -2,6 +2,9 @@
 # Refuse to push when the tests fail, so nothing untested reaches GitHub.
 # Enable once per clone: git config core.hooksPath .githooks
 root=$(git rev-parse --show-toplevel)
+# A hook runs with GIT_DIR set in a worktree: the tests' throwaway repos would
+# act on this one instead.
+unset $(git rev-parse --local-env-vars)
 if ! out=$("$root/scripts/test" 2>&1); then
     printf '%s\n' "$out"
     echo "pre-push: tests failed, push refused" >&2
