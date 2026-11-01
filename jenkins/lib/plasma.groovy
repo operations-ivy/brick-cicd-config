@@ -15,12 +15,29 @@
 // Kinds (brick-plasma's patterns.STAGES): checkout, install, test, build, push,
 // deploy, verify. The block also marks the build's description "plasma:<kind>",
 // which the board's Builds view shows; the description before it comes back after.
+// Each signal also says what's running, for the board's CRT: build-image's
+// display name ("#36 overwatch:0.8.6") or the job's name, then the stage.
+
+def plasmaJson(String value) {
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+def plasmaShow(String kind) {
+    def name = currentBuild.displayName
+    def title = name.contains(' ') ? name.substring(name.indexOf(' ') + 1) : env.JOB_NAME
+    def details = ["\"job\": ${plasmaJson(env.JOB_NAME)}", "\"build\": ${plasmaJson('#' + env.BUILD_NUMBER)}"]
+    def ref = params.REF ?: params.BRANCH
+    if (ref) {
+        details << "\"ref\": ${plasmaJson(ref.toString())}"
+    }
+    return "{\"title\": ${plasmaJson(title)}, \"status\": ${plasmaJson(kind)}, \"details\": {${details.join(', ')}}}"
+}
 
 def plasmaSignal(String kind, int ttl) {
     try {
         httpRequest(url: "http://plasma.brick.nozdormu.cloud/signals/jenkins-${env.JOB_NAME}",
                     httpMode: 'PUT', contentType: 'APPLICATION_JSON',
-                    requestBody: "{\"pattern\": \"stage-${kind}\", \"ttl\": ${ttl}}",
+                    requestBody: "{\"pattern\": \"stage-${kind}\", \"ttl\": ${ttl}, \"show\": ${plasmaShow(kind)}}",
                     timeout: 1, quiet: true, consoleLogResponseBody: false, validResponseCodes: '100:599')
     } catch (Exception e) {
         echo "plasma: no lights (${e.message})"

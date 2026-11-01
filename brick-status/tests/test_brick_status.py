@@ -14,7 +14,7 @@ import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import (board_metrics, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify,
+from brick_status import (board_metrics, jobs, checks, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
                           units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
@@ -1191,6 +1191,105 @@ class JenkinsJobsTest(unittest.TestCase):
             used |= set(re.findall(r'\$secrets/([\w-]+)', f.read_text()))
         self.assertTrue(used)
         self.assertLessEqual(used, sealed)
+
+
+class CrtActivityTest(unittest.TestCase):
+    ONE = {"source": "a", "title": "overwatch:0.8.6", "status": "build", "details": {"job": "build-image"}}
+    TWO = {"source": "b", "title": "deploy-brick9000", "status": "deploy", "details": {}}
+
+    def setUp(self):
+        self.out, self.keys, self.now = [], [], 100.0
+        self.screen = crt_activity.Screen(60, self.out.append, sleep=self.keys.append, clock=lambda: self.now)
+
+    def drawn(self):
+        text = "".join(self.out)
+        self.out.clear()
+        return text
+
+    def test_the_title_is_typed_a_key_at_a_time_and_nothing_else_is(self):
+        self.screen.update([self.ONE])
+        self.assertEqual(len(self.keys), len(self.ONE["title"]))
+        self.assertIn("o", self.out)  # the first letter went out on its own
+        self.assertNotIn("status   build", self.out)
+        self.assertIn("status   build", "".join(self.out))
+
+    def test_details_appear_after_the_title(self):
+        self.screen.update([self.ONE])
+        text = self.drawn()
+        self.assertLess(text.index("6"), text.index("status   build"))
+        self.assertIn("job      build-image", text)
+
+    def test_a_new_status_doesnt_type_the_title_again(self):
+        self.screen.update([self.ONE])
+        self.keys.clear()
+        self.drawn()
+        self.screen.update([{**self.ONE, "status": "push"}])
+        self.assertEqual(self.keys, [])
+        self.assertIn("status   push", self.drawn())
+
+    def test_two_at_once_show_only_their_titles(self):
+        self.screen.update([self.ONE, self.TWO])
+        text = self.drawn()
+        self.assertEqual(len(self.keys), len(self.ONE["title"]) + len(self.TWO["title"]))
+        self.assertNotIn("status", text)
+        self.assertNotIn("build-image", text)
+
+    def test_a_second_job_clears_the_firsts_details(self):
+        self.screen.update([self.ONE])
+        self.keys.clear()
+        self.drawn()
+        self.screen.update([self.ONE, self.TWO])
+        self.assertEqual(len(self.keys), len(self.TWO["title"]))  # only the new one is typed
+        text = self.drawn()
+        self.assertIn("\x1b[2J", text)
+        self.assertNotIn("status", text)
+
+    def test_back_to_one_shows_its_details_again(self):
+        self.screen.update([self.ONE, self.TWO])
+        self.keys.clear()
+        self.drawn()
+        self.screen.update([self.TWO])
+        self.assertEqual(self.keys, [])
+        self.assertIn("status   deploy", self.drawn())
+
+    def test_running_counts_up_from_when_it_was_first_seen(self):
+        self.screen.update([self.ONE])
+        self.now += 75
+        self.drawn()
+        self.screen.update([self.ONE])
+        self.assertIn("running  1m 15s", self.drawn())
+
+    def test_a_long_title_fits_the_window(self):
+        self.screen.update([{**self.ONE, "title": "x" * 200}])
+        self.assertLess(len(self.keys), 60)
+
+    def test_nothing_running_clears_the_screen(self):
+        self.screen.update([self.ONE])
+        self.drawn()
+        self.screen.update([])
+        self.assertIn("\x1b[2J", self.drawn())
+        self.assertEqual(self.screen.typed, {})
+
+    def test_activity_is_not_in_the_playlist(self):
+        self.assertIn("activity", matrix.PROGRAMS)
+        self.assertNotIn("activity", Settings().crt_programs)
+
+
+class ActivityTest(unittest.TestCase):
+    def test_it_asks_again_only_after_a_second(self):
+        now = [0.0]
+        activity = lights.Activity("http://127.0.0.1:1", clock=lambda: now[0])
+        calls = []
+        activity._ask = lambda: calls.append(1) or True
+        self.assertTrue(activity.running())
+        activity.running()
+        self.assertEqual(len(calls), 1)
+        now[0] = 1.5
+        activity.running()
+        self.assertEqual(len(calls), 2)
+
+    def test_no_plasma_api_means_nothing_running(self):
+        self.assertFalse(lights.Activity("http://127.0.0.1:1").running())
 
 
 if __name__ == "__main__":

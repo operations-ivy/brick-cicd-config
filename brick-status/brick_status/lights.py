@@ -43,6 +43,35 @@ def idle_pattern(checks: list[dict]) -> str:
     return "calm"
 
 
+class Activity:
+    """Whether a sender has said what it's running, for the CRT. /api/state asks
+    every second for the kiosk and for each mirror, so it's remembered briefly."""
+    TIMEOUT = 0.3
+    SECONDS = 1.0
+
+    def __init__(self, url: str, clock=time.monotonic):
+        parts = urlsplit(url)
+        self.host, self.port = parts.hostname, parts.port or 80
+        self.clock = clock
+        self.answer, self.asked_at = False, None
+
+    def running(self) -> bool:
+        now = self.clock()
+        if self.asked_at is None or now - self.asked_at >= self.SECONDS:
+            self.answer, self.asked_at = self._ask(), now
+        return self.answer
+
+    def _ask(self) -> bool:
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=self.TIMEOUT)
+        try:
+            connection.request("GET", "/activity")
+            return bool(json.load(connection.getresponse())["activity"])
+        except (OSError, ValueError, KeyError, http.client.HTTPException):
+            return False  # the playlist carries on
+        finally:
+            connection.close()
+
+
 class Plasma:
     SOURCE = "board"
     TTL = 30.0

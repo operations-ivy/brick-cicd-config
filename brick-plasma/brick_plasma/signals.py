@@ -26,6 +26,8 @@ class Signal:
     priority: int
     expires: float
     order: int
+    first: int  # when this sender started holding a signal: a new stage isn't a new job
+    show: dict | None = None  # what the board's CRT says about it (web.py, "show")
 
 
 class Signals:
@@ -35,18 +37,21 @@ class Signals:
         self._order = 0
         self._on_change = on_change
 
-    def put(self, source: str, label: str, frames: tuple, priority: int, ttl: float, now: float) -> None:
+    def put(self, source: str, label: str, frames: tuple, priority: int, ttl: float, now: float,
+            show: dict | None = None) -> None:
         expires = now + ttl
         with self._lock:
             self._expire(now)
             held = self._signals.get(source)
             if held and held.frames is frames and held.priority == priority:
                 held.expires = expires  # a heartbeat: not news, so it can't jump the queue
+                held.show = show
                 return
             if not held and len(self._signals) >= MAX_SIGNALS:
                 raise Full
             self._order += 1
-            self._signals[source] = Signal(source, label, frames, priority, expires, self._order)
+            first = held.first if held else self._order
+            self._signals[source] = Signal(source, label, frames, priority, expires, self._order, first, show)
         self._on_change()
 
     def remove(self, source: str) -> bool:
@@ -66,6 +71,12 @@ class Signals:
         with self._lock:
             self._expire(now)
             return sorted(self._signals.values(), key=lambda s: (s.priority, s.order), reverse=True)
+
+    def shown(self, now: float) -> list[Signal]:
+        """The live signals saying what they are, the longest running first."""
+        with self._lock:
+            self._expire(now)
+            return sorted((s for s in self._signals.values() if s.show), key=lambda s: s.first)
 
     def _expire(self, now: float) -> None:
         for source in [s for s, v in self._signals.items() if v.expires <= now]:

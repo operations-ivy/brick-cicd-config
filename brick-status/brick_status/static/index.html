@@ -380,9 +380,16 @@ function tintTheme(colour) {
 
 // Which program plays now: the playlist in turn, by the clock, so a restart or
 // a reload picks up where it was.
+// While anything's running, that instead (crt_activity.py), held a few seconds
+// so the gap between two stages doesn't bring cmatrix back for a moment.
+const ACTIVITY_HOLD_SECONDS = 6;
+let activityUntil = 0;
 function crtProgram(s) {
+  const now = s.now || Date.now() / 1000;
+  if (s.activity) activityUntil = now + ACTIVITY_HOLD_SECONDS;
+  if (now < activityUntil && s.crt?.activity) return s.crt.activity;
   const list = s.crt?.programs?.length ? s.crt.programs : [{ name: "cmatrix", tint: false, font: 11 }];
-  const slot = Math.floor((s.now || Date.now() / 1000) / 60 / (s.crt?.minutes || 10));
+  const slot = Math.floor(now / 60 / (s.crt?.minutes || 10));
   return list[slot % list.length];
 }
 

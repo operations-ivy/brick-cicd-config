@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import board_metrics as bm
-from . import matrix, volume
+from . import lights, matrix, volume
 from .metrics import CONTENT_TYPE
 
 STATIC = (Path(__file__).parent / "static").resolve()
@@ -50,11 +50,13 @@ def crt_playlist(settings) -> dict:
         return {"name": name, "tint": p.tint, "font": p.font}
     programs = [entry(n) for n in settings.crt_programs
                 if n in matrix.PROGRAMS and matrix.PROGRAMS[n].available(settings.cmatrix)]
-    return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes}
+    return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes,
+            "activity": entry("activity")}
 
 
 def serve(settings, board, status) -> None:
     crt = crt_playlist(settings)
+    activity = lights.Activity(settings.plasma_url)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -72,6 +74,7 @@ def serve(settings, board, status) -> None:
                     "updated": status.updated,
                     "now": now,
                     "crt": crt,
+                    "activity": activity.running(),
                     **status.get(),
                 }).encode()
                 self._send(200, "application/json", body)

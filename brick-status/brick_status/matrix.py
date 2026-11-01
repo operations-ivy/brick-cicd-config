@@ -54,6 +54,8 @@ PROGRAMS = {
     "nyancat": Program(("nyancat", "-n", "-s"), font=6),
     "rain": Program(("/usr/games/rain", "-d", "150")),
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45"), font=7),
+    # Not in the playlist: the page plays it while the plasma API has activity.
+    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=20),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
     # held the Pi 4 at 96% CPU (#28).
 }
