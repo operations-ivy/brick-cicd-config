@@ -34,8 +34,7 @@ PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 class Program:
     argv: tuple[str, ...]  # "{colour}" is replaced with the health colour
     tint: bool = True  # the page tints its colours; False: it colours itself
-    # The terminal's font size in pixels: smaller shows more of programs that
-    # draw at a fixed size (nyancat).
+    # The terminal's font size in pixels: smaller shows more of the paintings.
     font: int = 11
 
     def available(self, cmatrix: str = "cmatrix") -> bool:
@@ -46,13 +45,6 @@ class Program:
 PROGRAMS = {
     # -b bold, -s screensaver mode, -C colour.
     "cmatrix": Program(("cmatrix", "-b", "-s", "-C", "{colour}"), tint=False),
-    # 20 frames a second, not 75: every character drawn is the page's work too.
-    "pipes": Program(("/usr/games/pipes", "-p", "3", "-f", "20", "-r", "3000", "-R")),
-    "bonsai": Program(("cbonsai", "-S", "-w", "10", "-L", "40"), font=9),
-    "clock": Program(("tty-clock", "-s", "-c", "-b", "-n"), font=8),
-    # nyancat crops its fixed-size animation to the terminal: a small font shows all of it.
-    "nyancat": Program(("nyancat", "-n", "-s"), font=6),
-    "rain": Program(("/usr/games/rain", "-d", "150")),
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45"), font=7),
     # Not in the playlist: the page plays it while the plasma API has activity.
     "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=20),

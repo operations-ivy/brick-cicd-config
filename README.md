@@ -338,14 +338,15 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   memory turn yellow at 85% and red at 95%, temperature at 158°F and 176°F,
   disk at 85% and 95%), and its CPU temperature in °F beside the bar. The header shows a red
   "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
-- The CRT window plays real terminal programs in turn, 10 minutes each by the
-  clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix,
-  pipes, a gallery of public-domain paintings drawn with chafa
-  (`brick-status/art/paintings/`, credits in its `CREDITS.md`), cbonsai,
-  rain and nyancat (tty-clock is available but not in the default list). The bezel says which. The window is a
+- The CRT window plays real terminal programs in turn, 6 hours each by the
+  clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix and
+  a gallery of public-domain paintings drawn with chafa
+  (`brick-status/art/paintings/`, credits in its `CREDITS.md`). While something
+  is building or deploying it shows that instead (`crt_activity.py`), and the
+  bezel says which. The window is a
   square-ish CRT frame about a quarter of the screen, with the three tiles
   stacked beside it and the vitals below; each program names a font size
-  (smaller shows more of programs that draw at a fixed size, like nyancat). Only names in
+  (smaller shows more of the paintings). Only names in
   `matrix.PROGRAMS` run, and ones that aren't installed are skipped. Each
   runs in a pseudo-terminal sized to the window; its output streams to the
   page as server-sent events and xterm.js draws it with its WebGL renderer
@@ -355,9 +356,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   orange, so the page's theme repaints its yellow); every other program is
   tinted by the page, which maps all 256 terminal colours to shades of the
   health colour by brightness. Measured on brick9000 at about 140x20 (whole
-  machine, ~30% with the board idle): pipes adds about 7 points, cmatrix 1,
-  the rest under 1. hollywood was tried and left out: its widgets held the
-  Pi at 96% whatever its settings (#28). It all runs only while the overview
+  machine, ~30% with the board idle): cmatrix adds about 1 point. It all runs
+  only while the overview
   is on screen, and not overnight.
 - It reads the front-panel buttons from the `gpio_keys` input device (grabbed,
   so presses don't reach Chromium) and drives the screen with `wlopm`. It

@@ -10,7 +10,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # the proxy redirects to the new ones.
 sudo apt-get install -y python3-evdev python3-libgpiod python3-yaml avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
-sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
+sudo apt-get install -y cmatrix chafa
 # RetroArch's menu uses the board's typeface (retroarch/retroarch.cfg).
 sudo apt-get install -y --no-install-recommends fonts-ibm-plex
 # Prometheus scrapes brick9000 like a node (README, "Metrics"): node-exporter

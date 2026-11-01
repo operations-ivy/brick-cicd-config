@@ -389,7 +389,7 @@ function crtProgram(s) {
   if (s.activity) activityUntil = now + ACTIVITY_HOLD_SECONDS;
   if (now < activityUntil && s.crt?.activity) return s.crt.activity;
   const list = s.crt?.programs?.length ? s.crt.programs : [{ name: "cmatrix", tint: false, font: 11 }];
-  const slot = Math.floor(now / 60 / (s.crt?.minutes || 10));
+  const slot = Math.floor(now / 60 / (s.crt?.minutes || 360));
   return list[slot % list.length];
 }
 
