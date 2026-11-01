@@ -198,7 +198,7 @@ class Brick9000Deploy(DeployScripts, unittest.TestCase):
         self.assertEqual(self.h.head, sha)
 
     def test_a_new_display_file_restarts_the_api_before_the_board(self):
-        self.h.commit("pass", "a display", touch="brick-plasma/displays/new.toml")
+        self.h.commit("pass", "a display", touch="brick-plasma/displays/new.yaml")
         self.h.deploy()
         commands = self.h.commands
         self.assertLess(commands.index("systemctl --user try-restart brick-plasma"),

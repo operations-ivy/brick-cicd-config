@@ -253,7 +253,7 @@ def solid(colour: Rgb, seconds: float = 0.0) -> list[Frame]:
     return [[colour] * WIDTH]
 
 
-# What a display can be made of (displays/*.toml, or a signal's "effect"). A
+# What a display can be made of (displays/*.yaml, or a signal's "effect"). A
 # new animation is a function above and a line here; its keyword arguments are
 # then a display's settings.
 EFFECTS = {

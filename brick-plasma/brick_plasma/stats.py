@@ -32,7 +32,7 @@ class Stats:
             "# HELP brick_plasma_signals Signals held now.",
             "# TYPE brick_plasma_signals gauge",
             f"brick_plasma_signals {signals}",
-            "# HELP brick_plasma_display_errors Problems found loading displays/*.toml.",
+            "# HELP brick_plasma_display_errors Problems found loading displays/*.yaml.",
             "# TYPE brick_plasma_display_errors gauge",
             f"brick_plasma_display_errors {display_errors}",
             "# HELP brick_plasma_showing 1 for the pattern on the lights.",

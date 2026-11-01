@@ -8,7 +8,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # Button input, the lights' GPIO pins (brick-plasma), and avahi-publish to
 # announce brick9000's old names (jenkins.local, brick-status.local), which
 # the proxy redirects to the new ones.
-sudo apt-get install -y python3-evdev python3-libgpiod avahi-utils
+sudo apt-get install -y python3-evdev python3-libgpiod python3-yaml avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
 sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
 # RetroArch's menu uses the board's typeface (retroarch/retroarch.cfg).

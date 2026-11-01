@@ -155,7 +155,7 @@ class ShippedDisplaysTest(unittest.TestCase):
         kinds = re.findall(r"'(\w+)'", re.search(r"def kinds = \[(.*?)\]", text).group(1))
         self.assertGreater(len(kinds), 5)
         for kind in kinds:
-            self.assertEqual(self.named[f"stage-{kind}"].file, "jenkins.toml")
+            self.assertEqual(self.named[f"stage-{kind}"].file, "jenkins.yaml")
 
     def test_the_board_and_deploys_only_ask_for_displays_that_exist(self):
         root = Path(__file__).resolve().parents[2]
@@ -187,103 +187,142 @@ class DropInTest(unittest.TestCase):
         (self.directory / name).write_text(text)
 
     def test_a_new_source_needs_only_a_file(self):
-        self.write("garage.toml", """
-[defaults]
-priority = 40
-ttl = 120
+        self.write("garage.yaml", """
+defaults:
+  priority: 40
+  ttl: 120
 
-[displays.door-open]
-effect = "chase"
-color = "#ff0000"
-seconds = 1.0
-tail = 2
+displays:
+  door-open:
+    effect: chase
+    color: "#ff0000"
+    seconds: 1.0
+    tail: 2
 
-[displays.door-shut]
-effect = "solid"
-color = [0, 255, 0]
-priority = 45
-slots = [3, 4]
+  door-shut:
+    effect: solid
+    color: [0, 255, 0]
+    priority: 45
+    slots: [3, 4]
 """)
         named, errors = displays.load(self.directory)
         self.assertEqual(errors, [])
         door = named["door-open"]
-        self.assertEqual((door.priority, door.ttl, door.file, len(door.frames)), (40, 120.0, "garage.toml", 60))
+        self.assertEqual((door.priority, door.ttl, door.file, len(door.frames)), (40, 120.0, "garage.yaml", 60))
         self.assertEqual(named["door-shut"].priority, 45)
         wire = named["door-shut"].frames[0]
         self.assertEqual(wire[4:8], bytes([0xFF, 0, 0, 0]))  # slot 0 dark
         self.assertEqual(wire[4 + 12 * 4:4 + 12 * 4 + 4], bytes([0xFF, 0, 255, 0]))  # slot 3 lit
 
     def test_a_display_without_defaults_gets_the_apis(self):
-        self.write("a.toml", '[displays.x]\neffect = "rainbow"\nseconds = 1\n')
+        self.write("a.yaml", "displays:\n  x:\n    effect: rainbow\n    seconds: 1\n")
         named, _ = displays.load(self.directory)
         self.assertEqual((named["x"].priority, named["x"].ttl), (signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL))
 
     def test_a_file_that_wont_parse_costs_only_itself(self):
-        self.write("a-broken.toml", "this is not [toml")
-        self.write("b-good.toml", '[displays.good]\neffect = "boil"\n')
+        self.write("a-broken.yaml", "displays: [not: closed")
+        self.write("b-good.yaml", "displays:\n  good:\n    effect: boil\n")
         named, errors = displays.load(self.directory)
         self.assertEqual(list(named), ["good"])
         self.assertEqual(len(errors), 1)
-        self.assertIn("a-broken.toml", errors[0])
+        self.assertIn("a-broken.yaml", errors[0])
+
+    def test_a_file_of_the_wrong_shape_costs_only_itself(self):
+        for name, text in (("a-empty.yaml", ""), ("b-list.yaml", "- one\n- two\n"),
+                           ("c-text.yaml", "just words\n"), ("d-displays.yaml", "displays: [x]\n"),
+                           ("e-binary.yaml", "\ufffe")):
+            self.write(name, text)
+        (self.directory / "f-not-utf8.yaml").write_bytes(b"displays: \xff\xfe\x00")
+        self.write("g-good.yaml", "displays:\n  good:\n    effect: boil\n")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(list(named), ["good"])
+        self.assertEqual(len(errors), 6, errors)
 
     def test_a_bad_display_costs_only_itself(self):
-        self.write("a.toml", """
-[displays.good]
-effect = "boil"
+        self.write("a.yaml", """
+displays:
+  good:
+    effect: boil
 
-[displays.no-effect]
-color = "#ff0000"
+  no-effect:
+    color: "#ff0000"
 
-[displays.bad-effect]
-effect = "sparkle"
+  bad-effect:
+    effect: sparkle
 
-[displays.bad-colour]
-effect = "solid"
-color = "mauve"
+  bad-colour:
+    effect: solid
+    color: mauve
 
-[displays.bad-setting]
-effect = "chase"
-color = "#ff0000"
-wobble = 3
+  bad-setting:
+    effect: chase
+    color: "#ff0000"
+    wobble: 3
 
-[displays.colour-for-rainbow]
-effect = "rainbow"
-color = "#ff0000"
+  colour-for-rainbow:
+    effect: rainbow
+    color: "#ff0000"
 
-[displays.bad-priority]
-effect = "boil"
-priority = 101
+  bad-priority:
+    effect: boil
+    priority: 101
 
-[displays.bad-ttl]
-effect = "boil"
-ttl = 99999
+  bad-ttl:
+    effect: boil
+    ttl: 99999
 
-[displays.too-long]
-effect = "boil"
-seconds = 3600
+  too-long:
+    effect: boil
+    seconds: 3600
 
-[displays.bad-slots]
-effect = "boil"
-slots = [10]
+  bad-slots:
+    effect: boil
+    slots: [10]
 
-[displays.bad-number]
-effect = "pulse"
-color = "#ff0000"
-low = "dim"
+  bad-number:
+    effect: pulse
+    color: "#ff0000"
+    low: dim
 """)
         named, errors = displays.load(self.directory)
         self.assertEqual(list(named), ["good"])
         self.assertEqual(len(errors), 10, errors)
 
-    def test_the_first_file_keeps_a_name_two_want(self):
-        self.write("a.toml", '[displays.same]\neffect = "boil"\n')
-        self.write("b.toml", '[displays.same]\neffect = "rainbow"\n')
+    def test_an_unquoted_colour_is_reported(self):
+        # Unquoted, # starts a comment: YAML sees no value at all.
+        self.write("a.yaml", "displays:\n  x:\n    effect: solid\n    color: #ff0000\n")
         named, errors = displays.load(self.directory)
-        self.assertEqual(named["same"].file, "a.toml")
-        self.assertIn("already defined in a.toml", errors[0])
+        self.assertEqual(named, {})
+        self.assertIn("quote", errors[0])
+
+    def test_an_unquoted_off_is_reported(self):
+        # Unquoted, YAML reads off, on, yes and no as true or false.
+        self.write("a.yaml", 'displays:\n  off:\n    effect: boil\n  "on":\n    effect: boil\n')
+        named, errors = displays.load(self.directory)
+        self.assertEqual(list(named), ["on"])
+        self.assertIn("quotes", errors[0])
+
+    def test_a_name_twice_in_one_file_costs_that_file(self):
+        self.write("a.yaml", "displays:\n  x:\n    effect: boil\n  x:\n    effect: rainbow\n")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(named, {})
+        self.assertIn("x appears 2 times", errors[0])
+
+    def test_a_file_cant_build_objects(self):
+        self.write("a.yaml", "displays: !!python/object/apply:os.getcwd []\n")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(named, {})
+        self.assertIn("a.yaml", errors[0])
+
+    def test_the_first_file_keeps_a_name_two_want(self):
+        self.write("a.yaml", "displays:\n  same:\n    effect: boil\n")
+        self.write("b.yaml", "displays:\n  same:\n    effect: rainbow\n")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(named["same"].file, "a.yaml")
+        self.assertIn("already defined in a.yaml", errors[0])
 
     def test_a_typo_in_defaults_is_reported(self):
-        self.write("a.toml", '[defaults]\npriorty = 90\n\n[displays.x]\neffect = "boil"\n')
+        self.write("a.yaml", "defaults:\n  priorty: 90\ndisplays:\n  x:\n    effect: boil\n")
         named, errors = displays.load(self.directory)
         self.assertIn("priorty", errors[0])
         self.assertEqual(named["x"].priority, signals.DEFAULT_PRIORITY)
@@ -547,7 +586,7 @@ class ApiTest(unittest.TestCase):
     def test_what_can_be_asked_for_is_listed(self):
         status, reply = self.call("GET", "/patterns")
         self.assertEqual(status, 200)
-        self.assertEqual(reply["patterns"]["stage-push"], {"priority": 50, "ttl": 30.0, "file": "jenkins.toml"})
+        self.assertEqual(reply["patterns"]["stage-push"], {"priority": 50, "ttl": 30.0, "file": "jenkins.yaml"})
         self.assertIn("chase", reply["effects"])
         self.assertEqual(reply["errors"], [])
 

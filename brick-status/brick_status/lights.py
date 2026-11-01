@@ -15,7 +15,7 @@ from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
 
 log = logging.getLogger(__name__)
 
-# A display's priority is in its file (brick-plasma/displays/board.toml). The
+# A display's priority is in its file (brick-plasma/displays/board.yaml). The
 # view buttons aren't a named display: over a build, under a deploy.
 PRIORITY_ACTIVE = 70
 

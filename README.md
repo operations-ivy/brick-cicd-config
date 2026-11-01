@@ -439,29 +439,34 @@ timeout and ignore the result, since brick9000 is optional.
 
 ### Adding a source
 
-Displays are drop-ins: one TOML file per source in `brick-plasma/displays/`,
+Displays are drop-ins: one YAML file per source in `brick-plasma/displays/`,
 and nothing else changes. A new source with special needs adds a file, merges
 it, and calls the API by display name. A deploy that changes the directory
 restarts brick-plasma.
 
-```toml
-# brick-plasma/displays/garage.toml
-[defaults]              # optional: for every display in this file
-priority = 40
-ttl = 120
+```yaml
+# brick-plasma/displays/garage.yaml
+defaults:               # optional: for every display in this file
+  priority: 40
+  ttl: 120
 
-[displays.door-open]    # the name a sender asks for: must be new
-effect = "chase"        # see below
-color = "#ff0000"       # "#rrggbb" or [r, g, b]
-seconds = 1.0           # one loop
-tail = 2                # any setting the effect takes
+displays:
+  door-open:            # the name a sender asks for: must be new
+    effect: chase       # see below
+    color: "#ff0000"    # "#rrggbb" or [r, g, b]
+    seconds: 1.0        # one loop
+    tail: 2             # any setting the effect takes
 
-[displays.door-shut]
-effect = "solid"
-color = "#00ff00"
-priority = 45           # overrides [defaults]; a sender's own overrides this
-slots = [3, 4]          # only these buttons (0-9); the rest stay dark
+  door-shut:
+    effect: solid
+    color: "#00ff00"
+    priority: 45        # overrides defaults; a sender's own overrides this
+    slots: [3, 4]       # only these buttons (0-9); the rest stay dark
 ```
+
+Two things to quote: a colour, since `#` otherwise starts a comment, and a
+display called `off`, `on`, `yes` or `no`, which YAML otherwise reads as true or
+false. Both are reported if you forget.
 
 | Effect | Settings besides `seconds` |
 | --- | --- |

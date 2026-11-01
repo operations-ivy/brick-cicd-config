@@ -1,6 +1,6 @@
 // Run brick-cicd-config's tests (scripts/test) in a throwaway pod on brick2000.
 // The pod runs this Jenkins image: it's already on brick2000, and has the git,
-// Python 3 and ssh the tests need. Also run nightly by test-all.
+// Python 3, PyYAML and ssh the tests need. Also run nightly by test-all.
 // param BRANCH=main Branch to test
 pipeline {
     agent {
