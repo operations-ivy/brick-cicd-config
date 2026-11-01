@@ -6,18 +6,18 @@
 plasma_url=${BRICK_PLASMA_URL:-http://127.0.0.1:8766}
 plasma_source=brick9000-${status_name:-image}
 
-plasma_signal() {  # <pattern> <ttl>
+plasma_signal() {  # <pattern> <ttl> <status for the board's CRT>
     curl -s -o /dev/null --max-time 1 -X PUT -H 'Content-Type: application/json' \
-        -d "{\"pattern\": \"$1\", \"ttl\": $2}" \
+        -d "{\"pattern\": \"$1\", \"ttl\": $2, \"show\": {\"title\": \"${status_name:+$status_name }$image\", \"status\": \"$3\", \"details\": {\"commit\": \"$ref\"}}}" \
         "$plasma_url/signals/$plasma_source" || true
 }
 
 write_status() {  # <building|succeeded|failed>
     case $1 in
         # The time limit covers a build killed outright: it never says it ended.
-        building) if [ "${status_name:-}" = deploy ]; then plasma_signal deploying 900
-                  else plasma_signal image-building 3600; fi ;;
-        succeeded) plasma_signal image-pushed 60 ;;
-        failed) plasma_signal image-failed 60 ;;
+        building) if [ "${status_name:-}" = deploy ]; then plasma_signal deploying 900 deploying
+                  else plasma_signal image-building 3600 building; fi ;;
+        succeeded) plasma_signal image-pushed 60 succeeded ;;
+        failed) plasma_signal image-failed 60 failed ;;
     esac
 }
