@@ -45,7 +45,7 @@ class Program:
 PROGRAMS = {
     # -b bold, -s screensaver mode, -C colour.
     "cmatrix": Program(("cmatrix", "-b", "-s", "-C", "{colour}"), tint=False),
-    "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery", "45"), font=7),
+    "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery"), font=7),
     # Not in the playlist: the page plays it while the plasma API has activity.
     "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=20),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
