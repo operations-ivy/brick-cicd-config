@@ -57,8 +57,15 @@ class Apa102Test(unittest.TestCase):
     def test_only_the_two_pins_are_ever_touched(self):
         regs = Registers()
         apa102.Chain(regs).write(apa102.encode([(255, 0, 170)] * 40))
-        self.assertEqual({mask for _, mask in regs.writes}, {1 << 14, 1 << 15})
+        self.assertEqual({mask for _, mask in regs.writes}, {0, 1 << 14, 1 << 15})  # 0 changes nothing
         self.assertEqual({r for r, _ in regs.writes}, {apa102.GPSET0, apa102.GPCLR0})
+
+    def test_every_edge_is_held(self):
+        regs = Registers()
+        apa102.Chain(regs).write(bytes(1))
+        edges = [i for i, (_, mask) in enumerate(regs.writes) if mask]
+        self.assertTrue(all(b - a == apa102.HOLD + 1 for a, b in zip(edges[:3], edges[1:3])))
+        self.assertEqual(len(regs.writes), 8 * (3 + 2 * apa102.HOLD))
 
     def test_the_clock_ends_low(self):
         regs = Registers()

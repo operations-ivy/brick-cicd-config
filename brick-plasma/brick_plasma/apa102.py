@@ -5,6 +5,8 @@ so every clock edge is software. Pimoroni's library takes one call and one
 time.sleep(0) per edge: about 220 ms a frame. Writing the GPIO set and clear
 registers takes about 0.5 ms (brick-cicd-config: measured on brick9000), and
 they only touch the bits they're given, so nothing else's pins can be hurt.
+At that speed, about 3 MHz, the chain misread a bit now and then (a button
+changing colour for a frame, wild at 60 fps), so each edge is now held.
 """
 
 DATA_PIN, CLOCK_PIN = 14, 15
@@ -17,6 +19,8 @@ GPIO_MEM = "/dev/gpiomem"
 # to latch. Whole bytes here, so 40.
 START, END = bytes(4), bytes(5)
 FULL = 0xE0 | 31  # the LED's own brightness: three marker bits, then full
+# Register writes that change nothing, after each edge: what sets the clock speed.
+HOLD = 4
 
 
 def encode(frame) -> bytes:
@@ -32,10 +36,15 @@ class Chain:
 
     def write(self, frame: bytes) -> None:
         regs, data, clock = self.regs, self.data, self.clock
+        hold = range(HOLD)
         for byte in frame:
             for bit in (128, 64, 32, 16, 8, 4, 2, 1):
                 regs[GPSET0 if byte & bit else GPCLR0] = data
+                for _ in hold:
+                    regs[GPCLR0] = 0
                 regs[GPSET0] = clock
+                for _ in hold:
+                    regs[GPCLR0] = 0
                 regs[GPCLR0] = clock
 
 
