@@ -671,7 +671,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "1 * max(brick_status_lights_state{state=\"idle\"}) + 2 * max(brick_status_lights_state{state=\"active\"}) + 3 * max(brick_status_lights_state{state=\"build\"}) + 4 * max(brick_status_lights_state{state=\"off\"})",
+              "expr": "1 * max(brick_status_lights_state{state=\"idle\"}) + 2 * max(brick_status_lights_state{state=\"active\"}) + 4 * max(brick_status_lights_state{state=\"off\"})",
               "legendFormat": "lights"
             }
           ],
@@ -702,11 +702,6 @@ data:
                       "text": "active",
                       "color": "green",
                       "index": 1
-                    },
-                    "3": {
-                      "text": "build",
-                      "color": "orange",
-                      "index": 2
                     },
                     "4": {
                       "text": "off",

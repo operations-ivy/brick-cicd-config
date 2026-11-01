@@ -1,0 +1,406 @@
+import json
+import re
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from brick_plasma import apa102, patterns, renderer, signals, stats, web
+
+JENKINS = Path(__file__).resolve().parents[2] / "jenkins"
+DARK = (b"dark",)
+
+
+class Clock:
+    now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def decode(writes, data_pin=14, clock_pin=15) -> bytes:
+    """What an LED would read: the data line at each rising clock edge."""
+    data, clock = 1 << data_pin, 1 << clock_pin
+    level, bits = 0, []
+    for register, mask in writes:
+        if mask == data:
+            level = 1 if register == apa102.GPSET0 else 0
+        elif mask == clock and register == apa102.GPSET0:
+            bits.append(level)
+    return bytes(int("".join(map(str, bits[i:i + 8])), 2) for i in range(0, len(bits), 8))
+
+
+class Registers:
+    def __init__(self):
+        self.writes = []
+
+    def __setitem__(self, register, mask):
+        self.writes.append((register, mask))
+
+
+class Apa102Test(unittest.TestCase):
+    def test_a_frame_is_framed_and_ordered_as_the_leds_want(self):
+        wire = apa102.encode([(1, 2, 3)] * 40)
+        self.assertEqual(len(wire), 4 + 40 * 4 + 5)
+        self.assertEqual(wire[:4], bytes(4))
+        self.assertEqual(wire[4:8], bytes([0xFF, 3, 2, 1]))  # marker and full brightness, then b, g, r
+        self.assertEqual(wire[-5:], bytes(5))
+
+    def test_the_clock_carries_every_bit_of_the_frame(self):
+        regs = Registers()
+        wire = apa102.encode([(200, 100, 50)] * 40)
+        apa102.Chain(regs).write(wire)
+        self.assertEqual(decode(regs.writes), wire)
+
+    def test_only_the_two_pins_are_ever_touched(self):
+        regs = Registers()
+        apa102.Chain(regs).write(apa102.encode([(255, 0, 170)] * 40))
+        self.assertEqual({mask for _, mask in regs.writes}, {1 << 14, 1 << 15})
+        self.assertEqual({r for r, _ in regs.writes}, {apa102.GPSET0, apa102.GPCLR0})
+
+    def test_the_clock_ends_low(self):
+        regs = Registers()
+        apa102.Chain(regs).write(bytes(1))
+        self.assertEqual(regs.writes[-1], (apa102.GPCLR0, 1 << 15))
+
+
+class PatternTest(unittest.TestCase):
+    def test_every_named_pattern_is_whole_frames(self):
+        for name, frames in patterns.named().items():
+            self.assertTrue(frames, name)
+            self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), name)
+            self.assertTrue(all(0 <= v <= 255 for f in frames for c in f for v in c), name)
+
+    def test_every_effect_works_in_any_colour(self):
+        for name, effect in patterns.EFFECTS.items():
+            frames = effect((10, 20, 30), 1.0)
+            self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), name)
+
+    def test_stage_patterns_are_whole_loops(self):
+        for kind, make in patterns.STAGES.items():
+            self.assertGreater(len(make()), 30, kind)
+
+    def test_every_jenkins_kind_has_its_pattern(self):
+        text = (JENKINS / "lib" / "plasma.groovy").read_text()
+        kinds = re.findall(r"'(\w+)'", re.search(r"def kinds = \[(.*?)\]", text).group(1))
+        self.assertEqual(sorted(kinds), sorted(patterns.STAGES))
+        for kind in kinds:
+            self.assertIn(f"stage-{kind}", patterns.named())
+
+    def test_the_board_and_deploys_only_ask_for_patterns_that_exist(self):
+        root = Path(__file__).resolve().parents[2]
+        lights = (root / "brick-status" / "brick_status" / "lights.py").read_text()
+        asked = set(re.findall(r'return "([a-z]+)"', lights)) | {"off"}
+        script = (root / "brick9000" / "build-status.sh").read_text()
+        asked |= set(re.findall(r"plasma_signal ([a-z-]+) \d+", script))
+        self.assertGreater(len(asked), 10, asked)  # the regexes still find them
+        self.assertLessEqual(asked, set(patterns.named()))
+
+    def test_nightly_is_a_seamless_eight_second_loop(self):
+        frames = patterns.nightly(8.0)
+        self.assertEqual(len(frames), 8 * patterns.FPS)
+        self.assertEqual(frames, patterns.nightly(8.0))  # seeded: the same on every start
+        for i in range(patterns.WIDTH):  # every LED changes
+            self.assertGreater(len({f[i] for f in frames}), 10, i)
+        self.assertIn(255, {v for f in frames for c in f for v in c})
+
+    def test_rainbow_and_flash_colours(self):
+        rainbow = patterns.BUILD["image-building"]()
+        self.assertEqual(len(rainbow), int(0.75 * patterns.FPS))
+        hues = {px for frame in rainbow for px in frame}
+        self.assertTrue(any(r > 200 for r, _, _ in hues) and any(g > 200 for _, g, _ in hues)
+                        and any(b > 200 for _, _, b in hues))
+        flashes = {px for frame in patterns.BUILD["image-pushed"]() for px in frame}
+        self.assertEqual(flashes, {patterns.GREEN, patterns.OFF})
+
+    def test_boil_bubbles_every_slot_on_its_own_beat(self):
+        frames = patterns.BUILD["deploying"]()
+        self.assertEqual(len(frames), 2 * patterns.FPS)
+        firsts = [patterns.LEDS_PER_SLOT * s for s in range(patterns.SLOTS)]
+        for i in firsts:
+            column = [frame[i] for frame in frames]
+            self.assertGreater(max(max(px) for px in column), 240)  # swells to full
+            self.assertLess(min(max(px) for px in column), 20)  # and pops near dark
+        self.assertGreater(len({frames[60][i] for i in firsts}), 5)  # many colours at once
+        pops = [min(range(len(frames)), key=lambda f: max(frames[f][i])) for i in firsts]
+        self.assertGreater(len(set(pops)), 3)  # not in step
+        for i in firsts:  # rolling: every slot pops at least three times a second
+            column = [max(frame[i]) for frame in frames]
+            self.assertGreaterEqual(sum(1 for f in range(len(column)) if column[f] < column[f - 1]), 6)
+        self.assertEqual(patterns.boil(2.0), frames)  # seeded
+
+    def test_buttons_light_only_the_slots_given(self):
+        frames = patterns.buttons({1: patterns.RED}, 1)
+        self.assertEqual(frames[0][4 * 5], patterns.OFF)
+        self.assertTrue(frames[0][4 * 1][0] > 0)
+
+    def test_a_busy_button_pulses_fully(self):
+        frames = patterns.buttons({3: patterns.GREEN}, 0, {3})
+        greens = {frame[4 * 3] for frame in frames}
+        self.assertIn(patterns.GREEN, greens)
+        self.assertLess(min(g for _, g, _ in greens), 50)
+
+
+class SignalsTest(unittest.TestCase):
+    def setUp(self):
+        self.changes = []
+        self.board = signals.Signals(on_change=lambda: self.changes.append(1))
+        self.a, self.b = (b"a",), (b"b",)
+
+    def label(self, now=0.0):
+        winner = self.board.winner(now)
+        return winner.source if winner else None
+
+    def test_the_highest_priority_wins_however_old(self):
+        self.board.put("high", "x", self.a, 80, 10, 0)
+        self.board.put("low", "x", self.b, 10, 10, 0)
+        self.assertEqual(self.label(), "high")
+
+    def test_among_equals_the_newest_wins(self):
+        self.board.put("one", "x", self.a, 50, 10, 0)
+        self.board.put("two", "x", self.b, 50, 10, 0)
+        self.assertEqual(self.label(), "two")
+
+    def test_a_heartbeat_extends_but_doesnt_jump_the_queue(self):
+        self.board.put("one", "x", self.a, 50, 10, 0)
+        self.board.put("two", "x", self.b, 50, 10, 0)
+        before = len(self.changes)
+        self.board.put("one", "x", self.a, 50, 10, 5)
+        self.assertEqual(self.label(5), "two")
+        self.assertEqual(len(self.changes), before)
+        self.assertEqual(self.label(14), "one")  # two ran out at 10; one lives to 15
+
+    def test_a_new_order_from_a_sender_is_news(self):
+        self.board.put("one", "x", self.a, 50, 10, 0)
+        self.board.put("two", "x", self.b, 50, 10, 0)
+        self.board.put("one", "x", self.b, 50, 10, 0)
+        self.assertEqual(self.label(), "one")
+
+    def test_a_sender_that_dies_runs_out(self):
+        self.board.put("gone", "x", self.a, 90, 5, 0)
+        self.assertEqual(self.label(4.9), "gone")
+        self.assertIsNone(self.label(5.0))
+
+    def test_delete_uncovers_what_was_underneath(self):
+        self.board.put("low", "x", self.a, 10, 10, 0)
+        self.board.put("high", "x", self.b, 90, 10, 0)
+        self.assertTrue(self.board.remove("high"))
+        self.assertEqual(self.label(), "low")
+        self.assertFalse(self.board.remove("high"))
+
+    def test_senders_are_limited_but_expired_ones_dont_count(self):
+        for i in range(signals.MAX_SIGNALS):
+            self.board.put(f"s{i}", "x", self.a, 50, 10, 0)
+        with self.assertRaises(signals.Full):
+            self.board.put("more", "x", self.a, 50, 10, 0)
+        self.board.put("s0", "x", self.b, 50, 10, 0)  # one already held still can
+        self.board.put("more", "x", self.a, 50, 10, 11)
+
+
+class RecordingChain:
+    def __init__(self):
+        self.frames = []
+
+    def write(self, frame):
+        self.frames.append(frame)
+
+
+class RendererTest(unittest.TestCase):
+    def setUp(self):
+        self.clock = Clock()
+        self.chain = RecordingChain()
+        self.stats = stats.Stats()
+        self.board = signals.Signals()
+        self.render = renderer.Renderer(self.board, self.chain, DARK, self.stats, clock=self.clock)
+        self.loop = tuple(bytes([i]) for i in range(120))
+
+    def put(self, source, frames, priority=50, ttl=10):
+        self.board.put(source, "x", frames, priority, ttl, self.clock.now)
+
+    def test_dark_with_nothing_to_show(self):
+        self.assertEqual(self.render.step(), renderer.STILL_SECONDS)
+        self.assertEqual(self.chain.frames, [b"dark"])
+
+    def test_a_new_signal_starts_from_its_first_frame(self):
+        self.render.step()
+        self.put("a", self.loop)
+        self.clock.now += 0.1
+        self.assertEqual(self.render.step(), renderer.FRAME_SECONDS)
+        self.assertEqual(self.chain.frames[-1], self.loop[0])
+
+    def test_frames_follow_the_clock_and_loop(self):
+        self.put("a", self.loop)
+        self.render.step()
+        self.clock.now += 0.5
+        self.render.step()
+        self.assertEqual(self.chain.frames[-1], self.loop[30])
+        self.clock.now += 2.0
+        self.render.step()
+        self.assertEqual(self.chain.frames[-1], self.loop[30])  # 2 s is one whole loop
+
+    def test_a_heartbeat_doesnt_restart_the_animation(self):
+        self.put("a", self.loop)
+        self.render.step()
+        self.clock.now += 0.5
+        self.put("a", self.loop)
+        self.render.step()
+        self.assertEqual(self.chain.frames[-1], self.loop[30])
+
+    def test_a_frame_is_not_written_twice_within_its_time(self):
+        self.put("a", self.loop)
+        self.render.step()
+        self.render.step()
+        self.assertEqual(len(self.chain.frames), 1)
+
+    def test_a_still_pattern_is_refreshed_only_now_and_then(self):
+        self.put("a", (b"still",))
+        self.render.step()
+        self.clock.now += 0.01
+        self.render.step()
+        self.assertEqual(len(self.chain.frames), 1)
+        self.clock.now += renderer.STILL_SECONDS
+        self.render.step()
+        self.assertEqual(len(self.chain.frames), 2)
+
+    def test_when_a_signal_runs_out_the_next_one_shows(self):
+        self.put("under", (b"under",), priority=10, ttl=100)
+        self.put("over", (b"over",), priority=90, ttl=1)
+        self.render.step()
+        self.assertEqual(self.chain.frames[-1], b"over")
+        self.clock.now += 1
+        self.render.step()
+        self.assertEqual(self.chain.frames[-1], b"under")
+
+    def test_a_new_signal_cuts_the_wait_short(self):
+        board = signals.Signals(on_change=lambda: render.wake.set())
+        render = renderer.Renderer(board, self.chain, DARK, self.stats)
+        stop = threading.Event()
+        thread = threading.Thread(target=render.run, args=(stop,), daemon=True)
+        thread.start()
+        written = threading.Event()
+        self.chain.write = lambda frame: written.set() if frame == b"now" else None
+        board.put("a", "x", (b"now",), 50, 10, render.clock())
+        # Far less than STILL_SECONDS, which it would wait without the wake.
+        self.assertTrue(written.wait(renderer.STILL_SECONDS / 5))
+        stop.set()
+        render.wake.set()
+        thread.join(2)
+
+
+class ApiTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = web.Catalog()
+
+    def setUp(self):
+        self.clock = Clock()
+        self.stats = stats.Stats()
+        self.board = signals.Signals()
+        self.server = web.make_server("127.0.0.1", 0, self.catalog, self.board, self.stats, clock=self.clock)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def call(self, method, path, body=None, raw=None):
+        data = raw if raw is not None else None if body is None else json.dumps(body).encode()
+        request = urllib.request.Request(f"http://127.0.0.1:{self.server.server_port}{path}", data, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as r:
+                text = r.read()
+                return r.status, json.loads(text) if r.headers.get_content_type() == "application/json" else text
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def showing(self):
+        return self.call("GET", "/")[1]["showing"]
+
+    def test_put_shows_a_named_pattern(self):
+        status, reply = self.call("PUT", "/signals/job-1", {"pattern": "stage-test", "priority": 60, "ttl": 90})
+        self.assertEqual(status, 200)
+        self.assertEqual(reply, {"source": "job-1", "pattern": "stage-test", "priority": 60, "ttl": 90.0})
+        self.assertEqual(self.showing(), {"source": "job-1", "pattern": "stage-test", "priority": 60,
+                                          "expires_in": 90.0})
+        winner = self.board.winner(self.clock.now)
+        self.assertIs(winner.frames, self.catalog.named["stage-test"])
+
+    def test_the_defaults(self):
+        self.call("PUT", "/signals/a", {"pattern": "calm"})
+        shown = self.showing()
+        self.assertEqual((shown["priority"], shown["expires_in"]), (signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL))
+
+    def test_any_colour_in_any_effect(self):
+        self.assertEqual(self.call("PUT", "/signals/a", {"color": "#ff8000"})[0], 200)
+        first = self.board.winner(self.clock.now).frames
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0][4:8], bytes([0xFF, 0, 0x80, 0xFF]))
+        self.assertEqual(self.call("PUT", "/signals/b", {"color": [0, 0, 255], "effect": "chase", "seconds": 1})[0], 200)
+        self.assertEqual(len(self.board.winner(self.clock.now).frames), patterns.FPS)
+
+    def test_the_same_custom_request_is_a_repeat_not_news(self):
+        self.call("PUT", "/signals/a", {"color": [1, 2, 3], "effect": "pulse"})
+        first = self.board.winner(self.clock.now).frames
+        self.call("PUT", "/signals/a", {"color": [1, 2, 3], "effect": "pulse"})
+        self.assertIs(self.board.winner(self.clock.now).frames, first)
+
+    def test_buttons(self):
+        body = {"buttons": {"colors": {"1": [255, 0, 0], "3": "#00ff00"}, "selected": 1, "busy": [3]}}
+        self.assertEqual(self.call("PUT", "/signals/board", body)[0], 200)
+        winner = self.board.winner(self.clock.now)
+        self.assertEqual((winner.label, len(winner.frames)), ("buttons", 2 * patterns.FPS))
+
+    def test_delete_and_deleting_again(self):
+        self.call("PUT", "/signals/a", {"pattern": "calm"})
+        self.assertEqual(self.call("DELETE", "/signals/a")[0], 204)
+        self.assertIsNone(self.showing())
+        self.assertEqual(self.call("DELETE", "/signals/a")[0], 204)
+
+    def test_refused_without_touching_the_lights(self):
+        for body in ({}, {"pattern": "nope"}, {"pattern": 7}, {"pattern": "calm", "color": [1, 2, 3]},
+                     {"color": "red"}, {"color": [1, 2]}, {"color": [1, 2, 256]}, {"color": [1, 2, True]},
+                     {"color": [1, 2, 3], "effect": "nope"}, {"color": [1, 2, 3], "seconds": "long"},
+                     {"pattern": "calm", "ttl": "x"}, {"pattern": "calm", "priority": None},
+                     {"buttons": "x"}, {"buttons": {"colors": {"99": [1, 2, 3]}}},
+                     {"buttons": {"colors": {}, "busy": 3}}, {"buttons": {"colors": {"x": [1, 2, 3]}}}):
+            self.assertEqual(self.call("PUT", "/signals/a", body)[0], 400, body)
+        self.assertEqual(self.call("PUT", "/signals/a", raw=b"not json")[0], 400)
+        self.assertEqual(self.call("PUT", "/signals/a", raw=b"[1]")[0], 400)
+        self.assertIsNone(self.showing())
+
+    def test_a_bad_source_or_path_is_a_404(self):
+        self.assertEqual(self.call("PUT", "/signals/a b".replace(" ", "%20"), {"pattern": "calm"})[0], 404)
+        self.assertEqual(self.call("PUT", "/signals/" + "x" * 65, {"pattern": "calm"})[0], 404)
+        self.assertEqual(self.call("PUT", "/elsewhere", {"pattern": "calm"})[0], 404)
+        self.assertEqual(self.call("GET", "/elsewhere")[0], 404)
+
+    def test_an_oversized_body_is_refused(self):
+        self.assertEqual(self.call("PUT", "/signals/a", raw=b" " * (web.MAX_BODY + 1))[0], 400)
+
+    def test_time_limits_are_capped(self):
+        self.call("PUT", "/signals/a", {"pattern": "calm", "ttl": 10 ** 9})
+        self.assertEqual(self.showing()["expires_in"], signals.MAX_TTL)
+
+    def test_too_many_senders(self):
+        for i in range(signals.MAX_SIGNALS):
+            self.board.put(f"s{i}", "x", (b"",), 50, 10, self.clock.now)
+        self.assertEqual(self.call("PUT", "/signals/more", {"pattern": "calm"})[0], 429)
+
+    def test_what_can_be_asked_for_is_listed(self):
+        status, reply = self.call("GET", "/patterns")
+        self.assertEqual(status, 200)
+        self.assertIn("stage-push", reply["patterns"])
+        self.assertIn("off", reply["patterns"])
+        self.assertIn("chase", reply["effects"])
+
+    def test_metrics_and_health(self):
+        self.assertEqual(self.call("GET", "/healthz")[0], 200)
+        self.call("PUT", "/signals/a", {"pattern": "calm"})
+        self.stats.showing = "calm"
+        text = self.call("GET", "/metrics")[1].decode()
+        self.assertIn("brick_plasma_signals 1", text)
+        self.assertIn('brick_plasma_showing{pattern="calm"} 1', text)
+        self.assertIn('brick_plasma_requests_total{code="200"}', text)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -5,10 +5,10 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
-# Button input (the plasma daemon itself is already installed), and
-# avahi-publish to announce brick9000's old names (jenkins.local,
-# brick-status.local), which the proxy redirects to the new ones.
-sudo apt-get install -y python3-evdev avahi-utils
+# Button input, the lights' GPIO pins (brick-plasma), and avahi-publish to
+# announce brick9000's old names (jenkins.local, brick-status.local), which
+# the proxy redirects to the new ones.
+sudo apt-get install -y python3-evdev python3-libgpiod avahi-utils
 # The overview's CRT window plays these in turn (README, "brick-status").
 sudo apt-get install -y cmatrix pipes-sh cbonsai tty-clock nyancat bsdgames chafa
 # RetroArch's menu uses the board's typeface (retroarch/retroarch.cfg).
@@ -28,9 +28,11 @@ if [ "$(cat /etc/default/prometheus-node-exporter 2>/dev/null)" != "$node_args" 
 fi
 sudo systemctl enable --now prometheus-node-exporter
 
-# The plasma daemon (root) only loads patterns from /etc/plasma/; brick-status
-# (zaphod) writes its own into this subdirectory.
-sudo install -d -o "$USER" -g "$USER" /etc/plasma/brick-status
+# brick-plasma owns the button lights now: Pimoroni's daemon must let go of
+# the pins. Its package and files stay; disabled, not removed.
+if systemctl is-enabled --quiet plasma 2>/dev/null; then
+    sudo systemctl disable --now plasma
+fi
 
 mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 [ -f ~/.config/brick-status/env ] || cp "$here/brick-status.env.example" ~/.config/brick-status/env
@@ -41,7 +43,7 @@ mkdir -p ~/.config/brick-status ~/.config/systemd/user ~/.config/labwc
 topic=~/.config/brick-status/ntfy_topic
 [ -s "$topic" ] || [ -e ~/.config/brick-status/pages-paused ] ||
     (umask 077 && python3 -c 'import secrets; print("brick-" + secrets.token_urlsafe(30))' >"$topic")
-cp "$here/brick-status.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
+cp "$here/brick-status.service" "$here/brick-plasma.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
     ~/.config/systemd/user/
@@ -149,8 +151,8 @@ fi
 
 systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
-systemctl --user enable brick-status
-systemctl --user restart brick-status
+systemctl --user enable brick-plasma brick-status
+systemctl --user restart brick-plasma brick-status
 systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer
 systemctl --user enable brick-retro
 systemctl --user restart brick-retro

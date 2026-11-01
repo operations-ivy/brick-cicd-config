@@ -1,0 +1,15 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# On the host, not the cluster: it drives this machine's GPIO pins. zaphod is
+# in the gpio group, so it needs no root. Replaces Pimoroni's plasma.service.
+[Unit]
+Description=brick-plasma: the button lights' API
+
+[Service]
+WorkingDirectory=%h/brick-cicd-config/brick-plasma
+ExecStart=/usr/bin/python3 -m brick_plasma
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -5,7 +5,6 @@ device, with systemctl (and brick9000's proxy/retire) replaced by recorders.
 Each commit carries a RESULT file; its scripts/test passes only when RESULT
 says "pass", so the tests can make a branch good or bad."""
 
-import json
 import os
 import shutil
 import subprocess
@@ -46,7 +45,8 @@ class DeployHarness:
         env_dir.mkdir(parents=True)
         self.env_file = env_dir / "env"
         self.follow("main")
-        self.path = fake_commands(self.tmp / "bin", {"systemctl": f'echo "systemctl $*" >> {self.log}\n'})
+        self.path = fake_commands(self.tmp / "bin", {"systemctl": f'echo "systemctl $*" >> {self.log}\n',
+                                                     "curl": f'echo "curl $*" >> {self.log}\n'})
 
     def commit(self, result: str, message: str, branch: str = "main", touch: str | None = None) -> str:
         if branch != "main":
@@ -74,7 +74,8 @@ class DeployHarness:
         self.env_file.write_text(f"BRICK_DEPLOY_BRANCH={branch}\n")
 
     def deploy(self) -> subprocess.CompletedProcess:
-        env = {**os.environ, "HOME": str(self.home), "PATH": self.path, "XDG_STATE_HOME": str(self.home / "state")}
+        env = {**os.environ, "HOME": str(self.home), "PATH": self.path, "XDG_STATE_HOME": str(self.home / "state"),
+               "BRICK_DEPLOY_MIN_SECONDS": "0"}
         env.pop("XDG_CONFIG_HOME", None)
         return subprocess.run([str(self.device / self.host / "deploy")], capture_output=True, text=True, env=env)
 
@@ -172,19 +173,36 @@ class Brick1982Deploy(DeployScripts, unittest.TestCase):
 class Brick9000Deploy(DeployScripts, unittest.TestCase):
     host, service = "brick9000", "brick-status"
 
+    def signals(self):
+        return [c for c in self.h.commands if c.startswith("curl ")]
+
     def test_the_lights_see_the_deploy_and_its_result(self):
-        sha = self.h.commit("pass", "second")
+        self.h.commit("pass", "second")
         self.h.deploy()
-        status = json.loads((self.h.home / "state" / "brick-build" / "deploy.json").read_text())
-        self.assertEqual((status["state"], status["image"]), ("succeeded", "brick9000"))
-        self.assertEqual(status["ref"], sha[:7])
-        self.assertIn("finished", status)
+        boil, result = self.signals()
+        self.assertIn('"pattern": "deploying"', boil)
+        self.assertIn('"pattern": "image-pushed"', result)
+        self.assertIn("/signals/brick9000-deploy", result)
+        self.assertIn("--max-time 1", result)
 
     def test_a_failed_deploy_shows_as_failed(self):
         self.h.commit("fail", "bad")
         self.h.deploy()
-        status = json.loads((self.h.home / "state" / "brick-build" / "deploy.json").read_text())
-        self.assertEqual(status["state"], "failed")
+        self.assertIn('"pattern": "image-failed"', self.signals()[-1])
+
+    def test_the_lights_being_down_never_fails_a_deploy(self):
+        fake_commands(self.h.tmp / "bin", {"curl": "exit 7\n"})
+        sha = self.h.commit("pass", "second")
+        result = self.h.deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.h.head, sha)
+
+    def test_the_api_restarts_before_the_board_that_calls_it(self):
+        self.h.commit("pass", "second")
+        self.h.deploy()
+        commands = self.h.commands
+        self.assertLess(commands.index("systemctl --user try-restart brick-plasma"),
+                        commands.index("systemctl --user restart brick-status"))
 
     def test_a_proxy_change_retires_brick9000s_proxy(self):
         # The front door runs on the cluster since 2026-10-17: a proxy change

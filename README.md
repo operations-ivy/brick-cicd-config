@@ -12,7 +12,8 @@ shows how that's going.
 
 | Where | What | Why there |
 | --- | --- | --- |
-| `brick9000` (standalone host) | Kiosk display, `brick-status` daemon, button lights | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
+| `brick9000` (standalone host) | Kiosk display, `brick-status` daemon | Needs the screen and GPIO buttons; must keep working when the cluster doesn't |
+| `brick9000` (standalone host) | `brick-plasma`: the button lights' API | Drives this machine's GPIO pins |
 | `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
@@ -84,11 +85,10 @@ script in git that runs from anywhere, not a Jenkins job.
 - **The plasma library drives the cabinet's buttons.** `jenkins/lib/*.groovy`
   is a shared library the seed puts ahead of every job's pipeline (no Jenkins
   library plugin source to fetch: it's baked into the image like the jobs).
-  `steps { script { plasma('test') { ... } } }` marks the running build with
-  what it's doing (its description becomes `plasma:test` for the block's
-  length). brick-status reads the mark from running builds as it polls
-  Jenkins and lights that stage's pattern (README, "brick-status", lights):
-  a pull, so it works from agent pods, which can't reach brick9000. Kinds:
+  `steps { script { plasma('test') { ... } } }` tells
+  [the plasma API](#the-plasma-api) what the build is doing for the block's
+  length, at once, and marks the build's description `plasma:test` for the
+  board's Builds view. Kinds:
   `checkout`, `install`, `test`, `verify`, `build`, `push`, `deploy`.
 - **Reproducible images.** `build-image` and `verify-images` share one recipe
   (`lib/build.groovy`): rootless BuildKit pinned by digest,
@@ -358,8 +358,8 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   Pi at 96% whatever its settings (#28). It all runs only while the overview
   is on screen, and not overnight.
 - It reads the front-panel buttons from the `gpio_keys` input device (grabbed,
-  so presses don't reach Chromium) and drives the screen with `wlopm` and the
-  button lights through the plasma daemon's FIFO, `/tmp/plasma`.
+  so presses don't reach Chromium) and drives the screen with `wlopm`. It
+  tells [the plasma API](#the-plasma-api) what the button lights should show.
 
 The board has three modes:
 
@@ -393,29 +393,85 @@ Idle light patterns, highest priority first:
 
 | Pattern | Event |
 | --- | --- |
-| `nightly` | the show, while Jenkins' nightly `test-all` runs: each button's four LEDs spin a colour wheel, a white-hot comet sweeps the chain trailing the spectrum, fireworks burst on random buttons, and it all breathes (outranks everything, for the few minutes it runs) |
+| `nightly` | the show, while Jenkins' nightly `test-all` runs: each button's four LEDs spin a colour wheel, a white-hot comet sweeps the chain trailing the spectrum, fireworks burst on random buttons, and it all breathes (outranks a build's stages, for the few minutes it runs) |
 | `alert` | red pulse: anything failing |
-| `stage-<kind>` | a running Jenkins build marked by the plasma library: `checkout` a cyan comet streaming along the chain, `install` an amber bar filling, `test` a green scanner swinging end to end, `verify` purple heads racing in from both ends to a white flash, `build` the rainbow, `push` blue waves rushing out, `deploy` the boil; with several, the stage furthest along wins |
-| `building` | amber chase: a Jenkins job is running |
+| `building` | amber chase: a Jenkins job is running that's told the lights nothing |
 | `uploading` | green pulse: wigle-sync is uploading |
 | `warn` | slow amber pulse: something degraded |
 | `unknown` | grey pulse: no data (e.g. Prometheus unreachable) |
 | `calm` | slow green (0 255 0) breathing: all good |
 
-A deploy or an image build on brick9000 itself (below) takes over the lights
-in idle and active mode. While brick9000 deploys a new commit, `deploying`
-boils the buttons at a rolling boil: each one swells in a random colour on its
-own quick beat (a bubble every 0.13-0.33 s) and pops dark, a new colour each
-time. An image build alone flashes `image-building`
-rainbow. Either way, `image-pushed` then flashes bright green or `image-failed`
-pulses red for a minute (`BRICK_STATUS_BUILD_RESULT_SECONDS`). A deploy
-outranks an image build, so the buttons boil until the whole deploy is done,
-and for at least 10 seconds (`BRICK_STATUS_DEPLOY_MIN_SECONDS`) so a deploy with
-nothing to rebuild is still seen; its result follows for the usual minute.
+## The plasma API
 
-The patterns are PNGs the daemon writes into `/etc/plasma/brick-status/` at
-startup (40 pixels wide: 10 button slots of 4 LEDs; one row per frame at
-60fps), so changing one needs only a restart, not a reinstall.
+`brick-plasma` owns the button lights: 40 APA102 LEDs, 10 slots of 4. It runs on
+brick9000 and takes orders from anywhere on the LAN, at
+`http://plasma.brick.nozdormu.cloud` through the cluster's front door (plain
+HTTP, so a sender has no TLS handshake to wait for). There's no login: like
+the volume dial's API it's LAN-only, and the worst a caller can do is change
+a colour.
+
+Each sender holds one signal under a name of its own. The highest priority
+shows; among equals, the newest. It reaches the LEDs within a frame of
+arriving (a sixtieth of a second).
+
+```sh
+# Show a pattern for up to 30 s, or until replaced.
+curl -m 1 -X PUT http://plasma.brick.nozdormu.cloud/signals/my-job \
+     -d '{"pattern": "stage-test", "ttl": 30}'
+# Any colour, still or with an effect.
+curl -m 1 -X PUT http://plasma.brick.nozdormu.cloud/signals/my-job \
+     -d '{"color": "#ff8000", "effect": "chase", "seconds": 1.5, "priority": 60}'
+# Done: whatever's underneath shows again.
+curl -m 1 -X DELETE http://plasma.brick.nozdormu.cloud/signals/my-job
+```
+
+| Call | What it does |
+| --- | --- |
+| `PUT /signals/<source>` | Hold a signal. Exactly one of `pattern`, `color` (`[r, g, b]` or `"#rrggbb"`, with `effect` and `seconds`) or `buttons`, plus `priority` (0-100, default 50) and `ttl` (seconds, default 30, at most 3600). A repeat of the same signal only extends its time |
+| `DELETE /signals/<source>` | Let it go |
+| `GET /` | What's showing and every signal held |
+| `GET /patterns` | The pattern and effect names |
+| `GET /metrics`, `GET /healthz` | Prometheus' job `brick-plasma`; up or not |
+
+**Every signal has a time limit**, so a sender that dies can't leave the lights
+stuck. **Lights are never worth failing a job for**: give every call a short
+timeout and ignore the result, since brick9000 is optional.
+
+Who uses which priority:
+
+| Priority | Sender | Shows |
+| --- | --- | --- |
+| 100 | `board` | off, in quiet hours (nothing else gets through) |
+| 80 | `brick9000-deploy`, `brick9000-image` | a deploy or image build on brick9000 itself: `deploying` boils the buttons, at least 10 s so a quick one is seen; `image-building`, then `image-pushed` or `image-failed` for a minute |
+| 70 | `board` | a button was pressed: each view's button in its health colour |
+| 60 | `board` | `nightly` |
+| 50 | `jenkins-<job>` | a stage of a build (below), and any sender that doesn't say |
+| 10 | `board` | the idle patterns above |
+
+The board repeats its signal every 10 s, so its 30 s limit only runs out if
+brick-status dies; with no signal at all the lights are dark. A stage outranks
+`alert` on purpose: the lights show what's happening now, and the alert is back
+the moment the build ends.
+
+Jenkins' stages, from `plasma('<kind>') { ... }` (`jenkins/lib/plasma.groovy`):
+
+| Kind | Pattern |
+| --- | --- |
+| `checkout` | `stage-checkout`: a cyan comet streaming along the chain |
+| `install` | `stage-install`: an amber bar filling |
+| `test` | `stage-test`: a green scanner swinging end to end |
+| `verify` | `stage-verify`: purple heads racing in from both ends to a white flash |
+| `build` | `stage-build`: the rainbow |
+| `push` | `stage-push`: blue waves rushing out |
+| `deploy` | `stage-deploy`: the boil |
+
+Why not a library: Pimoroni's `plasmalights` takes a call and a `time.sleep(0)`
+for every clock edge, about 220 ms a frame and a third of a core. The Picade
+wires the LEDs to GPIO 14 and 15, which no SPI peripheral reaches, so the
+SPI-based APA102 libraries can't help either. `brick_plasma/apa102.py` claims
+the two pins through libgpiod and writes the GPIO set and clear registers
+directly, about 0.5 ms a frame. It replaces Pimoroni's `plasma.service`, which
+install.sh disables.
 
 ### Alerts
 

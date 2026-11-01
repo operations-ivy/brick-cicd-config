@@ -7,14 +7,15 @@ import sys
 import threading
 import time as pytime
 import unittest
+import json
 import urllib.error
 import urllib.request
 import zlib
 from datetime import datetime, time
 from pathlib import Path
 
-from brick_status import (board_metrics, build, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify,
-                          patterns, units, volume, web)
+from brick_status import (board_metrics, jobs, checks, crt_gallery, host, lights, matrix, metrics, notify,
+                          units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -159,124 +160,6 @@ class IdlePatternTest(unittest.TestCase):
         self.assertEqual(lights.idle_pattern([]), "unknown")
         self.assertEqual(lights.idle_pattern([check("cluster", "ok")]), "calm")
 
-    def test_every_idle_pattern_exists(self):
-        for states in (["fail"], ["warn"], ["ok"], []):
-            self.assertIn(lights.idle_pattern([check("cluster", s) for s in states]), patterns.IDLE)
-
-
-class PatternTest(unittest.TestCase):
-    def test_png_is_valid_rgb(self):
-        frames = patterns.IDLE["building"]()
-        data = patterns.png(frames)
-        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
-        width, height, depth, colour = struct.unpack(">IIBB", data[16:26])
-        self.assertEqual((width, height, depth, colour), (patterns.WIDTH, len(frames), 8, 2))
-        idat_len = struct.unpack(">I", data[33:37])[0]
-        raw = zlib.decompress(data[41:41 + idat_len])
-        self.assertEqual(len(raw), height * (1 + width * 3))
-
-    def test_active_frames_light_only_view_buttons(self):
-        frames = lights.active_frames({"builds": "fail"}, VIEWS, [0, 1, 2, 3, 4, 5], selected_view=1)
-        first = frames[0]
-        self.assertEqual(first[4 * 5], patterns.OFF)  # button 6 has no view
-        r, g, b = first[4 * 1]
-        self.assertTrue(r > 0 and g == 0)  # builds failing: red
-
-    def test_busy_button_pulses_green(self):
-        frames = lights.active_frames({"wigle": "active"}, VIEWS, [0, 1, 2, 3], selected_view=0)
-        greens = {frame[4 * 3] for frame in frames}
-        self.assertIn(patterns.GREEN, greens)
-        self.assertTrue(all(r == 0 and b == 0 for r, _, b in greens))
-        self.assertLess(min(g for _, g, _ in greens), 50)
-
-
-class BuildLightsTest(unittest.TestCase):
-    def pattern(self, status, now=1000.0, alive=True, **kw):
-        import json
-        import os
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "status.json")
-            if status is not None:
-                with open(path, "w") as f:
-                    json.dump(status, f)
-            return build.light_pattern(path, now, result_seconds=60, alive=lambda pid: alive, **kw)
-
-    def test_building_shows_rainbow_while_the_build_runs(self):
-        status = {"state": "building", "pid": 123, "started": 900}
-        self.assertEqual(self.pattern(status), "image-building")
-        self.assertIsNone(self.pattern(status, alive=False))  # killed without a result
-
-    def test_deploy_boils_while_it_runs(self):
-        status = {"state": "building", "pid": 123, "started": 900}
-        self.assertEqual(self.pattern(status, running="deploying"), "deploying")
-        done = {**status, "state": "succeeded", "finished": 990}
-        self.assertEqual(self.pattern(done, running="deploying"), "image-pushed")
-
-    def test_quick_deploy_boils_for_the_minimum(self):
-        # A 3-second deploy: started at 1000, finished at 1003.
-        done = {"state": "succeeded", "pid": 123, "started": 1000, "finished": 1003}
-        kw = {"running": "deploying", "min_running_seconds": 10}
-        self.assertEqual(self.pattern(done, now=1005, **kw), "deploying")
-        self.assertEqual(self.pattern(done, now=1011, **kw), "image-pushed")
-        self.assertEqual(self.pattern(done, now=1069, **kw), "image-pushed")
-        self.assertIsNone(self.pattern(done, now=1071, **kw))
-        failed = {**done, "state": "failed"}
-        self.assertEqual(self.pattern(failed, now=1005, **kw), "deploying")
-        self.assertEqual(self.pattern(failed, now=1011, **kw), "image-failed")
-
-    def test_long_deploy_result_counts_from_finish(self):
-        done = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
-        kw = {"running": "deploying", "min_running_seconds": 10}
-        self.assertEqual(self.pattern(done, now=1000, **kw), "image-pushed")
-        self.assertIsNone(self.pattern(done, now=1051, **kw))
-
-    def test_result_shows_for_a_while_then_stops(self):
-        ok = {"state": "succeeded", "pid": 123, "started": 900, "finished": 990}
-        self.assertEqual(self.pattern(ok), "image-pushed")
-        self.assertIsNone(self.pattern(ok, now=1051))
-        failed = {**ok, "state": "failed"}
-        self.assertEqual(self.pattern(failed), "image-failed")
-
-    def test_no_or_bad_status_file(self):
-        self.assertIsNone(self.pattern(None))
-        self.assertIsNone(self.pattern({"state": "unknown"}))
-
-    def test_every_build_pattern_exists(self):
-        for name in ("deploying", "image-building", "image-pushed", "image-failed"):
-            self.assertIn(name, patterns.BUILD)
-
-    def test_rainbow_and_flash_colours(self):
-        # One full turn of the rainbow every 0.75s.
-        self.assertEqual(len(patterns.BUILD["image-building"]()), int(0.75 * patterns.FPS))
-        hues = {px for frame in patterns.BUILD["image-building"]() for px in frame}
-        self.assertTrue(any(r > 200 for r, _, _ in hues) and any(g > 200 for _, g, _ in hues)
-                        and any(b > 200 for _, _, b in hues))
-        flashes = {px for frame in patterns.BUILD["image-pushed"]() for px in frame}
-        self.assertEqual(flashes, {patterns.GREEN, patterns.OFF})
-
-    def test_boil_bubbles_every_slot_on_its_own_beat(self):
-        frames = patterns.BUILD["deploying"]()
-        self.assertEqual(len(frames), 2 * patterns.FPS)
-        firsts = [patterns.LEDS_PER_SLOT * s for s in range(patterns.SLOTS)]
-        for i in firsts:
-            column = [frame[i] for frame in frames]
-            # Swells to full brightness and drops back near dark (the pop).
-            self.assertGreater(max(max(px) for px in column), 240)
-            self.assertLess(min(max(px) for px in column), 20)
-        # Many colours at once, and the slots don't pop in step.
-        self.assertGreater(len({frames[60][i] for i in firsts}), 5)
-        pops = [min(range(len(frames)), key=lambda f: max(frames[f][i])) for i in firsts]
-        self.assertGreater(len(set(pops)), 3)
-        # A rolling boil: every slot pops at least three times a second.
-        for i in firsts:
-            column = [max(frame[i]) for frame in frames]
-            pops = sum(1 for f in range(len(column)) if column[f] < column[f - 1])
-            self.assertGreaterEqual(pops, 6)
-        # Seeded: the same PNG on every start.
-        self.assertEqual(patterns.boil(2.0), frames)
-
 
 class DebouncerTest(unittest.TestCase):
     def run_events(self, events):
@@ -306,49 +189,87 @@ class DebouncerTest(unittest.TestCase):
         self.assertEqual(self.run_events(events), [True, True])
 
 
+class FakeClock:
+    now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
 class PlasmaTest(unittest.TestCase):
-    def test_missed_command_is_retried(self):
-        import os
-        import tempfile
+    """The board as a client of the plasma API, against a real HTTP server."""
 
-        with tempfile.TemporaryDirectory() as d:
-            fifo = os.path.join(d, "plasma")
-            plasma = lights.Plasma(fifo, d, "brick-status")
-            plasma.show("calm")  # no FIFO yet: nothing sent
-            self.assertIsNone(plasma.current)
+    def setUp(self):
+        import http.server
+        import threading
 
-            os.mkfifo(fifo)
-            reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
-            try:
-                plasma.show("calm")  # same pattern again: must be retried
-                self.assertEqual(plasma.current, "calm")
-                self.assertEqual(os.read(reader, 100), b"fps 2\nbrick-status/calm\n")
-            finally:
-                os.close(reader)
+        calls = self.calls = []
+        self.status = 200
+        test = self
 
-    def test_only_a_change_of_pattern_changes_the_frame_rate(self):
-        import os
-        import tempfile
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_PUT(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                calls.append((self.path, body))
+                self.send_response(test.status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
-        with tempfile.TemporaryDirectory() as d:
-            fifo = os.path.join(d, "plasma")
-            os.mkfifo(fifo)
-            reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
-            try:
-                plasma = lights.Plasma(fifo, d, "brick-status")
-                plasma.show("calm")
-                plasma.show("calm")
-                plasma.off()
-                plasma.off()
-                plasma.show("stage-build")
-                plasma.show("building")
-                self.assertEqual(os.read(reader, 200).decode().splitlines(), [
-                    "fps 2", "brick-status/calm",
-                    "fps 1", "0 0 0",
-                    "fps 30", "brick-status/stage-build",
-                    "brick-status/building"])
-            finally:
-                os.close(reader)
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.clock = FakeClock()
+        self.plasma = lights.Plasma(f"http://127.0.0.1:{self.server.server_port}", clock=self.clock)
+
+    def test_a_pattern_is_sent_once_then_repeated_as_a_heartbeat(self):
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.assertEqual(self.calls, [("/signals/board", {"pattern": "calm", "priority": 10, "ttl": 30.0})])
+        self.clock.now += lights.Plasma.HEARTBEAT
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.assertEqual(len(self.calls), 2)
+        self.assertLess(lights.Plasma.HEARTBEAT * 2, lights.Plasma.TTL)
+
+    def test_a_change_goes_out_at_once(self):
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.off()
+        self.assertEqual(self.calls[-1][1]["pattern"], "off")
+        self.assertEqual(self.calls[-1][1]["priority"], lights.PRIORITY_QUIET)
+
+    def test_a_refused_signal_is_retried(self):
+        self.status = 500
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.status = 200
+        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_the_api_being_down_is_survived(self):
+        plasma = lights.Plasma("http://127.0.0.1:9", clock=self.clock)
+        with self.assertLogs("brick_status.lights", "WARNING") as logs:
+            plasma.show("calm", lights.PRIORITY_IDLE)
+            plasma.show("calm", lights.PRIORITY_IDLE)
+        self.assertEqual(len(logs.records), 1)  # once, not every second
+        self.assertIsNone(plasma.sent)
+
+    def test_buttons_light_each_view_in_its_health_colour(self):
+        self.plasma.buttons({"builds": "fail", "wigle": "active"}, VIEWS, [2, 1, 0, 3], selected_view=1)
+        path, body = self.calls[0]
+        self.assertEqual(body["priority"], lights.PRIORITY_ACTIVE)
+        buttons = body["buttons"]
+        self.assertEqual(buttons["selected"], 1)
+        self.assertEqual(buttons["colors"]["1"], lights.RED)  # builds, the second view
+        self.assertEqual(buttons["colors"]["2"], lights.GREEN)  # the overview is well by default
+        self.assertEqual(buttons["busy"], [slot for slot, view in zip([2, 1, 0, 3], VIEWS) if view == "wigle"])
+
+    def test_the_order_of_priorities(self):
+        self.assertLess(lights.PRIORITY_IDLE, 50)  # the API's default: a Jenkins stage
+        self.assertLess(50, lights.PRIORITY_NIGHTLY)
+        self.assertLess(lights.PRIORITY_ACTIVE, 80)  # a deploy on brick9000
+        self.assertLess(80, lights.PRIORITY_QUIET)
 
 
 class FakeProm:
@@ -1418,28 +1339,17 @@ class CrtTest(unittest.TestCase):
 
 
 class NightlyLightsTest(unittest.TestCase):
-    def test_nightly_is_a_seamless_eight_second_loop_of_whole_rows(self):
-        frames = patterns.nightly(8.0)
-        self.assertEqual(len(frames), 8 * patterns.FPS)
-        self.assertTrue(all(len(f) == patterns.WIDTH for f in frames))
-        self.assertEqual(frames, patterns.nightly(8.0))  # seeded: the same PNG every start
-        # Every LED changes during the loop, and something reaches full brightness.
-        for i in range(patterns.WIDTH):
-            self.assertGreater(len({f[i] for f in frames}), 10, i)
-        self.assertIn(255, {v for f in frames for c in f for v in c})
-
     def test_test_all_running_gets_the_show_even_over_a_failure(self):
         checks = [{"group": "builds", "name": "test-all", "state": "active"},
                   {"group": "services", "name": "brick1982: x.service", "state": "fail"}]
         self.assertEqual(lights.idle_pattern(checks), "nightly")
         checks[0]["name"] = "test-wigle-sync"
         self.assertEqual(lights.idle_pattern(checks), "alert")
-        self.assertIn("nightly", patterns.IDLE)
 
 
 class PlasmaLibraryTest(unittest.TestCase):
-    """jenkins/lib/plasma.groovy marks running builds; brick-status reads the
-    mark (checks) and lights the stage's pattern (lights, patterns)."""
+    """jenkins/lib/plasma.groovy marks running builds, for the board's Builds
+    view (checks), and tells the plasma API what to show."""
 
     LIB = JENKINS / "lib" / "plasma.groovy"
 
@@ -1447,10 +1357,13 @@ class PlasmaLibraryTest(unittest.TestCase):
         groovy = re.search(r"def kinds = \[(.*?)\]", self.LIB.read_text()).group(1)
         kinds = re.findall(r"'(\w+)'", groovy)
         self.assertEqual(sorted(kinds), sorted(checks.PLASMA_STAGES))
-        self.assertEqual(sorted(lights.STAGE_ORDER), sorted(kinds))
-        self.assertEqual(sorted(patterns.STAGES), sorted(kinds))
-        for kind in kinds:
-            self.assertIn(f"stage-{kind}", patterns.IDLE)
+
+    def test_the_library_asks_the_api_and_never_fails_a_build(self):
+        lib = self.LIB.read_text()
+        self.assertIn("httpRequest(", lib)
+        self.assertIn("timeout: 1,", lib)
+        self.assertIn("catch (Exception e)", lib)
+        self.assertIn("http_request", (JENKINS / "plugins.txt").read_text().split())
 
     def test_jobs_use_only_known_kinds(self):
         used = set()
@@ -1484,20 +1397,3 @@ class PlasmaLibraryTest(unittest.TestCase):
                                "displayName": "#15 overwatch:0.8.3", "description": "plasma:build"}}]
         [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
         self.assertEqual(c.detail, "overwatch:0.8.3, running 30s, build")
-
-    def test_the_furthest_stage_wins_and_nightly_and_failures_outrank_stages(self):
-        def build(name, stage):
-            return {"group": "builds", "name": name, "state": "active", "stage": stage}
-        self.assertEqual(lights.idle_pattern([build("a", "test"), build("b", "push")]), "stage-push")
-        self.assertEqual(lights.idle_pattern([build("a", ""), {"group": "x", "name": "y", "state": "ok"}]),
-                         "building")
-        failing = {"group": "services", "name": "z", "state": "fail"}
-        self.assertEqual(lights.idle_pattern([build("a", "test"), failing]), "alert")
-        self.assertEqual(lights.idle_pattern([build("test-all", ""), build("a", "test"), failing]), "nightly")
-
-    def test_stage_patterns_are_whole_loops(self):
-        for kind, make in patterns.STAGES.items():
-            frames = make()
-            self.assertGreater(len(frames), 30, kind)
-            self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), kind)
-

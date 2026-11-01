@@ -27,7 +27,7 @@ MODE = REGISTRY.gauge("brick_status_mode", "1 for the board's current mode (idle
 VIEW = REGISTRY.gauge("brick_status_view", "1 for the view on screen.", ["view"])
 BUTTONS = REGISTRY.counter("brick_status_button_presses_total", "Cabinet buttons pressed.", ["button"])
 LIGHTS = REGISTRY.gauge("brick_status_lights_state",
-                        "1 for what the plasma lights show: off, build, active or idle.", ["state"])
+                        "1 for what the board asks of the plasma lights: off, active or idle.", ["state"])
 OPEN = REGISTRY.gauge("brick_status_open_problems", "Problems the pager is holding or has paged.")
 QUEUED = REGISTRY.gauge("brick_status_pages_queued", "Pages waiting to be sent.")
 PAGES = REGISTRY.counter("brick_status_pages_total", "Pages to the phone, by result.", ["result"])

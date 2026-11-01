@@ -1,14 +1,12 @@
-"""Plasma LED patterns, written as the PNGs the plasma daemon animates.
+"""Plasma LED patterns: lists of frames, one colour per LED.
 
-Each PNG is 40 pixels wide (10 button slots x 4 LEDs) and one row per frame;
-the daemon plays rows at 60 frames per second and loops.
+A frame is 40 colours (10 button slots x 4 LEDs); the renderer plays them at
+60 frames per second and loops.
 """
 
 import colorsys
 import math
 import random
-import struct
-import zlib
 
 SLOTS = 10
 LEDS_PER_SLOT = 4
@@ -23,8 +21,6 @@ CYAN = (0, 200, 255)
 BLUE = (40, 90, 255)
 PURPLE = (170, 60, 255)
 OFF = (0, 0, 0)
-
-STATE_COLOURS = {"ok": GREEN, "warn": AMBER, "fail": RED, "active": GREEN, "unknown": GREY}
 
 Rgb = tuple[int, int, int]
 Frame = list[Rgb]
@@ -250,7 +246,7 @@ def flash(colour: Rgb, seconds: float) -> list[Frame]:
     return [_slots([colour if f < n // 2 else OFF] * SLOTS) for f in range(n)]
 
 
-# Idle patterns, one per board event, highest priority first.
+# The board's events (brick-status lights.idle_pattern).
 IDLE = {
     "nightly": lambda: nightly(8.0),
     "alert": lambda: pulse(RED, 1.0, 0.15),
@@ -261,8 +257,7 @@ IDLE = {
     "calm": lambda: pulse(GREEN, 6.0, 0.03),
 }
 
-# Jenkins build stages, from the plasma library's mark on a running build
-# (jenkins/lib/plasma.groovy, checks.PLASMA_STAGES): "stage-<kind>" patterns.
+# Jenkins build stages (jenkins/lib/plasma.groovy): "stage-<kind>" patterns.
 STAGES = {
     "checkout": lambda: stream(CYAN, 1.5),
     "install": lambda: fill(AMBER, 2.0),
@@ -274,8 +269,7 @@ STAGES = {
 }
 IDLE.update({f"stage-{kind}": make for kind, make in STAGES.items()})
 
-# Image builds and deploys on brick9000 (see build.py). These take over the
-# lights in idle and active mode alike; a deploy outranks an image build.
+# Deploys and image builds on brick9000 itself (brick9000/build-status.sh).
 BUILD = {
     "deploying": lambda: boil(2.0),
     "image-building": lambda: rainbow(0.75),
@@ -284,13 +278,21 @@ BUILD = {
 }
 
 
-def png(frames: list[Frame]) -> bytes:
-    """Encode frames as a 24-bit RGB PNG, one row per frame."""
-    raw = b"".join(b"\x00" + bytes(v for px in row for v in px) for row in frames)
+def named() -> dict:
+    """Every named pattern's frames; "off" is one dark frame."""
+    return {"off": [[OFF] * WIDTH],
+            **{name: make() for name, make in {**IDLE, **BUILD}.items()}}
 
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
-    header = struct.pack(">IIBBBBB", len(frames[0]), len(frames), 8, 2, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+# The effects a signal can ask for in any colour: effect(colour, seconds).
+EFFECTS = {
+    "solid": lambda colour, seconds: [[colour] * WIDTH],
+    "pulse": lambda colour, seconds: pulse(colour, seconds, 0.1),
+    "flash": flash,
+    "chase": chase,
+    "stream": stream,
+    "fill": fill,
+    "scanner": scanner,
+    "rush": rush,
+    "converge": converge,
+}

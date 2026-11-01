@@ -26,7 +26,10 @@ current=$(git rev-parse HEAD)
 [ "$target" != "$(cat "$state/failed" 2>/dev/null)" ] || exit 0
 
 # From here brick9000 is rebuilding itself: the buttons boil until it's done,
-# then flash green or pulse red (brick-status/brick_status/build.py).
+# for at least $min_seconds so a quick deploy is still seen, then flash green
+# or pulse red (build-status.sh).
+min_seconds=${BRICK_DEPLOY_MIN_SECONDS:-10}
+started=$(date +%s)
 image=brick9000 ref=$(git rev-parse --short "$target") status_name=deploy
 . "$repo/brick9000/build-status.sh"
 result=failed
@@ -34,7 +37,9 @@ scratch=$(mktemp -d)
 finish() {
     git worktree remove --force "$scratch/tree" 2>/dev/null || true
     rm -rf "$scratch"
-    write_status "$result" "$(date +%s)"
+    left=$((started + min_seconds - $(date +%s)))
+    [ "$left" -le 0 ] || sleep "$left"
+    write_status "$result"
 }
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
@@ -58,6 +63,8 @@ if changed brick9000/ ':!brick9000/proxy'; then
     echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
 fi
 result=succeeded
+# Before brick-status, whose first signal then finds it up.
+systemctl --user try-restart brick-plasma
 systemctl --user restart brick-status
 # Not before install.sh has set it up; a running game survives (KillMode=process).
 systemctl --user try-restart brick-retro
