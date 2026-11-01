@@ -2,7 +2,7 @@
 
 Run in the CRT's pseudo-terminal by matrix.py like any other program:
 
-    python3 -m brick_status.crt_gallery [SECONDS_EACH]
+    python3 -m brick_status.crt_gallery
 
 Each painting is drawn once (so it costs nothing while it hangs) in 256
 colours, which the page tints with the board's health colour, with its title
@@ -18,6 +18,7 @@ import sys
 import time
 
 PAINTINGS = os.path.join(os.path.dirname(__file__), "..", "art", "paintings")
+SECONDS_EACH = 900
 
 
 def credits() -> dict[str, str]:
@@ -44,7 +45,6 @@ def show(path: str, caption: str, cols: int, rows: int) -> None:
 
 
 def main() -> None:
-    seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 45
     names = credits()
     files = sorted(n for n in os.listdir(PAINTINGS) if n.endswith(".jpg"))
     random.shuffle(files)
@@ -52,7 +52,7 @@ def main() -> None:
         for name in files:
             cols, rows = shutil.get_terminal_size()
             show(os.path.join(PAINTINGS, name), names.get(name, name), cols, rows)
-            time.sleep(seconds)
+            time.sleep(SECONDS_EACH)
 
 
 if __name__ == "__main__":

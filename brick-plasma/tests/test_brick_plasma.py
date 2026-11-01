@@ -57,8 +57,15 @@ class Apa102Test(unittest.TestCase):
     def test_only_the_two_pins_are_ever_touched(self):
         regs = Registers()
         apa102.Chain(regs).write(apa102.encode([(255, 0, 170)] * 40))
-        self.assertEqual({mask for _, mask in regs.writes}, {1 << 14, 1 << 15})
+        self.assertEqual({mask for _, mask in regs.writes}, {0, 1 << 14, 1 << 15})  # 0 changes nothing
         self.assertEqual({r for r, _ in regs.writes}, {apa102.GPSET0, apa102.GPCLR0})
+
+    def test_every_edge_is_held(self):
+        regs = Registers()
+        apa102.Chain(regs).write(bytes(1))
+        edges = [i for i, (_, mask) in enumerate(regs.writes) if mask]
+        self.assertTrue(all(b - a == apa102.HOLD + 1 for a, b in zip(edges[:3], edges[1:3])))
+        self.assertEqual(len(regs.writes), 8 * (3 + 2 * apa102.HOLD))
 
     def test_the_clock_ends_low(self):
         regs = Registers()
@@ -395,6 +402,33 @@ class RecordingChain:
         self.frames.append(frame)
 
 
+class ShownTest(unittest.TestCase):
+    def setUp(self):
+        self.board = signals.Signals()
+        self.a, self.b = ("a",), ("b",)
+
+    def test_only_signals_that_say_what_they_are(self):
+        self.board.put("lights", "x", self.a, 50, 10, 0)
+        self.board.put("job", "x", self.a, 50, 10, 0, {"title": "t"})
+        self.assertEqual([s.source for s in self.board.shown(0)], ["job"])
+
+    def test_a_new_stage_keeps_its_place(self):
+        self.board.put("one", "x", self.a, 50, 10, 0, {"title": "1"})
+        self.board.put("two", "x", self.a, 50, 10, 0, {"title": "2"})
+        self.board.put("one", "y", self.b, 50, 10, 1, {"title": "1", "status": "next"})
+        self.assertEqual([s.source for s in self.board.shown(1)], ["one", "two"])
+        self.assertEqual(self.board.shown(1)[0].show["status"], "next")
+
+    def test_a_heartbeat_can_change_what_it_says(self):
+        self.board.put("job", "x", self.a, 50, 10, 0, {"title": "t", "status": "one"})
+        self.board.put("job", "x", self.a, 50, 10, 1, {"title": "t", "status": "two"})
+        self.assertEqual(self.board.shown(1)[0].show["status"], "two")
+
+    def test_it_expires_with_the_signal(self):
+        self.board.put("job", "x", self.a, 50, 10, 0, {"title": "t"})
+        self.assertEqual(self.board.shown(11), [])
+
+
 class RendererTest(unittest.TestCase):
     def setUp(self):
         self.clock = Clock()
@@ -598,6 +632,29 @@ class ApiTest(unittest.TestCase):
         self.assertIn("brick_plasma_signals 1", text)
         self.assertIn('brick_plasma_showing{pattern="calm"} 1', text)
         self.assertIn('brick_plasma_requests_total{code="200"}', text)
+
+    def test_activity_lists_what_senders_say(self):
+        self.call("PUT", "/signals/job", {"pattern": "calm", "show": {
+            "title": "overwatch:0.8.6", "status": "build", "details": {"job": "build-image"}}})
+        self.call("PUT", "/signals/lights", {"pattern": "calm"})
+        self.assertEqual(self.call("GET", "/activity")[1], {"activity": [
+            {"source": "job", "title": "overwatch:0.8.6", "status": "build", "details": {"job": "build-image"}}]})
+
+    def test_show_keeps_escape_codes_out_of_the_terminal(self):
+        self.call("PUT", "/signals/job", {"pattern": "calm", "show": {
+            "title": "a\x1b[2Jb\n", "status": "\x07ok", "details": {"x\x1b": "y\r"}}})
+        [shown] = self.call("GET", "/activity")[1]["activity"]
+        self.assertEqual((shown["title"], shown["status"], shown["details"]), ("a[2Jb", "ok", {"x": "y"}))
+
+    def test_show_limits_its_size(self):
+        self.call("PUT", "/signals/job", {"pattern": "calm", "show": {"title": "x" * 500}})
+        self.assertEqual(len(self.call("GET", "/activity")[1]["activity"][0]["title"]), web.MAX_TEXT)
+
+    def test_bad_show_is_refused(self):
+        for show in ("text", {}, {"title": ""}, {"title": 1}, {"title": "t", "details": []},
+                     {"title": "t", "details": {str(i): "v" for i in range(web.MAX_DETAILS + 1)}}):
+            self.assertEqual(self.call("PUT", "/signals/job", {"pattern": "calm", "show": show})[0], 400, show)
+        self.assertEqual(self.showing(), None)
 
 
 if __name__ == "__main__":

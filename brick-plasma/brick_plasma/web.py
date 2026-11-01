@@ -12,6 +12,7 @@ from . import apa102, patterns, signals
 SOURCE = re.compile(r"^/signals/([A-Za-z0-9._-]{1,64})$")
 MAX_BODY = 4096
 MIN_SECONDS, MAX_SECONDS = 0.2, 10.0
+MAX_TEXT, MAX_DETAILS = 80, 8
 
 
 class BadRequest(Exception):
@@ -30,6 +31,32 @@ def _number(body: dict, key: str, default: float, low: float, high: float) -> fl
     if not isinstance(value, (int, float)) or isinstance(value, bool) or value != value:
         raise BadRequest(f"{key} must be a number")
     return max(low, min(high, float(value)))
+
+
+def _text(value, name: str) -> str:
+    """One short printable line: this ends up in a terminal, so no escape codes."""
+    if not isinstance(value, str):
+        raise BadRequest(f"{name} must be a string")
+    return "".join(c for c in value if c.isprintable())[:MAX_TEXT].strip()
+
+
+def _show(body: dict) -> dict | None:
+    """A signal's optional "show": what the board's CRT says while it's held.
+    title is the main thing, typed out; status and details appear after it,
+    and only while nothing else is running."""
+    if "show" not in body:
+        return None
+    show = body["show"]
+    if not isinstance(show, dict):
+        raise BadRequest("show must be an object")
+    title = _text(show.get("title"), "show.title")
+    if not title:
+        raise BadRequest("show needs a title")
+    details = show.get("details", {})
+    if not isinstance(details, dict) or len(details) > MAX_DETAILS:
+        raise BadRequest(f"show.details must be an object of at most {MAX_DETAILS}")
+    return {"title": title, "status": _text(show.get("status", ""), "show.status"),
+            "details": {_text(k, "a detail's name"): _text(v, f"show.details.{k}") for k, v in details.items()}}
 
 
 class Catalog:
@@ -111,6 +138,8 @@ def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, 
                 now = clock()
                 showing = [describe(s, now) for s in board.active(now)]
                 self._json(200, {"showing": showing[0] if showing else None, "signals": showing})
+            elif path == "/activity":
+                self._json(200, {"activity": [{"source": s.source, **s.show} for s in board.shown(clock())]})
             elif path == "/patterns":
                 self._json(200, {"patterns": {name: {"priority": d.priority, "ttl": d.ttl, "file": d.file}
                                               for name, d in sorted(catalog.named.items())},
@@ -135,7 +164,7 @@ def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, 
                 label, frames, priority, ttl = catalog.resolve(body)
                 priority = int(_number(body, "priority", priority, 0, 100))
                 ttl = _number(body, "ttl", ttl, 0.1, signals.MAX_TTL)
-                board.put(match[1], label, frames, priority, ttl, clock())
+                board.put(match[1], label, frames, priority, ttl, clock(), _show(body))
             except BadRequest as e:
                 self._json(400, {"error": str(e)})
             except signals.Full:

@@ -8,7 +8,7 @@ pipeline {
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 5, unit: 'MINUTES') }
     stages {
         stage('Deploy') {
-            steps { sh '/usr/share/brick-jenkins/bin/deploy-brick1982' }
+            steps { script { plasma('deploy') { sh '/usr/share/brick-jenkins/bin/deploy-brick1982' } } }
         }
     }
 }

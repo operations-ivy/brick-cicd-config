@@ -45,9 +45,8 @@ class Settings:
     cmatrix: str = "cmatrix"
     # The overview's CRT window plays these in turn (matrix.PROGRAMS names),
     # each for crt_minutes; ones that aren't installed are skipped.
-    crt_programs: list[str] = field(default_factory=lambda: [
-        "cmatrix", "pipes", "gallery", "bonsai", "rain", "nyancat"])
-    crt_minutes: float = 10.0
+    crt_programs: list[str] = field(default_factory=lambda: ["cmatrix", "gallery"])
+    crt_minutes: float = 360.0
     # When the screen and lights are off; see board.QuietSchedule for the format.
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
     # How long the side button turns everything on for, while it's quiet.
