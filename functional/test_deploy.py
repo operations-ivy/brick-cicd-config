@@ -197,12 +197,17 @@ class Brick9000Deploy(DeployScripts, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.h.head, sha)
 
-    def test_the_api_restarts_before_the_board_that_calls_it(self):
-        self.h.commit("pass", "second")
+    def test_a_new_display_file_restarts_the_api_before_the_board(self):
+        self.h.commit("pass", "a display", touch="brick-plasma/displays/new.toml")
         self.h.deploy()
         commands = self.h.commands
         self.assertLess(commands.index("systemctl --user try-restart brick-plasma"),
                         commands.index("systemctl --user restart brick-status"))
+
+    def test_other_deploys_leave_the_lights_running(self):
+        self.h.commit("pass", "second")
+        self.h.deploy()
+        self.assertNotIn("systemctl --user try-restart brick-plasma", self.h.commands)
 
     def test_a_proxy_change_retires_brick9000s_proxy(self):
         # The front door runs on the cluster since 2026-10-17: a proxy change

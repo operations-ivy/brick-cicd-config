@@ -63,8 +63,11 @@ if changed brick9000/ ':!brick9000/proxy'; then
     echo "deploy: brick9000/ changed; run brick9000/install.sh to apply it" >&2
 fi
 result=succeeded
-# Before brick-status, whose first signal then finds it up.
-systemctl --user try-restart brick-plasma
+# A new display file is read at the start. Before brick-status, whose first
+# signal then finds it up.
+if changed brick-plasma; then
+    systemctl --user try-restart brick-plasma
+fi
 systemctl --user restart brick-status
 # Not before install.sh has set it up; a running game survives (KillMode=process).
 systemctl --user try-restart brick-retro

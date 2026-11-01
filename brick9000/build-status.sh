@@ -8,7 +8,7 @@ plasma_source=brick9000-${status_name:-image}
 
 plasma_signal() {  # <pattern> <ttl>
     curl -s -o /dev/null --max-time 1 -X PUT -H 'Content-Type: application/json' \
-        -d "{\"pattern\": \"$1\", \"priority\": 80, \"ttl\": $2}" \
+        -d "{\"pattern\": \"$1\", \"ttl\": $2}" \
         "$plasma_url/signals/$plasma_source" || true
 }
 

@@ -427,15 +427,54 @@ curl -m 1 -X DELETE http://plasma.brick.nozdormu.cloud/signals/my-job
 
 | Call | What it does |
 | --- | --- |
-| `PUT /signals/<source>` | Hold a signal. Exactly one of `pattern`, `color` (`[r, g, b]` or `"#rrggbb"`, with `effect` and `seconds`) or `buttons`, plus `priority` (0-100, default 50) and `ttl` (seconds, default 30, at most 3600). A repeat of the same signal only extends its time |
+| `PUT /signals/<source>` | Hold a signal. Exactly one of `pattern` (a display, below), `color` (`[r, g, b]` or `"#rrggbb"`, with `effect` and `seconds`) or `buttons`, plus `priority` (0-100) and `ttl` (seconds, at most 3600). Without those, a display's own apply, or 50 and 30. A repeat of the same signal only extends its time |
 | `DELETE /signals/<source>` | Let it go |
 | `GET /` | What's showing and every signal held |
-| `GET /patterns` | The pattern and effect names |
+| `GET /patterns` | Every display with its priority, time limit and file, the effects, and any file that failed to load |
 | `GET /metrics`, `GET /healthz` | Prometheus' job `brick-plasma`; up or not |
 
 **Every signal has a time limit**, so a sender that dies can't leave the lights
 stuck. **Lights are never worth failing a job for**: give every call a short
 timeout and ignore the result, since brick9000 is optional.
+
+### Adding a source
+
+Displays are drop-ins: one TOML file per source in `brick-plasma/displays/`,
+and nothing else changes. A new source with special needs adds a file, merges
+it, and calls the API by display name. A deploy that changes the directory
+restarts brick-plasma.
+
+```toml
+# brick-plasma/displays/garage.toml
+[defaults]              # optional: for every display in this file
+priority = 40
+ttl = 120
+
+[displays.door-open]    # the name a sender asks for: must be new
+effect = "chase"        # see below
+color = "#ff0000"       # "#rrggbb" or [r, g, b]
+seconds = 1.0           # one loop
+tail = 2                # any setting the effect takes
+
+[displays.door-shut]
+effect = "solid"
+color = "#00ff00"
+priority = 45           # overrides [defaults]; a sender's own overrides this
+slots = [3, 4]          # only these buttons (0-9); the rest stay dark
+```
+
+| Effect | Settings besides `seconds` |
+| --- | --- |
+| `solid`, `flash`, `fill`, `stream`, `scanner`, `rush`, `converge`, `chase`, `pulse` | `color`; also `tail` on `stream`, `converge` and `chase`, `base` on `chase`, `width` on `scanner`, `low` and `high` on `pulse` |
+| `rainbow`, `boil`, `nightly` | none in colour; `seed` on `boil` and `nightly` |
+
+A new kind of animation is a function in `brick_plasma/patterns.py` and a line in
+its `EFFECTS`; its keyword arguments become settings, so any file can then use it.
+
+A broken file or display is skipped and logged, and everything else keeps
+working (`GET /patterns` lists it, `brick_plasma_display_errors` counts it). The
+tests load this directory, so `brick9000/deploy` refuses a bad one before it
+goes live.
 
 Who uses which priority:
 

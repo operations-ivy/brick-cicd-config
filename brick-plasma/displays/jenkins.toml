@@ -1,0 +1,37 @@
+# Jenkins build stages, from plasma('<kind>') { ... } (jenkins/lib/plasma.groovy).
+# Over the board's health: the lights show what's happening now.
+[defaults]
+priority = 50
+
+[displays.stage-checkout]
+effect = "stream"
+color = "#00c8ff"
+seconds = 1.5
+
+[displays.stage-install]
+effect = "fill"
+color = "#ff8c00"
+seconds = 2.0
+
+[displays.stage-test]
+effect = "scanner"
+color = "#00ff00"
+seconds = 1.6
+
+[displays.stage-verify]
+effect = "converge"
+color = "#aa3cff"
+seconds = 1.6
+
+[displays.stage-build]
+effect = "rainbow"
+seconds = 0.75
+
+[displays.stage-push]
+effect = "rush"
+color = "#285aff"
+seconds = 1.0
+
+[displays.stage-deploy]
+effect = "boil"
+seconds = 2.0

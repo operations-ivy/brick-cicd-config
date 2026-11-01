@@ -16,7 +16,7 @@ class Stats:
         with self._lock:
             self.requests[code] = self.requests.get(code, 0) + 1
 
-    def render(self, signals: int) -> str:
+    def render(self, signals: int, display_errors: int = 0) -> str:
         with self._lock:
             requests = dict(self.requests)
         lines = [
@@ -32,6 +32,9 @@ class Stats:
             "# HELP brick_plasma_signals Signals held now.",
             "# TYPE brick_plasma_signals gauge",
             f"brick_plasma_signals {signals}",
+            "# HELP brick_plasma_display_errors Problems found loading displays/*.toml.",
+            "# TYPE brick_plasma_display_errors gauge",
+            f"brick_plasma_display_errors {display_errors}",
             "# HELP brick_plasma_showing 1 for the pattern on the lights.",
             "# TYPE brick_plasma_showing gauge",
             f'brick_plasma_showing{{pattern="{self.showing}"}} 1',

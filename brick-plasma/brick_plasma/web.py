@@ -19,13 +19,10 @@ class BadRequest(Exception):
 
 
 def _colour(value) -> tuple:
-    if isinstance(value, str) and re.fullmatch(r"#?[0-9a-fA-F]{6}", value):
-        digits = value.lstrip("#")
-        return tuple(int(digits[i:i + 2], 16) for i in (0, 2, 4))
-    if (isinstance(value, list) and len(value) == 3
-            and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in value)):
-        return tuple(value)
-    raise BadRequest(f"not a colour: {value!r} (use [r, g, b] or \"#rrggbb\")")
+    try:
+        return patterns.parse_colour(value)
+    except ValueError as e:
+        raise BadRequest(str(e)) from None
 
 
 def _number(body: dict, key: str, default: float, low: float, high: float) -> float:
@@ -39,9 +36,8 @@ class Catalog:
     """Turns a request into frames ready to clock out. The same request gets
     the same object back, which is how a repeat is known to be one."""
 
-    def __init__(self):
-        self.named = {name: tuple(apa102.encode(f) for f in frames)
-                      for name, frames in patterns.named().items()}
+    def __init__(self, named: dict, errors: tuple = ()):
+        self.named, self.errors = named, list(errors)
         self.custom = lru_cache(maxsize=64)(self._build)
 
     @staticmethod
@@ -50,11 +46,12 @@ class Catalog:
             colours, selected, busy = args
             frames = patterns.buttons(dict(colours), selected, set(busy))
         else:
-            frames = patterns.EFFECTS[kind](*args)
+            colour, seconds = args
+            frames = patterns.make(kind, color=colour, seconds=seconds)
         return tuple(apa102.encode(f) for f in frames)
 
-    def resolve(self, body: dict) -> tuple[str, tuple]:
-        """A body's (label, frames)."""
+    def resolve(self, body: dict) -> tuple[str, tuple, int, float]:
+        """A body's (label, frames, default priority, default time limit)."""
         asked = [k for k in ("pattern", "color", "buttons") if k in body]
         if len(asked) != 1:
             raise BadRequest("send exactly one of pattern, color or buttons")
@@ -62,14 +59,20 @@ class Catalog:
             name = body["pattern"]
             if not isinstance(name, str) or name not in self.named:
                 raise BadRequest(f"no pattern {name!r}: GET /patterns")
-            return name, self.named[name]
+            shown = self.named[name]
+            return name, shown.frames, shown.priority, shown.ttl
         if asked == ["color"]:
             effect = body.get("effect", "solid")
             if not isinstance(effect, str) or effect not in patterns.EFFECTS:
                 raise BadRequest(f"no effect {effect!r}: GET /patterns")
             seconds = _number(body, "seconds", 2.0, MIN_SECONDS, MAX_SECONDS)
-            return "custom", self.custom(effect, _colour(body["color"]), seconds)
-        return "buttons", self.custom("buttons", *self._buttons(body["buttons"]))
+            try:
+                frames = self.custom(effect, _colour(body["color"]), seconds)
+            except ValueError as e:
+                raise BadRequest(str(e)) from None
+            return "custom", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL
+        frames = self.custom("buttons", *self._buttons(body["buttons"]))
+        return "buttons", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL
 
     @staticmethod
     def _buttons(spec) -> tuple:
@@ -109,11 +112,14 @@ def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, 
                 showing = [describe(s, now) for s in board.active(now)]
                 self._json(200, {"showing": showing[0] if showing else None, "signals": showing})
             elif path == "/patterns":
-                self._json(200, {"patterns": sorted(catalog.named), "effects": sorted(patterns.EFFECTS)})
+                self._json(200, {"patterns": {name: {"priority": d.priority, "ttl": d.ttl, "file": d.file}
+                                              for name, d in sorted(catalog.named.items())},
+                                 "effects": sorted(patterns.EFFECTS), "errors": catalog.errors})
             elif path == "/healthz":
                 self._json(200, {"ok": True})
             elif path == "/metrics":
-                self._reply(200, "text/plain; version=0.0.4", stats.render(len(board.active(clock()))).encode())
+                self._reply(200, "text/plain; version=0.0.4",
+                            stats.render(len(board.active(clock())), len(catalog.errors)).encode())
             else:
                 self._json(404, {"error": "not found"})
 
@@ -126,9 +132,9 @@ def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, 
             try:
                 if body is None:
                     raise BadRequest("the body must be a JSON object")
-                label, frames = catalog.resolve(body)
-                priority = int(_number(body, "priority", signals.DEFAULT_PRIORITY, 0, 100))
-                ttl = _number(body, "ttl", signals.DEFAULT_TTL, 0.1, signals.MAX_TTL)
+                label, frames, priority, ttl = catalog.resolve(body)
+                priority = int(_number(body, "priority", priority, 0, 100))
+                ttl = _number(body, "ttl", ttl, 0.1, signals.MAX_TTL)
                 board.put(match[1], label, frames, priority, ttl, clock())
             except BadRequest as e:
                 self._json(400, {"error": str(e)})

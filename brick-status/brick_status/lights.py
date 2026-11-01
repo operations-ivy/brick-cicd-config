@@ -15,13 +15,9 @@ from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
 
 log = logging.getLogger(__name__)
 
-# Against the API's default of 50, which a Jenkins stage uses, and 80, a
-# deploy on brick9000: health sits under whatever's happening now; a person at
-# the buttons and the nightly show sit over a build; quiet hours beat everything.
-PRIORITY_IDLE = 10
-PRIORITY_NIGHTLY = 60
+# A display's priority is in its file (brick-plasma/displays/board.toml). The
+# view buttons aren't a named display: over a build, under a deploy.
 PRIORITY_ACTIVE = 70
-PRIORITY_QUIET = 100
 
 GREEN, AMBER, RED, GREY = [0, 255, 0], [255, 140, 0], [255, 0, 0], [90, 90, 110]
 STATE_COLOURS = {OK: GREEN, WARN: AMBER, FAIL: RED, ACTIVE: GREEN, UNKNOWN: GREY}
@@ -60,11 +56,11 @@ class Plasma:
         self.sent, self.sent_at = None, 0.0
         self.failing = False
 
-    def show(self, pattern: str, priority: int) -> None:
-        self._put({"pattern": pattern}, priority)
+    def show(self, pattern: str) -> None:
+        self._put({"pattern": pattern})
 
     def off(self) -> None:
-        self.show("off", PRIORITY_QUIET)
+        self.show("off")
 
     def buttons(self, group_states: dict[str, str], views: list[str], slots: list[int],
                 selected_view: int) -> None:
@@ -78,10 +74,11 @@ class Plasma:
             if state == ACTIVE:
                 busy.append(slots[i])
         selected = slots[selected_view] if selected_view < len(slots) else None
-        self._put({"buttons": {"colors": colours, "selected": selected, "busy": busy}}, PRIORITY_ACTIVE)
+        self._put({"buttons": {"colors": colours, "selected": selected, "busy": busy},
+                   "priority": PRIORITY_ACTIVE})
 
-    def _put(self, signal: dict, priority: int) -> None:
-        wanted = {**signal, "priority": priority, "ttl": self.TTL}
+    def _put(self, signal: dict) -> None:
+        wanted = {**signal, "ttl": self.TTL}
         now = self.clock()
         if wanted == self.sent and now - self.sent_at < self.HEARTBEAT:
             return

@@ -180,8 +180,7 @@ def main() -> None:
             plasma.buttons(states, VIEWS, settings.button_slots, board.view(now))
         else:  # idle: the lights show the most important event
             all_checks = [c for g in summary["groups"].values() for c in g["checks"]]
-            pattern = lights.idle_pattern(all_checks)
-            plasma.show(pattern, lights.PRIORITY_NIGHTLY if pattern == "nightly" else lights.PRIORITY_IDLE)
+            plasma.show(lights.idle_pattern(all_checks))
 
 
 if __name__ == "__main__":

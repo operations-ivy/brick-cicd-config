@@ -226,32 +226,31 @@ class PlasmaTest(unittest.TestCase):
         self.plasma = lights.Plasma(f"http://127.0.0.1:{self.server.server_port}", clock=self.clock)
 
     def test_a_pattern_is_sent_once_then_repeated_as_a_heartbeat(self):
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
-        self.assertEqual(self.calls, [("/signals/board", {"pattern": "calm", "priority": 10, "ttl": 30.0})])
+        self.plasma.show("calm")
+        self.plasma.show("calm")
+        self.assertEqual(self.calls, [("/signals/board", {"pattern": "calm", "ttl": 30.0})])
         self.clock.now += lights.Plasma.HEARTBEAT
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.show("calm")
         self.assertEqual(len(self.calls), 2)
         self.assertLess(lights.Plasma.HEARTBEAT * 2, lights.Plasma.TTL)
 
     def test_a_change_goes_out_at_once(self):
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.show("calm")
         self.plasma.off()
         self.assertEqual(self.calls[-1][1]["pattern"], "off")
-        self.assertEqual(self.calls[-1][1]["priority"], lights.PRIORITY_QUIET)
 
     def test_a_refused_signal_is_retried(self):
         self.status = 500
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.show("calm")
         self.status = 200
-        self.plasma.show("calm", lights.PRIORITY_IDLE)
+        self.plasma.show("calm")
         self.assertEqual(len(self.calls), 2)
 
     def test_the_api_being_down_is_survived(self):
         plasma = lights.Plasma("http://127.0.0.1:9", clock=self.clock)
         with self.assertLogs("brick_status.lights", "WARNING") as logs:
-            plasma.show("calm", lights.PRIORITY_IDLE)
-            plasma.show("calm", lights.PRIORITY_IDLE)
+            plasma.show("calm")
+            plasma.show("calm")
         self.assertEqual(len(logs.records), 1)  # once, not every second
         self.assertIsNone(plasma.sent)
 
@@ -264,12 +263,6 @@ class PlasmaTest(unittest.TestCase):
         self.assertEqual(buttons["colors"]["1"], lights.RED)  # builds, the second view
         self.assertEqual(buttons["colors"]["2"], lights.GREEN)  # the overview is well by default
         self.assertEqual(buttons["busy"], [slot for slot, view in zip([2, 1, 0, 3], VIEWS) if view == "wigle"])
-
-    def test_the_order_of_priorities(self):
-        self.assertLess(lights.PRIORITY_IDLE, 50)  # the API's default: a Jenkins stage
-        self.assertLess(50, lights.PRIORITY_NIGHTLY)
-        self.assertLess(lights.PRIORITY_ACTIVE, 80)  # a deploy on brick9000
-        self.assertLess(80, lights.PRIORITY_QUIET)
 
 
 class FakeProm:

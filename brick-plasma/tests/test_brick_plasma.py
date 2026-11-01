@@ -1,12 +1,13 @@
 import json
 import re
+import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from brick_plasma import apa102, patterns, renderer, signals, stats, web
+from brick_plasma import apa102, displays, patterns, renderer, signals, stats, web
 
 JENKINS = Path(__file__).resolve().parents[2] / "jenkins"
 DARK = (b"dark",)
@@ -66,36 +67,32 @@ class Apa102Test(unittest.TestCase):
 
 
 class PatternTest(unittest.TestCase):
-    def test_every_named_pattern_is_whole_frames(self):
-        for name, frames in patterns.named().items():
-            self.assertTrue(frames, name)
-            self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), name)
-            self.assertTrue(all(0 <= v <= 255 for f in frames for c in f for v in c), name)
-
-    def test_every_effect_works_in_any_colour(self):
-        for name, effect in patterns.EFFECTS.items():
-            frames = effect((10, 20, 30), 1.0)
+    def test_every_colour_effect_works_in_any_colour(self):
+        for name in ("solid", "pulse", "flash", "chase", "stream", "fill", "scanner", "rush", "converge"):
+            frames = patterns.make(name, color=(10, 20, 30), seconds=1.0)
             self.assertTrue(all(len(f) == patterns.WIDTH for f in frames), name)
 
-    def test_stage_patterns_are_whole_loops(self):
-        for kind, make in patterns.STAGES.items():
-            self.assertGreater(len(make()), 30, kind)
+    def test_an_effect_refuses_settings_it_doesnt_have(self):
+        for effect, params in (("nope", {}), ("rainbow", {"seconds": 1, "color": (1, 2, 3)}),
+                               ("chase", {"color": (1, 2, 3), "seconds": 1, "wobble": 2})):
+            with self.assertRaises(ValueError):
+                patterns.make(effect, **params)
 
-    def test_every_jenkins_kind_has_its_pattern(self):
-        text = (JENKINS / "lib" / "plasma.groovy").read_text()
-        kinds = re.findall(r"'(\w+)'", re.search(r"def kinds = \[(.*?)\]", text).group(1))
-        self.assertEqual(sorted(kinds), sorted(patterns.STAGES))
-        for kind in kinds:
-            self.assertIn(f"stage-{kind}", patterns.named())
+    def test_colours(self):
+        self.assertEqual(patterns.parse_colour("#ff8000"), (255, 128, 0))
+        self.assertEqual(patterns.parse_colour("ff8000"), (255, 128, 0))
+        self.assertEqual(patterns.parse_colour([1, 2, 3]), (1, 2, 3))
+        for bad in ("red", [1, 2], [1, 2, 256], [1, 2, True], None):
+            with self.assertRaises(ValueError):
+                patterns.parse_colour(bad)
 
-    def test_the_board_and_deploys_only_ask_for_patterns_that_exist(self):
-        root = Path(__file__).resolve().parents[2]
-        lights = (root / "brick-status" / "brick_status" / "lights.py").read_text()
-        asked = set(re.findall(r'return "([a-z]+)"', lights)) | {"off"}
-        script = (root / "brick9000" / "build-status.sh").read_text()
-        asked |= set(re.findall(r"plasma_signal ([a-z-]+) \d+", script))
-        self.assertGreater(len(asked), 10, asked)  # the regexes still find them
-        self.assertLessEqual(asked, set(patterns.named()))
+    def test_only_slots_darkens_the_rest(self):
+        [frame] = patterns.only_slots(patterns.solid((9, 9, 9)), [1])
+        self.assertEqual(frame[4:8], [(9, 9, 9)] * 4)
+        self.assertEqual({frame[i] for i in range(40) if not 4 <= i < 8}, {patterns.OFF})
+        for bad in ([10], [-1], [True], 3):
+            with self.assertRaises(ValueError):
+                patterns.only_slots([], bad)
 
     def test_nightly_is_a_seamless_eight_second_loop(self):
         frames = patterns.nightly(8.0)
@@ -106,16 +103,16 @@ class PatternTest(unittest.TestCase):
         self.assertIn(255, {v for f in frames for c in f for v in c})
 
     def test_rainbow_and_flash_colours(self):
-        rainbow = patterns.BUILD["image-building"]()
+        rainbow = patterns.rainbow(0.75)
         self.assertEqual(len(rainbow), int(0.75 * patterns.FPS))
         hues = {px for frame in rainbow for px in frame}
         self.assertTrue(any(r > 200 for r, _, _ in hues) and any(g > 200 for _, g, _ in hues)
                         and any(b > 200 for _, _, b in hues))
-        flashes = {px for frame in patterns.BUILD["image-pushed"]() for px in frame}
+        flashes = {px for frame in patterns.flash(patterns.GREEN, 0.5) for px in frame}
         self.assertEqual(flashes, {patterns.GREEN, patterns.OFF})
 
     def test_boil_bubbles_every_slot_on_its_own_beat(self):
-        frames = patterns.BUILD["deploying"]()
+        frames = patterns.boil(2.0)
         self.assertEqual(len(frames), 2 * patterns.FPS)
         firsts = [patterns.LEDS_PER_SLOT * s for s in range(patterns.SLOTS)]
         for i in firsts:
@@ -140,6 +137,159 @@ class PatternTest(unittest.TestCase):
         greens = {frame[4 * 3] for frame in frames}
         self.assertIn(patterns.GREEN, greens)
         self.assertLess(min(g for _, g, _ in greens), 50)
+
+
+class ShippedDisplaysTest(unittest.TestCase):
+    """The real directory: a bad drop-in fails here, so it never deploys."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.named, cls.errors = displays.load()
+
+    def test_every_file_loads_clean(self):
+        self.assertEqual(self.errors, [])
+        self.assertGreaterEqual(len({d.file for d in self.named.values()}), 3)
+
+    def test_every_jenkins_kind_has_its_display(self):
+        text = (JENKINS / "lib" / "plasma.groovy").read_text()
+        kinds = re.findall(r"'(\w+)'", re.search(r"def kinds = \[(.*?)\]", text).group(1))
+        self.assertGreater(len(kinds), 5)
+        for kind in kinds:
+            self.assertEqual(self.named[f"stage-{kind}"].file, "jenkins.toml")
+
+    def test_the_board_and_deploys_only_ask_for_displays_that_exist(self):
+        root = Path(__file__).resolve().parents[2]
+        lights = (root / "brick-status" / "brick_status" / "lights.py").read_text()
+        asked = set(re.findall(r'return "([a-z]+)"', lights)) | set(re.findall(r'self\.show\("([a-z]+)"\)', lights))
+        script = (root / "brick9000" / "build-status.sh").read_text()
+        asked |= set(re.findall(r"plasma_signal ([a-z-]+) \d+", script))
+        self.assertGreater(len(asked), 10, asked)  # the regexes still find them
+        self.assertLessEqual(asked, set(self.named))
+
+    def test_the_order_of_priorities(self):
+        priority = {name: d.priority for name, d in self.named.items()}
+        active = int(re.search(r"PRIORITY_ACTIVE = (\d+)", (JENKINS.parent / "brick-status" / "brick_status"
+                                                            / "lights.py").read_text())[1])
+        self.assertLess(priority["alert"], priority["stage-test"])
+        self.assertLess(priority["stage-test"], priority["nightly"])
+        self.assertLess(priority["nightly"], active)
+        self.assertLess(active, priority["deploying"])
+        self.assertLess(priority["deploying"], priority["off"])
+
+
+class DropInTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+
+    def write(self, name, text):
+        (self.directory / name).write_text(text)
+
+    def test_a_new_source_needs_only_a_file(self):
+        self.write("garage.toml", """
+[defaults]
+priority = 40
+ttl = 120
+
+[displays.door-open]
+effect = "chase"
+color = "#ff0000"
+seconds = 1.0
+tail = 2
+
+[displays.door-shut]
+effect = "solid"
+color = [0, 255, 0]
+priority = 45
+slots = [3, 4]
+""")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(errors, [])
+        door = named["door-open"]
+        self.assertEqual((door.priority, door.ttl, door.file, len(door.frames)), (40, 120.0, "garage.toml", 60))
+        self.assertEqual(named["door-shut"].priority, 45)
+        wire = named["door-shut"].frames[0]
+        self.assertEqual(wire[4:8], bytes([0xFF, 0, 0, 0]))  # slot 0 dark
+        self.assertEqual(wire[4 + 12 * 4:4 + 12 * 4 + 4], bytes([0xFF, 0, 255, 0]))  # slot 3 lit
+
+    def test_a_display_without_defaults_gets_the_apis(self):
+        self.write("a.toml", '[displays.x]\neffect = "rainbow"\nseconds = 1\n')
+        named, _ = displays.load(self.directory)
+        self.assertEqual((named["x"].priority, named["x"].ttl), (signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL))
+
+    def test_a_file_that_wont_parse_costs_only_itself(self):
+        self.write("a-broken.toml", "this is not [toml")
+        self.write("b-good.toml", '[displays.good]\neffect = "boil"\n')
+        named, errors = displays.load(self.directory)
+        self.assertEqual(list(named), ["good"])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("a-broken.toml", errors[0])
+
+    def test_a_bad_display_costs_only_itself(self):
+        self.write("a.toml", """
+[displays.good]
+effect = "boil"
+
+[displays.no-effect]
+color = "#ff0000"
+
+[displays.bad-effect]
+effect = "sparkle"
+
+[displays.bad-colour]
+effect = "solid"
+color = "mauve"
+
+[displays.bad-setting]
+effect = "chase"
+color = "#ff0000"
+wobble = 3
+
+[displays.colour-for-rainbow]
+effect = "rainbow"
+color = "#ff0000"
+
+[displays.bad-priority]
+effect = "boil"
+priority = 101
+
+[displays.bad-ttl]
+effect = "boil"
+ttl = 99999
+
+[displays.too-long]
+effect = "boil"
+seconds = 3600
+
+[displays.bad-slots]
+effect = "boil"
+slots = [10]
+
+[displays.bad-number]
+effect = "pulse"
+color = "#ff0000"
+low = "dim"
+""")
+        named, errors = displays.load(self.directory)
+        self.assertEqual(list(named), ["good"])
+        self.assertEqual(len(errors), 10, errors)
+
+    def test_the_first_file_keeps_a_name_two_want(self):
+        self.write("a.toml", '[displays.same]\neffect = "boil"\n')
+        self.write("b.toml", '[displays.same]\neffect = "rainbow"\n')
+        named, errors = displays.load(self.directory)
+        self.assertEqual(named["same"].file, "a.toml")
+        self.assertIn("already defined in a.toml", errors[0])
+
+    def test_a_typo_in_defaults_is_reported(self):
+        self.write("a.toml", '[defaults]\npriorty = 90\n\n[displays.x]\neffect = "boil"\n')
+        named, errors = displays.load(self.directory)
+        self.assertIn("priorty", errors[0])
+        self.assertEqual(named["x"].priority, signals.DEFAULT_PRIORITY)
+
+    def test_an_empty_directory_is_no_displays(self):
+        self.assertEqual(displays.load(self.directory), ({}, []))
 
 
 class SignalsTest(unittest.TestCase):
@@ -291,7 +441,7 @@ class RendererTest(unittest.TestCase):
 class ApiTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.catalog = web.Catalog()
+        cls.catalog = web.Catalog(*displays.load())
 
     def setUp(self):
         self.clock = Clock()
@@ -322,12 +472,21 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(self.showing(), {"source": "job-1", "pattern": "stage-test", "priority": 60,
                                           "expires_in": 90.0})
         winner = self.board.winner(self.clock.now)
-        self.assertIs(winner.frames, self.catalog.named["stage-test"])
+        self.assertIs(winner.frames, self.catalog.named["stage-test"].frames)
 
     def test_the_defaults(self):
-        self.call("PUT", "/signals/a", {"pattern": "calm"})
+        self.call("PUT", "/signals/a", {"color": "#ffffff"})
         shown = self.showing()
         self.assertEqual((shown["priority"], shown["expires_in"]), (signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL))
+
+    def test_a_display_brings_its_own_priority_and_a_sender_can_overrule_it(self):
+        self.call("PUT", "/signals/a", {"pattern": "deploying"})
+        self.assertEqual(self.showing()["priority"], 80)
+        self.call("PUT", "/signals/a", {"pattern": "deploying", "priority": 20, "ttl": 5})
+        self.assertEqual((self.showing()["priority"], self.showing()["expires_in"]), (20, 5.0))
+
+    def test_a_colourless_effect_is_refused_a_colour(self):
+        self.assertEqual(self.call("PUT", "/signals/a", {"color": "#ffffff", "effect": "rainbow"})[0], 400)
 
     def test_any_colour_in_any_effect(self):
         self.assertEqual(self.call("PUT", "/signals/a", {"color": "#ff8000"})[0], 200)
@@ -388,9 +547,9 @@ class ApiTest(unittest.TestCase):
     def test_what_can_be_asked_for_is_listed(self):
         status, reply = self.call("GET", "/patterns")
         self.assertEqual(status, 200)
-        self.assertIn("stage-push", reply["patterns"])
-        self.assertIn("off", reply["patterns"])
+        self.assertEqual(reply["patterns"]["stage-push"], {"priority": 50, "ttl": 30.0, "file": "jenkins.toml"})
         self.assertIn("chase", reply["effects"])
+        self.assertEqual(reply["errors"], [])
 
     def test_metrics_and_health(self):
         self.assertEqual(self.call("GET", "/healthz")[0], 200)
