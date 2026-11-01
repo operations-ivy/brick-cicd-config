@@ -1,14 +1,14 @@
-"""Plasma LED patterns, written as the PNGs the plasma daemon animates.
+"""Plasma LED patterns: lists of frames, one colour per LED.
 
-Each PNG is 40 pixels wide (10 button slots x 4 LEDs) and one row per frame;
-the daemon plays rows at 60 frames per second and loops.
+A frame is 40 colours (10 button slots x 4 LEDs); the renderer plays them at
+60 frames per second and loops.
 """
 
 import colorsys
+import inspect
 import math
 import random
-import struct
-import zlib
+import re
 
 SLOTS = 10
 LEDS_PER_SLOT = 4
@@ -23,8 +23,6 @@ CYAN = (0, 200, 255)
 BLUE = (40, 90, 255)
 PURPLE = (170, 60, 255)
 OFF = (0, 0, 0)
-
-STATE_COLOURS = {"ok": GREEN, "warn": AMBER, "fail": RED, "active": GREEN, "unknown": GREY}
 
 Rgb = tuple[int, int, int]
 Frame = list[Rgb]
@@ -43,7 +41,7 @@ def _breathe(t: float, low: float, high: float) -> float:
     return low + (high - low) * (0.5 - 0.5 * math.cos(2 * math.pi * t))
 
 
-def pulse(colour: Rgb, seconds: float, low: float, high: float = 1.0) -> list[Frame]:
+def pulse(colour: Rgb, seconds: float, low: float = 0.1, high: float = 1.0) -> list[Frame]:
     n = int(seconds * FPS)
     return [_slots([_scale(colour, _breathe(f / n, low, high))] * SLOTS) for f in range(n)]
 
@@ -250,47 +248,58 @@ def flash(colour: Rgb, seconds: float) -> list[Frame]:
     return [_slots([colour if f < n // 2 else OFF] * SLOTS) for f in range(n)]
 
 
-# Idle patterns, one per board event, highest priority first.
-IDLE = {
-    "nightly": lambda: nightly(8.0),
-    "alert": lambda: pulse(RED, 1.0, 0.15),
-    "building": lambda: chase(AMBER, 1.5),
-    "uploading": lambda: pulse(GREEN, 2.0, 0.1),
-    "warn": lambda: pulse(AMBER, 3.0, 0.05, 0.6),
-    "unknown": lambda: pulse(GREY, 4.0, 0.05, 0.4),
-    "calm": lambda: pulse(GREEN, 6.0, 0.03),
-}
+def solid(colour: Rgb, seconds: float = 0.0) -> list[Frame]:
+    """One colour, still: a single frame, whatever seconds says."""
+    return [[colour] * WIDTH]
 
-# Jenkins build stages, from the plasma library's mark on a running build
-# (jenkins/lib/plasma.groovy, checks.PLASMA_STAGES): "stage-<kind>" patterns.
-STAGES = {
-    "checkout": lambda: stream(CYAN, 1.5),
-    "install": lambda: fill(AMBER, 2.0),
-    "test": lambda: scanner(GREEN, 1.6),
-    "verify": lambda: converge(PURPLE, 1.6),
-    "build": lambda: rainbow(0.75),
-    "push": lambda: rush(BLUE, 1.0),
-    "deploy": lambda: boil(2.0),
-}
-IDLE.update({f"stage-{kind}": make for kind, make in STAGES.items()})
 
-# Image builds and deploys on brick9000 (see build.py). These take over the
-# lights in idle and active mode alike; a deploy outranks an image build.
-BUILD = {
-    "deploying": lambda: boil(2.0),
-    "image-building": lambda: rainbow(0.75),
-    "image-pushed": lambda: flash(GREEN, 0.5),
-    "image-failed": lambda: pulse(RED, 0.8, 0.0),
+# What a display can be made of (displays/*.yaml, or a signal's "effect"). A
+# new animation is a function above and a line here; its keyword arguments are
+# then a display's settings.
+EFFECTS = {
+    "solid": solid,
+    "pulse": pulse,
+    "flash": flash,
+    "chase": chase,
+    "stream": stream,
+    "fill": fill,
+    "scanner": scanner,
+    "rush": rush,
+    "converge": converge,
+    "rainbow": rainbow,
+    "boil": boil,
+    "nightly": nightly,
 }
 
 
-def png(frames: list[Frame]) -> bytes:
-    """Encode frames as a 24-bit RGB PNG, one row per frame."""
-    raw = b"".join(b"\x00" + bytes(v for px in row for v in px) for row in frames)
+def parse_colour(value) -> Rgb:
+    """[r, g, b] or "#rrggbb"."""
+    if isinstance(value, str) and re.fullmatch(r"#?[0-9a-fA-F]{6}", value):
+        digits = value.lstrip("#")
+        return tuple(int(digits[i:i + 2], 16) for i in (0, 2, 4))
+    if (isinstance(value, list) and len(value) == 3
+            and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in value)):
+        return tuple(value)
+    raise ValueError(f'not a colour: {value!r} (use [r, g, b] or "#rrggbb")')
 
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
-    header = struct.pack(">IIBBBBB", len(frames[0]), len(frames), 8, 2, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+def make(effect: str, color: Rgb | None = None, **params) -> list[Frame]:
+    """An effect's frames. ValueError if there's no such effect or it doesn't
+    take these settings, as with a colour for the rainbow."""
+    if effect not in EFFECTS:
+        raise ValueError(f"no effect {effect!r}")
+    if color is not None:
+        params["colour"] = color
+    try:
+        inspect.signature(EFFECTS[effect]).bind(**params)
+    except TypeError as e:
+        raise ValueError(f"{effect}: {e}") from None
+    return EFFECTS[effect](**params)
+
+
+def only_slots(frames: list[Frame], slots: list[int]) -> list[Frame]:
+    """The frames with every button but these dark."""
+    if not isinstance(slots, list) or not all(type(s) is int and 0 <= s < SLOTS for s in slots):
+        raise ValueError(f"slots must be a list of 0 to {SLOTS - 1}")
+    keep = {i for s in slots for i in range(s * LEDS_PER_SLOT, (s + 1) * LEDS_PER_SLOT)}
+    return [[c if i in keep else OFF for i, c in enumerate(frame)] for frame in frames]

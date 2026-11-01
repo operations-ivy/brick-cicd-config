@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import build, checks, host, lights, notify, units, web
+from . import checks, host, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
@@ -132,11 +132,9 @@ def main() -> None:
 
     board = Board(VIEWS, settings.active_seconds, settings.quiet, settings.wake_seconds)
     status = Status()
-    plasma = lights.Plasma(settings.plasma_fifo, settings.pattern_dir, settings.pattern_prefix)
+    plasma = lights.Plasma(settings.plasma_url)
     screen = Screen(settings.wlopm)
     wake = threading.Event()  # set when anything changed, so lights react at once
-
-    plasma.install_patterns()
 
     def on_key(code: int) -> None:
         now = time.time()
@@ -160,7 +158,6 @@ def main() -> None:
     log.info("brick-status up: prometheus=%s board=http://%s:%d",
              settings.prometheus_url, settings.http_host, settings.http_port)
 
-    last_active = None
     while True:
         wake.wait(timeout=1.0)
         wake.clear()
@@ -173,32 +170,17 @@ def main() -> None:
         summary = status.get()
         screen.set(mode != QUIET)
 
-        # brick9000 deploying itself boils the buttons; it outranks the image
-        # builds it runs along the way.
-        building = (build.light_pattern(settings.deploy_status, now, settings.build_result_seconds,
-                                        running="deploying", min_running_seconds=settings.deploy_min_seconds)
-                    or build.light_pattern(settings.build_status, now, settings.build_result_seconds))
-
-        lights_state = ("off" if mode == QUIET else "build" if building
-                        else "active" if mode == ACTIVE else "idle")
-        bm.one_hot(bm.LIGHTS, "state", lights_state, ("off", "build", "active", "idle"))
+        lights_state = "off" if mode == QUIET else "active" if mode == ACTIVE else "idle"
+        bm.one_hot(bm.LIGHTS, "state", lights_state, ("off", "active", "idle"))
         if mode == QUIET:
             plasma.off()
-            last_active = None
-        elif building:  # a deploy or build on brick9000 takes over the lights
-            plasma.show(building)
-            last_active = None
         elif mode == ACTIVE:
             states = {g: v["state"] for g, v in summary["groups"].items()}
             states["overview"] = summary["overall"]
-            key = (board.view(now), tuple(sorted(states.items())))
-            if key != last_active:  # only rewrite the PNG when something changed
-                plasma.show("active", lights.active_frames(states, VIEWS, settings.button_slots, key[0]))
-                last_active = key
+            plasma.buttons(states, VIEWS, settings.button_slots, board.view(now))
         else:  # idle: the lights show the most important event
             all_checks = [c for g in summary["groups"].values() for c in g["checks"]]
             plasma.show(lights.idle_pattern(all_checks))
-            last_active = None
 
 
 if __name__ == "__main__":

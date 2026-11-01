@@ -38,10 +38,8 @@ class Settings:
     poll_seconds: float = 15.0
     http_host: str = "127.0.0.1"
     http_port: int = 8765
-    plasma_fifo: str = "/tmp/plasma"
-    # Pattern names are relative to the plasma daemon's /etc/plasma/.
-    pattern_dir: str = "/etc/plasma/brick-status"
-    pattern_prefix: str = "brick-status"
+    # The plasma API (brick-plasma/), on this machine.
+    plasma_url: str = "http://127.0.0.1:8766"
     # Seconds after the last button press before the board goes back to idle.
     active_seconds: float = 120.0
     cmatrix: str = "cmatrix"
@@ -58,16 +56,6 @@ class Settings:
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
     # row, then left to right along the bottom.
     button_slots: list[int] = field(default_factory=lambda: [2, 1, 0, 3, 4, 5])
-    # Written by brick9000/build-image; drives the build lights.
-    build_status: str = os.path.join(
-        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/status.json")
-    # Written by brick9000/deploy; boils the buttons while it runs.
-    deploy_status: str = os.path.join(
-        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-build/deploy.json")
-    # How long the lights show a finished build's result.
-    build_result_seconds: float = 60.0
-    # The shortest a deploy boils the buttons, so a no-op deploy is still seen.
-    deploy_min_seconds: float = 10.0
     # brick-retro keeps this file while RetroArch is open: the screen stays on.
     retro_flag: str = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "brick-retro.playing")
     input_device_name: str = "gpio_keys"
@@ -103,13 +91,8 @@ class Settings:
         s.jenkins_password = env("BRICK_STATUS_JENKINS_PASSWORD", s.jenkins_password)
         s.http_host = env("BRICK_STATUS_HTTP_HOST", s.http_host)
         s.http_port = int(env("BRICK_STATUS_HTTP_PORT", s.http_port))
-        s.plasma_fifo = env("BRICK_STATUS_PLASMA_FIFO", s.plasma_fifo)
-        s.pattern_dir = env("BRICK_STATUS_PATTERN_DIR", s.pattern_dir)
+        s.plasma_url = env("BRICK_STATUS_PLASMA_URL", s.plasma_url).rstrip("/")
         s.active_seconds = float(env("BRICK_STATUS_ACTIVE_SECONDS", s.active_seconds))
-        s.build_status = env("BRICK_STATUS_BUILD_STATUS", s.build_status)
-        s.deploy_status = env("BRICK_STATUS_DEPLOY_STATUS", s.deploy_status)
-        s.build_result_seconds = float(env("BRICK_STATUS_BUILD_RESULT_SECONDS", s.build_result_seconds))
-        s.deploy_min_seconds = float(env("BRICK_STATUS_DEPLOY_MIN_SECONDS", s.deploy_min_seconds))
         s.input_device_name = env("BRICK_STATUS_INPUT_DEVICE", s.input_device_name)
         s.retro_flag = env("BRICK_STATUS_RETRO_FLAG", s.retro_flag)
         s.wlopm = env("BRICK_STATUS_WLOPM", s.wlopm)

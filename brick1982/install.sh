@@ -17,6 +17,9 @@ fi
 cp "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-units.service" "$here/brick-units.timer" ~/.config/systemd/user/
 
+# brick1982/deploy runs scripts/test, and brick-plasma's tests load its YAML.
+sudo apt-get install -y python3-yaml
+
 # Prometheus scrapes brick1982 like brick9000 (not a cluster node since
 # 2026-10-14): node-exporter on :9100 with the cluster DaemonSet's flags,
 # reading brick-units' report from the textfile directory.

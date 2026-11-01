@@ -1,0 +1,53 @@
+# brick-status: the board's own health and quiet hours (lights.idle_pattern).
+defaults:
+  priority: 10
+
+displays:
+  alert:
+    effect: pulse
+    color: "#ff0000"
+    seconds: 1.0
+    low: 0.15
+
+  building:
+    effect: chase
+    color: "#ff8c00"
+    seconds: 1.5
+
+  uploading:
+    effect: pulse
+    color: "#00ff00"
+    seconds: 2.0
+    low: 0.1
+
+  warn:
+    effect: pulse
+    color: "#ff8c00"
+    seconds: 3.0
+    low: 0.05
+    high: 0.6
+
+  unknown:
+    effect: pulse
+    color: "#5a5a6e"
+    seconds: 4.0
+    low: 0.05
+    high: 0.4
+
+  calm:
+    effect: pulse
+    color: "#00ff00"
+    seconds: 6.0
+    low: 0.03
+
+  # Over a build's stages: Jenkins' nightly test-all, for the minutes it runs.
+  nightly:
+    effect: nightly
+    seconds: 8.0
+    priority: 60
+
+  # Quiet hours: nothing else gets through.
+  "off":
+    effect: solid
+    color: "#000000"
+    priority: 100

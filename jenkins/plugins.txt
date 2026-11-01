@@ -9,3 +9,4 @@ prometheus
 timestamper
 # Agent pods for build and test jobs (values.yaml, agent:).
 kubernetes
+http_request

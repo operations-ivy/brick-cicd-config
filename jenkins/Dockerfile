@@ -14,7 +14,7 @@ ARG KUBECTL_VERSION=v1.36.4
 ARG HELM_VERSION=v3.22.0
 ARG DOCKER_VERSION=29.8.1
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client python3 \
+    && apt-get install -y --no-install-recommends openssh-client python3 python3-yaml \
     && rm -rf /var/lib/apt/lists/* \
     && arch=$(dpkg --print-architecture) \
     && cd /tmp \

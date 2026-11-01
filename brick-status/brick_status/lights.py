@@ -1,15 +1,26 @@
-"""Drive the plasma daemon through its command FIFO."""
+"""The board's say on the button lights, through the plasma API (brick-plasma/).
 
+The board is one sender, "board": it holds one signal, changing it with the
+mode, and repeats it so the API's time limit only runs out if brick-status
+dies. Other senders (Jenkins, deploys) outrank it by priority.
+"""
+
+import http.client
+import json
 import logging
-import os
+import time
+from urllib.parse import urlsplit
 
-from . import patterns
 from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
 
 log = logging.getLogger(__name__)
 
-# Plasma stage kinds, least to most important (checks.PLASMA_STAGES).
-STAGE_ORDER = ["checkout", "install", "test", "verify", "build", "push", "deploy"]
+# A display's priority is in its file (brick-plasma/displays/board.yaml). The
+# view buttons aren't a named display: over a build, under a deploy.
+PRIORITY_ACTIVE = 70
+
+GREEN, AMBER, RED, GREY = [0, 255, 0], [255, 140, 0], [255, 0, 0], [90, 90, 110]
+STATE_COLOURS = {OK: GREEN, WARN: AMBER, FAIL: RED, ACTIVE: GREEN, UNKNOWN: GREY}
 
 
 def idle_pattern(checks: list[dict]) -> str:
@@ -21,11 +32,6 @@ def idle_pattern(checks: list[dict]) -> str:
         return "nightly"
     if FAIL in states:
         return "alert"
-    # A build marked by the plasma library: its stage's pattern. With several,
-    # the stage furthest along wins.
-    staged = [c["stage"] for c in checks if c["group"] == "builds" and c["state"] == ACTIVE and c.get("stage")]
-    if staged:
-        return "stage-" + max(staged, key=STAGE_ORDER.index)
     if "builds" in running:
         return "building"
     if "wigle" in running:
@@ -37,80 +43,63 @@ def idle_pattern(checks: list[dict]) -> str:
     return "calm"
 
 
-# The daemon bit-bangs the LEDs from Python: a frame costs about 90 ms of CPU
-# and 220 ms of wall time, whatever its fps says, so 30 fps is really about 4
-# and a third of a core (brick-cicd-config#96). Off and the slow calm pulse
-# don't need that; everything else keeps the daemon's default.
-DEFAULT_FPS = 30
-PATTERN_FPS = {"off": 1, "calm": 2}
-
-
 class Plasma:
-    def __init__(self, fifo: str, pattern_dir: str, prefix: str):
-        self.fifo = fifo
-        self.pattern_dir = pattern_dir
-        self.prefix = prefix
-        self.current = None
-        self.fps = None
+    SOURCE = "board"
+    TTL = 30.0
+    HEARTBEAT = 10.0
+    TIMEOUT = 0.5  # the board's main loop waits on this
 
-    def install_patterns(self) -> None:
-        os.makedirs(self.pattern_dir, exist_ok=True)
-        for name, make in {**patterns.IDLE, **patterns.BUILD}.items():
-            self._write(name, make())
+    def __init__(self, url: str, clock=time.monotonic):
+        parts = urlsplit(url)
+        self.host, self.port = parts.hostname, parts.port or 80
+        self.clock = clock
+        self.sent, self.sent_at = None, 0.0
+        self.failing = False
 
-    def show(self, name: str, frames: list | None = None) -> None:
-        """Switch to a pattern, writing its PNG first if frames are given."""
-        if frames is not None:
-            self._write(name, frames)
-        elif name == self.current:
-            return
-        self._set_fps(PATTERN_FPS.get(name, DEFAULT_FPS))
-        # Only remember what was actually sent, so a missed command is retried.
-        self.current = name if self._send(f"{self.prefix}/{name}") else None
+    def show(self, pattern: str) -> None:
+        self._put({"pattern": pattern})
 
     def off(self) -> None:
-        if self.current != "off":
-            self._set_fps(PATTERN_FPS["off"])
-            self.current = "off" if self._send("0 0 0") else None
+        self.show("off")
 
-    def _set_fps(self, fps: int) -> None:
-        if fps != self.fps:
-            self.fps = fps if self._send(f"fps {fps}") else None
+    def buttons(self, group_states: dict[str, str], views: list[str], slots: list[int],
+                selected_view: int) -> None:
+        """Each view's button in its group's health colour."""
+        colours, busy = {}, []
+        for i, view in enumerate(views):
+            if i >= len(slots):
+                break
+            state = group_states.get(view, OK if view == "overview" else UNKNOWN)
+            colours[str(slots[i])] = STATE_COLOURS[state]
+            if state == ACTIVE:
+                busy.append(slots[i])
+        selected = slots[selected_view] if selected_view < len(slots) else None
+        self._put({"buttons": {"colors": colours, "selected": selected, "busy": busy},
+                   "priority": PRIORITY_ACTIVE})
 
-    def _write(self, name: str, frames: list) -> None:
-        path = os.path.join(self.pattern_dir, f"{name}.png")
-        tmp = path + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(patterns.png(frames))
-        os.replace(tmp, path)
+    def _put(self, signal: dict) -> None:
+        wanted = {**signal, "ttl": self.TTL}
+        now = self.clock()
+        if wanted == self.sent and now - self.sent_at < self.HEARTBEAT:
+            return
+        # Only remember what was actually sent, so a missed one is retried.
+        self.sent = wanted if self._send(wanted) else None
+        self.sent_at = now
 
-    def _send(self, command: str) -> bool:
-        # O_NONBLOCK: fail fast if the daemon isn't running instead of hanging.
+    def _send(self, body: dict) -> bool:
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=self.TIMEOUT)
         try:
-            fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK)
-        except OSError as e:
-            log.warning("plasma FIFO %s unavailable: %s", self.fifo, e)
-            return False
-        try:
-            os.write(fd, (command + "\n").encode())
-            return True
-        except OSError as e:
-            log.warning("plasma FIFO write failed: %s", e)
-            return False
+            connection.request("PUT", f"/signals/{self.SOURCE}", json.dumps(body),
+                               {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            response.read()
+            ok = response.status == 200
+            problem = response.status
+        except (OSError, http.client.HTTPException) as e:
+            ok, problem = False, e
         finally:
-            os.close(fd)
-
-
-def active_frames(group_states: dict[str, str], views: list[str], slots: list[int],
-                  selected_view: int) -> list:
-    """Frames lighting each view's button in its group's health colour."""
-    colours, busy = {}, set()
-    for i, view in enumerate(views):
-        if i >= len(slots):
-            break
-        state = group_states.get(view, OK if view == "overview" else UNKNOWN)
-        colours[slots[i]] = patterns.STATE_COLOURS[state]
-        if state == ACTIVE:
-            busy.add(slots[i])
-    selected = slots[selected_view] if selected_view < len(slots) else None
-    return patterns.buttons(colours, selected, busy)
+            connection.close()
+        if not ok and not self.failing:  # once, not every second
+            log.warning("plasma API: %s", problem)
+        self.failing = not ok
+        return ok
