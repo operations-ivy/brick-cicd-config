@@ -1,8 +1,9 @@
 #!/bin/sh
-# Release the cluster's Jenkins, from the laptop (README, "Jenkins").
-# Argo CD deploys it (brick-k8s-config's argocd/apps/jenkins.yaml, chart
-# pinned there): a merge to main is the deploy. This does the two halves Argo
-# can't:
+# The fallback for releasing the cluster's Jenkins, from the laptop, for when
+# Jenkins itself is broken. Normally build-branches builds the image from the
+# pushed branch and marks the commit on GitHub (README, "Releasing"). Argo CD
+# deploys it (brick-k8s-config's argocd/apps/jenkins.yaml, chart pinned
+# there): a merge to main is the deploy. This does the two halves by hand:
 #
 #   jenkins/release           before merging: build and push the image tag
 #   jenkins/release --check   after merging: wait for Argo CD to run that tag,

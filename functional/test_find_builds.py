@@ -84,3 +84,66 @@ class FindBuilds(unittest.TestCase):
     def test_a_kustomization_is_read_by_image(self):
         text = "images:\n  - name: whitepatrick/wigle-sync\n    newTag: 0.1.12\n  - name: whitepatrick/overwatch\n    newTag: 0.8.5\n"
         self.assertEqual(dict(fb.TAG.findall(text)), {SYNC: "0.1.12", "whitepatrick/overwatch": "0.8.5"})
+
+
+JENKINS_IMAGE = "whitepatrick/brick-jenkins"
+VALUES_ARGS = [*ARGS, f"{JENKINS_IMAGE}=brick-cicd-config:jenkins/values.yaml"]
+
+
+class FindBuildsFromValues(unittest.TestCase):
+    """An image whose tag a file names (jenkins/values.yaml): every branch."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.state, self.statuses = f"{d.name}/seen", f"{d.name}/statuses"
+
+    def poll(self, heads, tags, hub=None):
+        hub, asked = hub or {}, []
+
+        def fake_heads(repo, every=False):
+            asked.append((repo, every))
+            return heads.get(repo, {})
+
+        out = io.StringIO()
+        with (mock.patch.object(fb, "heads", side_effect=fake_heads),
+              mock.patch.object(fb, "pinned", side_effect=lambda _, ref: MAIN),
+              mock.patch.object(fb, "values_tag", side_effect=lambda repo, commit, path: tags.get(commit)),
+              mock.patch.object(fb, "on_hub", side_effect=lambda image, tag: hub.get((image, tag))),
+              mock.patch.object(sys, "argv", ["find-builds", self.state, "--statuses", self.statuses, *VALUES_ARGS]),
+              contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO())):
+            code = fb.main()
+        statuses = Path(self.statuses).read_text().splitlines()
+        return code, out.getvalue().splitlines(), statuses, asked
+
+    def test_any_branch_builds_the_tag_its_file_names(self):
+        code, lines, statuses, asked = self.poll({"brick-cicd-config": {"main": A, "front-buttons": B}},
+                                                 {A: "2.580.1-aaaaaaaaaaaa", B: "2.580.1-bbbbbbbbbbbb"},
+                                                 {(JENKINS_IMAGE, "2.580.1-aaaaaaaaaaaa"): A})
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, [f"{JENKINS_IMAGE} 2.580.1-bbbbbbbbbbbb {B}"])
+        self.assertEqual(sorted(statuses), sorted([
+            f"brick-cicd-config {B} {JENKINS_IMAGE} 2.580.1-bbbbbbbbbbbb pending",
+            f"brick-cicd-config {A} {JENKINS_IMAGE} 2.580.1-aaaaaaaaaaaa success"]))
+        self.assertIn(("brick-cicd-config", True), asked)  # every branch, not only feature/ and release/
+        self.assertIn(("wigle-sync", False), asked)
+
+    def test_the_same_tag_from_another_commit_is_the_same_image(self):
+        code, lines, statuses, _ = self.poll({"brick-cicd-config": {"docs-only": B}},
+                                             {B: "2.580.1-aaaaaaaaaaaa"},
+                                             {(JENKINS_IMAGE, "2.580.1-aaaaaaaaaaaa"): A})
+        self.assertEqual((code, lines), (0, []))
+        self.assertEqual(statuses, [f"brick-cicd-config {B} {JENKINS_IMAGE} 2.580.1-aaaaaaaaaaaa success"])
+
+    def test_each_head_is_marked_once(self):
+        heads, tags = {"brick-cicd-config": {"x": B}}, {B: "2.580.1-bbbbbbbbbbbb"}
+        self.assertEqual(len(self.poll(heads, tags)[2]), 1)
+        self.assertEqual(self.poll(heads, tags)[1:3], ([], []))
+
+    def test_a_branch_without_the_file_is_skipped(self):
+        self.assertEqual(self.poll({"brick-cicd-config": {"old": A}}, {})[1:3], ([], []))
+
+    def test_the_values_tag_line(self):
+        text = 'controller:\n  image:\n    tag: "2.580.1-0687f6b2ae59"\n  other:\n      tag: "nope"\n'
+        self.assertEqual(fb.VALUES_TAG.findall(text), ["2.580.1-0687f6b2ae59"])
+        self.assertEqual(fb.VALUES_TAG.findall('    tag: "x; rm -rf /"\n'), [])

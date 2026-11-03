@@ -167,21 +167,40 @@ so Jenkins can reach it again.
 
 Argo CD deploys Jenkins from `main` (brick-k8s-config's
 `argocd/apps/jenkins.yaml` pins the chart; the values and `namespace.yaml`
-come from here), so a merge is the deploy. Any change under `jenkins/` other
-than `values.yaml` changes the image, so bump `controller.image.tag` in
-`values.yaml` along with it (`<Jenkins version>-<n>`), and **build the image
-before merging**, from the branch:
+come from here), so a merge is the deploy. Releasing a change under
+`jenkins/` is: push the branch, wait for the check, merge.
 
 ```bash
-jenkins/release           # build and push the tag (brick2000's BuildKit)
-# merge; Argo CD deploys within a few minutes
-jenkins/release --check   # wait for that tag to run, check every job loaded
+jenkins/image-tag --write   # after changing jenkins/: the tests fail until you do
+git push                    # build-branches builds that tag within a few minutes
+# GitHub's "jenkins-image" check goes green; merge; Argo CD deploys it
 ```
 
-It refuses a tag already built from different files. `--check` restarts
-Jenkins once if the seed's jobs didn't load (see the script). To try a
-values change before merging: `scripts/trial-branch jenkins <branch>` in
-brick-k8s-config. Logs: `kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
+- **The tag is worked out, never picked** (`jenkins/image-tag`): the Jenkins
+  version, then a hash of every file the Dockerfile copies in. The same files
+  give the same tag and any change gives a new one, so branches can't collide
+  and a tag never names two different images.
+- **Jenkins builds its own image.** `build-branches` looks at every
+  brick-cicd-config branch every two minutes and builds the tag its
+  `values.yaml` names if Docker Hub doesn't have it (`build-image`, the
+  `whitepatrick/brick-jenkins` entry in `lib/build.groovy`; `verify-images`
+  leaves it out, since `apt-get` and downloads don't rebuild byte for byte).
+- **Each commit is marked on GitHub** as the status `jenkins-image`: pending
+  while it builds, then success or failure (`bin/github-status`, with the
+  fine-grained `github_token` in `jenkins/seal-secrets`). `main` requires it,
+  so a PR can't merge before its image exists: merging first would deploy a
+  tag nobody can pull and take Jenkins down, which then couldn't build it.
+  Statuses that can't be posted (no token yet) wait in a queue.
+- **Jobs load on the first start.** The seed runs again once Jenkins has
+  loaded its jobs from disk (`seed-after-load.groovy`, an init hook), so the
+  old restart for dropped jobs or unarmed cron timers isn't needed.
+
+**When Jenkins itself is broken** (it can't build its own fix), build the tag
+from the laptop: `jenkins/release` builds and pushes it on brick2000's
+BuildKit, and `jenkins/release --check` waits for Argo CD and checks every job
+loaded. It's the fallback, not the route. To try a values change before
+merging: `scripts/trial-branch jenkins <branch>` in brick-k8s-config. Logs:
+`kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
 
 ### Ports 80 and 443: the proxy (retired from brick9000, 2026-10-17)
 

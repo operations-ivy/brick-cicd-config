@@ -1133,6 +1133,62 @@ JENKINS = Path(__file__).resolve().parents[2] / "jenkins"
 BRICK9000 = JENKINS.parent / "brick9000"
 
 
+class JenkinsImageTagTest(unittest.TestCase):
+    """jenkins/image-tag: the tag is worked out from the image's files."""
+
+    def setUp(self):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("image_tag", str(JENKINS / "image-tag"))
+        spec = importlib.util.spec_from_loader("image_tag", loader)
+        self.it = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode, before = True, sys.dont_write_bytecode
+        try:
+            loader.exec_module(self.it)
+        finally:
+            sys.dont_write_bytecode = before
+
+    def test_values_yaml_names_the_tag_the_files_make(self):
+        self.assertEqual(self.it.pinned(), self.it.tag(),
+                         "run jenkins/image-tag --write after changing anything under jenkins/")
+        self.assertRegex(self.it.tag(), r"^\d+\.\d+\.\d+-[0-9a-f]{12}$")
+
+    def test_the_inputs_are_what_the_dockerfile_copies(self):
+        dockerfile = (JENKINS / "Dockerfile").read_text()
+        copied = set(re.findall(r"^COPY (?:--\S+ )*(\S+) ", dockerfile, re.M))
+        self.assertEqual(copied | {"Dockerfile"}, set(self.it.INPUTS))
+
+    def copy(self, d):
+        import shutil as sh
+        for name in self.it.INPUTS + ["values.yaml"]:
+            src = JENKINS / name
+            (sh.copytree if src.is_dir() else sh.copy)(src, Path(d) / name)
+        return Path(d)
+
+    def test_any_change_is_a_new_tag_and_leftovers_are_not(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = self.copy(d)  # not a git checkout: every file on disk counts
+            first = self.it.tag(root)
+            (root / "bin" / "__pycache__").mkdir()
+            (root / "bin" / "__pycache__" / "x.cpython-313.pyc").write_bytes(b"junk")
+            self.assertEqual(self.it.tag(root), first)
+            (root / "jobs" / "test-all.groovy").write_text((root / "jobs" / "test-all.groovy").read_text() + "\n")
+            second = self.it.tag(root)
+            self.assertNotEqual(second, first)
+            (root / "values.yaml").write_text((root / "values.yaml").read_text() + "# a comment\n")
+            self.assertEqual(self.it.tag(root), second)  # values.yaml isn't in the image
+
+    def test_write_puts_it_in_values_yaml(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = self.copy(d)
+            values = root / "values.yaml"
+            values.write_text(self.it.TAG_LINE.sub(r'\g<1>2.580.1-18\g<3>', values.read_text()))
+            self.assertEqual(self.it.pinned(root), "2.580.1-18")
+            self.assertEqual(self.it.write(root), self.it.tag(root))
+            self.assertEqual(self.it.pinned(root), self.it.tag(root))
+
+
 class JenkinsJobsTest(unittest.TestCase):
     """What seed.groovy expects of each job file, and scripts that at least parse.
     deploy runs these before switching brick9000 to a new commit."""
@@ -1207,7 +1263,21 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertIn(needle, lib)
         images = set(re.findall(r"'(whitepatrick/[\w-]+)':", lib))
         self.assertEqual(images, {"whitepatrick/wigle-sync", "whitepatrick/wigle-console", "whitepatrick/joke-reader",
-                                  "whitepatrick/joke-importer", "whitepatrick/overwatch"})
+                                  "whitepatrick/joke-importer", "whitepatrick/overwatch", "whitepatrick/brick-jenkins"})
+
+    def test_jenkins_builds_its_own_image_and_marks_the_commit(self):
+        lib = (JENKINS / "lib" / "build.groovy").read_text()
+        entry = re.search(r"'whitepatrick/brick-jenkins': \[(.*?)\]", lib, re.S).group(1)
+        for needle in ("repo: 'brick-cicd-config'", "context: 'jenkins'", "tagArg: 'BRICK_JENKINS_TAG'",
+                       "values: 'jenkins/values.yaml'", "verify: false"):
+            self.assertIn(needle, entry)
+        self.assertIn("ARG BRICK_JENKINS_TAG", (JENKINS / "Dockerfile").read_text())
+        self.assertIn("it.value.verify != false", (JENKINS / "jobs" / "verify-images.groovy").read_text())
+        branches = (JENKINS / "jobs" / "build-branches.groovy").read_text()
+        self.assertIn("--statuses", branches)
+        self.assertIn("entry.values", branches)
+        self.assertEqual(branches.count("/usr/share/brick-jenkins/bin/github-status"), 2)  # after each poll and build
+        self.assertTrue((JENKINS / "bin" / "github-status").stat().st_mode & 0o111)
 
     def test_the_hub_push_credential_comes_from_the_sealed_secret(self):
         values = (JENKINS / "values.yaml").read_text()

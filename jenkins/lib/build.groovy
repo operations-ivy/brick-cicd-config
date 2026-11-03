@@ -9,7 +9,12 @@
 // builds the same digest (proven on brick2000, 2026-10-13: two --no-cache
 // builds of wigle-sync 9af5ee8 gave the same sha256:02f6ac72...).
 
-// Every image built from these repos: name -> repo and Dockerfile.
+// Every image built from these repos: name -> repo and Dockerfile. Optional:
+// context, the build's folder in the repo (default the root); tagArg, a build
+// argument the tag is passed in; values, the file a branch names its tag in
+// (build-branches builds every branch's, not just feature/ and release/);
+// verify: false, left out of verify-images (it installs packages and
+// downloads, so it can't rebuild to the same digest).
 def brickImages() {
     return [
         'whitepatrick/wigle-sync':    [repo: 'wigle-sync', dockerfile: 'Dockerfile'],
@@ -17,6 +22,8 @@ def brickImages() {
         'whitepatrick/joke-reader':   [repo: 'chucks-wisdom', dockerfile: 'Dockerfile.web'],
         'whitepatrick/joke-importer': [repo: 'chucks-wisdom', dockerfile: 'Dockerfile.db'],
         'whitepatrick/overwatch':     [repo: 'overwatch', dockerfile: 'Dockerfile'],
+        'whitepatrick/brick-jenkins': [repo: 'brick-cicd-config', dockerfile: 'Dockerfile', context: 'jenkins',
+                                       tagArg: 'BRICK_JENKINS_TAG', values: 'jenkins/values.yaml', verify: false],
     ]
 }
 
@@ -88,8 +95,10 @@ def checkoutForBuild(String image, String ref, String dir) {
 def buildImage(String image, String tag, String dir, String revision, String epoch,
                boolean push = false, boolean noCache = false) {
     def entry = brickImages()[image]
-    def opts = "--frontend dockerfile.v0 --local context='${dir}' --local dockerfile='${dir}' " +
+    def context = entry.context ? "${dir}/${entry.context}" : dir
+    def opts = "--frontend dockerfile.v0 --local context='${context}' --local dockerfile='${context}' " +
                "--opt filename='${entry.dockerfile}' --opt build-arg:SOURCE_DATE_EPOCH=${epoch} " +
+               (entry.tagArg ? "--opt build-arg:${entry.tagArg}=${tag} " : '') +
                "--opt label:org.opencontainers.image.revision=${revision} " +
                "--opt label:org.opencontainers.image.source=https://github.com/operations-ivy/${entry.repo} " +
                (noCache ? '--no-cache ' : '') +

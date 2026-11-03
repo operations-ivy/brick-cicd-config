@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Mark commits on GitHub with whether their Jenkins image is built.
+
+    github-status QUEUE [FILE]
+
+FILE has one `repo commit image tag state [url]` per line (find-builds
+--statuses, or build-branches after a build); state is pending, success or
+failure. They join QUEUE, newest state per commit winning, and everything in
+QUEUE is posted as the commit status "jenkins-image" (brick-cicd-config's
+main requires it, so a PR merges only once its image exists). What can't be
+posted (no token yet, GitHub down) stays queued for the next run; the queue
+keeps the newest MAX_QUEUED commits.
+
+The token is a fine-grained one for the repo with "Commit statuses: Read and
+write" only, in the brick-jenkins Secret as github-token (jenkins/seal-secrets).
+It's never printed. Exits 0 whatever happens: a status is never worth failing
+a build for.
+"""
+
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+CONTEXT = "jenkins-image"
+TOKEN_FILE = os.environ.get("GITHUB_TOKEN_FILE", "/run/secrets/additional/github-token")
+API = os.environ.get("GITHUB_API", "https://api.github.com")
+MAX_QUEUED = 200
+LINE = re.compile(r"^([\w.-]+) ([0-9a-f]{40}) ([\w./-]+) ([\w.-]+) (pending|success|failure)(?: (https?://\S+))?$")
+SAYS = {
+    "pending": "building {image}:{tag}",
+    "success": "{image}:{tag} is on Docker Hub",
+    "failure": "{image}:{tag} didn't build",
+}
+
+
+def read(path: str) -> list[tuple]:
+    try:
+        with open(path) as f:
+            return [m.groups() for m in map(LINE.match, f.read().splitlines()) if m]
+    except FileNotFoundError:
+        return []
+
+
+def merge(queued: list[tuple], new: list[tuple]) -> list[tuple]:
+    """One entry per (repo, commit), the newest state; the oldest drop off past MAX_QUEUED."""
+    by_commit = {}
+    for entry in queued + new:
+        by_commit.pop((entry[0], entry[1]), None)
+        by_commit[(entry[0], entry[1])] = entry
+    return list(by_commit.values())[-MAX_QUEUED:]
+
+
+def post(token: str, entry: tuple) -> bool:
+    repo, commit, image, tag, state, url = entry
+    body = {"state": state, "context": CONTEXT, "description": SAYS[state].format(image=image, tag=tag)[:140]}
+    if url:
+        body["target_url"] = url
+    request = urllib.request.Request(f"{API}/repos/operations-ivy/{repo}/statuses/{commit}",
+                                     data=json.dumps(body).encode(), method="POST", headers={
+                                         "Authorization": f"Bearer {token}",
+                                         "Accept": "application/vnd.github+json",
+                                         "X-GitHub-Api-Version": "2022-11-28",
+                                         "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as reply:
+            return reply.status == 201
+    except urllib.error.HTTPError as e:
+        print(f"github-status: {repo} {commit[:12]}: GitHub answered {e.code}", file=sys.stderr)
+        return e.code == 422  # a commit GitHub doesn't know (a branch rewritten): nothing to retry
+    except OSError as e:
+        print(f"github-status: can't reach GitHub ({getattr(e, 'reason', e)})", file=sys.stderr)
+        return False
+
+
+def main(argv: list[str]) -> int:
+    if not 1 <= len(argv) <= 2:
+        print("usage: github-status QUEUE [FILE]", file=sys.stderr)
+        return 0
+    queue = argv[0]
+    entries = merge(read(queue), read(argv[1]) if len(argv) == 2 else [])
+    try:
+        with open(TOKEN_FILE) as f:
+            token = f.read().strip()
+    except OSError:
+        token = ""
+    if not token:
+        if entries:
+            print(f"github-status: no token in {TOKEN_FILE}; {len(entries)} status(es) wait for it", file=sys.stderr)
+        left = entries
+    else:
+        left = [entry for entry in entries if not post(token, entry)]
+    tmp = queue + ".tmp"
+    with open(tmp, "w") as f:
+        f.writelines(" ".join(part for part in entry if part) + "\n" for entry in left)
+    os.replace(tmp, queue)
+    posted = len(entries) - len(left)
+    if posted:
+        print(f"github-status: posted {posted}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
