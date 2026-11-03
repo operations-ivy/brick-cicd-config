@@ -196,9 +196,21 @@ git push                    # build-branches builds that tag within a few minute
   old restart for dropped jobs or unarmed cron timers isn't needed.
 
 **When Jenkins itself is broken** (it can't build its own fix), build the tag
-from the laptop: `jenkins/release` builds and pushes it on brick2000's
-BuildKit, and `jenkins/release --check` waits for Argo CD and checks every job
-loaded. It's the fallback, not the route. To try a values change before
+from the laptop and mark the commit by hand. `main` requires `jenkins-image`
+for admins too, so nothing merges without that mark:
+
+```bash
+jenkins/image-tag --write && git commit -am ... && git push   # the fix, on a branch
+jenkins/release                    # build and push the tag on brick2000's BuildKit
+gh api repos/operations-ivy/brick-cicd-config/statuses/"$(git rev-parse HEAD)" \
+    -f state=success -f context=jenkins-image -f description="built by hand (jenkins/release)"
+# merge the PR; Argo CD deploys it
+jenkins/release --check            # wait for it to run, check every job loaded
+```
+
+Mark only a commit whose tag `jenkins/release` just built or found on Docker
+Hub: the check is what keeps a merge from deploying a tag nobody can pull. It's
+the fallback, not the route. To try a values change before
 merging: `scripts/trial-branch jenkins <branch>` in brick-k8s-config. Logs:
 `kubectl -n jenkins logs statefulset/jenkins -c jenkins`.
 
