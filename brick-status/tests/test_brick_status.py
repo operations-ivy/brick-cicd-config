@@ -1279,6 +1279,26 @@ class JenkinsJobsTest(unittest.TestCase):
         self.assertEqual(branches.count("/usr/share/brick-jenkins/bin/github-status"), 2)  # after each poll and build
         self.assertTrue((JENKINS / "bin" / "github-status").stat().st_mode & 0o111)
 
+    def test_a_postsync_hook_checks_every_job_loaded(self):
+        import yaml
+        objects = yaml.safe_load((JENKINS / "values.yaml").read_text())["extraObjects"]
+        named = {(o["kind"], o["metadata"]["name"]): o for o in objects}
+        job = named[("Job", "jenkins-check-jobs")]
+        self.assertEqual(job["metadata"]["annotations"]["argocd.argoproj.io/hook"], "PostSync")
+        pod = job["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        # The image Argo just deployed, so it expects exactly that image's jobs.
+        self.assertEqual(container["image"], "{{ .Values.controller.image.registry }}/"
+                         "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}")
+        self.assertIn("/usr/share/brick-jenkins/jobs/*.groovy", container["args"][0])
+        self.assertIn('"$new" != "$old"', container["args"][0])  # waits for the new pod, not the old
+        self.assertEqual(pod["serviceAccountName"], "jenkins-check-jobs")
+        rules = named[("Role", "jenkins-check-jobs")]["rules"]
+        deletes = [r for r in rules if "delete" in r["verbs"]]
+        self.assertEqual(deletes, [{"apiGroups": [""], "resources": ["pods"], "resourceNames": ["jenkins-0"],
+                                    "verbs": ["delete"]}])
+        self.assertTrue(all(set(r["verbs"]) <= {"get", "list", "watch"} for r in rules if r not in deletes))
+
     def test_the_hub_push_credential_comes_from_the_sealed_secret(self):
         values = (JENKINS / "values.yaml").read_text()
         self.assertIn("id: dockerhub", values)

@@ -193,7 +193,10 @@ git push                    # build-branches builds that tag within a few minute
   Statuses that can't be posted (no token yet) wait in a queue.
 - **Jobs load on the first start.** The seed runs again once Jenkins has
   loaded its jobs from disk (`seed-after-load.groovy`, an init hook), so the
-  old restart for dropped jobs or unarmed cron timers isn't needed.
+  old restart for dropped jobs or unarmed cron timers isn't needed. After
+  every sync, Argo CD's PostSync hook (`jenkins-check-jobs` in `values.yaml`)
+  checks every job file in the deployed image is a job, and restarts Jenkins
+  once if not; a failure shows as the jenkins app's sync failing.
 
 **When Jenkins itself is broken** (it can't build its own fix), build the tag
 from the laptop and mark the commit by hand. `main` requires `jenkins-image`

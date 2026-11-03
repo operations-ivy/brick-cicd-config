@@ -210,3 +210,108 @@ extraObjects:
       - kind: ServiceAccount
         name: jenkins
         namespace: jenkins
+  # After every Argo CD sync: check every job file in this image is a job in
+  # Jenkins, and restart it once if not (jenkins/release --check's work, so a
+  # merge needs nothing from the laptop). seed-after-load.groovy should make
+  # the restart rare. It runs in the image Argo just deployed (the tag below),
+  # so it expects exactly that image's jobs. It may read pods here and delete
+  # only jenkins-0; a failure shows as the jenkins app's sync failing.
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: jenkins-check-jobs
+      namespace: jenkins
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: jenkins-check-jobs
+      namespace: jenkins
+    rules:
+      - apiGroups: [""]
+        resources: [pods]
+        verbs: [get, list, watch]
+      - apiGroups: [""]
+        resources: [pods]
+        resourceNames: [jenkins-0]
+        verbs: [delete]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: jenkins-check-jobs
+      namespace: jenkins
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: jenkins-check-jobs
+    subjects:
+      - kind: ServiceAccount
+        name: jenkins-check-jobs
+        namespace: jenkins
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: jenkins-check-jobs
+      namespace: jenkins
+      annotations:
+        argocd.argoproj.io/hook: PostSync
+        # The last run stays (for its log) until the next sync replaces it.
+        argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          serviceAccountName: jenkins-check-jobs
+          restartPolicy: Never
+          # Where the controller runs: its image is already there.
+          nodeSelector:
+            chuck.io/storage-node: "true"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          containers:
+            - name: check
+              image: "{{ .Values.controller.image.registry }}/{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+              command: [sh, -c]
+              args:
+                - |
+                  set -eu
+                  p=$(cat /run/secrets/brick-jenkins/admin-password)
+                  missing() {  # job files of this image that Jenkins doesn't list
+                      live=
+                      for i in $(seq 1 60); do
+                          live=$(curl -sf -g -u "admin:$p" "http://jenkins:8080/api/json?tree=jobs[name]") && break
+                          sleep 5
+                      done
+                      [ -n "$live" ] || { echo "check-jobs: Jenkins didn't answer in 5 minutes" >&2; return 2; }
+                      for f in /usr/share/brick-jenkins/jobs/*.groovy; do
+                          n=$(basename "$f" .groovy)
+                          case "$live" in *"\"name\":\"$n\""*) ;; *) echo "$n" ;; esac
+                      done
+                  }
+                  gone=$(missing)
+                  if [ -z "$gone" ]; then echo "check-jobs: every job is loaded"; exit 0; fi
+                  echo "check-jobs: not loaded: $(echo $gone); restarting Jenkins once"
+                  old=$(kubectl -n jenkins get pod jenkins-0 -o jsonpath='{.metadata.uid}')
+                  kubectl -n jenkins delete pod jenkins-0 --wait=true
+                  # The StatefulSet makes a new pod; wait for that one, not the old.
+                  for i in $(seq 1 120); do
+                      new=$(kubectl -n jenkins get pod jenkins-0 -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+                      [ -n "$new" ] && [ "$new" != "$old" ] && break
+                      sleep 5
+                  done
+                  kubectl -n jenkins wait --for=condition=Ready pod/jenkins-0 --timeout=15m
+                  gone=$(missing)
+                  if [ -n "$gone" ]; then echo "check-jobs: still not loaded after a restart: $(echo $gone)" >&2; exit 1; fi
+                  echo "check-jobs: every job is loaded after one restart"
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {cpu: 200m, memory: 128Mi}
+              volumeMounts:
+                - {name: brick-jenkins, mountPath: /run/secrets/brick-jenkins, readOnly: true}
+          volumes:
+            - name: brick-jenkins
+              secret:
+                secretName: brick-jenkins
+                items:
+                  - {key: admin-password, path: admin-password}
