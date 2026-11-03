@@ -36,6 +36,9 @@ class Program:
     tint: bool = True  # the page tints its colours; False: it colours itself
     # The terminal's font size in pixels: smaller shows more of the paintings.
     font: int = 11
+    # Programs in different slots run side by side (the page's two terminals
+    # while a job runs); a new one stops only the one in its own slot.
+    slot: str = "main"
 
     def available(self, cmatrix: str = "cmatrix") -> bool:
         exe = cmatrix if self.argv[0] == "cmatrix" else self.argv[0]
@@ -46,23 +49,24 @@ PROGRAMS = {
     # -b bold, -s screensaver mode, -C colour.
     "cmatrix": Program(("cmatrix", "-b", "-s", "-C", "{colour}"), tint=False),
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery"), font=7),
-    # Not in the playlist: the page plays it while the plasma API has activity.
-    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=9),
+    # Not in the playlist: while the plasma API has activity, the page splits the
+    # window: what's running, big enough to read across the room, over its log.
+    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=15),
+    "activity-log": Program((sys.executable, "-m", "brick_status.crt_logs"), font=9, slot="log"),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
     # held the Pi 4 at 96% CPU (#28).
 }
 
-_current: subprocess.Popen | None = None
+_current: dict[str, subprocess.Popen] = {}  # slot to the program running in it
 _lock = threading.Lock()
 
 
 def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix") -> Iterator[bytes]:
     """Yield the program's terminal output until the caller stops iterating.
 
-    Only one program runs at a time: starting a new stream (a resize, a colour
-    change, the next program) stops the previous one.
+    One program runs per slot: starting a new stream (a resize, a colour
+    change, the next program) stops the previous one in the same slot.
     """
-    global _current
     program = PROGRAMS.get(name, PROGRAMS["cmatrix"])
     cols, rows = max(10, min(cols, 400)), max(5, min(rows, 200))
     colour = colour if colour in COLOURS else "green"
@@ -77,7 +81,7 @@ def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix
                             start_new_session=True, close_fds=True)
     os.close(slave)
     with _lock:
-        previous, _current = _current, proc
+        previous, _current[program.slot] = _current.get(program.slot), proc
     if previous is not None:
         _stop(previous)
     log.info("%s started (%dx%d, %s)", name, cols, rows, colour)
@@ -98,8 +102,8 @@ def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix
         _stop(proc)
         os.close(master)
         with _lock:
-            if _current is proc:
-                _current = None
+            if _current.get(program.slot) is proc:
+                del _current[program.slot]
 
 
 def _stop(proc: subprocess.Popen) -> None:

@@ -1,6 +1,13 @@
-"""The running job's log, for the CRT's activity screen (crt_activity.py).
+"""The running job's log, scrolling in the lower half of the CRT while
+something runs (the upper half is crt_activity.py). Run in its own
+pseudo-terminal by matrix.py ("activity-log"):
 
-A plasma sender that says what it's running can also be followed:
+    python3 -m brick_status.crt_logs
+
+It follows the newest running sender (when check-all starts test-all, test-all),
+says which in a header line, and prints its new lines as they come; the
+terminal scrolls them. A plasma sender that says what it's running can be
+followed when it is:
 
 - jenkins-<job>, whose "show" names the job and build: Jenkins' progressive
   console log, read as brick-status' read-only user (BRICK_STATUS_JENKINS_*).
@@ -13,9 +20,13 @@ is blanked. Jenkins masks its own credentials already; this is the second net.
 """
 
 import base64
+import json
 import os
 import re
+import shutil
 import subprocess
+import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -120,3 +131,66 @@ def for_item(item: dict, env=os.environ):
     if source == "brick9000-deploy":
         return JournalLog("brick-deploy.service")
     return None
+
+
+class Follower:
+    """Prints the newest running item's log lines, cut to the terminal's width."""
+
+    def __init__(self, cols: int, write, log_for=for_item, clock=time.monotonic):
+        self.cols, self.write, self.log_for, self.clock = cols, write, log_for, clock
+        self.seen: dict[str, float] = {}  # source to when it first appeared
+        self.source: str | None = None
+        self.log = None
+
+    def update(self, items: list[dict]) -> None:
+        now = self.clock()
+        running = {i.get("source"): i for i in items if i.get("source")}
+        for source in running:
+            self.seen.setdefault(source, now)
+        for source in [s for s in self.seen if s not in running]:
+            del self.seen[source]
+        newest = max(self.seen, key=lambda s: (self.seen[s], s), default=None)
+        if newest != self.source:
+            self.source = newest
+            item = running.get(newest)
+            self.log = self.log_for(item) if item else None
+            if item:
+                title = clean(str(item.get("title") or newest))
+                self._line(f"-- {title} " + "-" * self.cols, bold=True)
+        if self.log is not None:
+            for line in self.log.poll():
+                if line.strip():
+                    self._line(line)
+
+    def _line(self, text: str, bold: bool = False) -> None:
+        """One line, cut (not wrapped) to the width; the terminal scrolls."""
+        text = text[:max(self.cols - 1, 1)]
+        self.write("\r\n" + (f"\x1b[1m{text}\x1b[0m" if bold else text))
+
+
+def fetch() -> list[dict]:
+    url = os.environ.get("BRICK_STATUS_PLASMA_URL", "http://127.0.0.1:8766").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{url}/activity", timeout=1) as reply:
+            return json.load(reply)["activity"]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def main() -> None:
+    def write(text: str) -> None:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    write("\x1b[2J\x1b[?25l\x1b[999;1H")  # start at the bottom, so lines scroll up
+    follower = Follower(shutil.get_terminal_size().columns, write)
+    while True:
+        follower.update(fetch())
+        time.sleep(1.0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (BrokenPipeError, KeyboardInterrupt):
+        pass
