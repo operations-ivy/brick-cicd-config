@@ -36,3 +36,21 @@ displays:
   stage-deploy:
     effect: boil
     seconds: 2.0
+
+  # check-all's result (plasmaResult): over the nightly pattern its test-all
+  # run shows, under the view buttons.
+  check-passed:
+    effect: pulse
+    color: "#00ff00"
+    seconds: 1.0
+    low: 0.3
+    priority: 65
+    ttl: 30
+
+  check-failed:
+    effect: pulse
+    color: "#ff0000"
+    seconds: 0.8
+    low: 0.0
+    priority: 65
+    ttl: 300

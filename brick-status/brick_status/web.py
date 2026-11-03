@@ -69,6 +69,7 @@ def serve(settings, board, status) -> None:
                     "boot": BOOT,
                     "mode": board.mode(now),
                     "awake_until": board.awake_until(now),
+                    "asleep_until": board.asleep_until(now),
                     "view": board.views[board.view(now)],
                     "views": board.views,
                     "updated": status.updated,

@@ -369,14 +369,22 @@ The board has three modes:
 | --- | --- | --- | --- |
 | idle | no press in the last 2 minutes | overview | the most important event (below) |
 | active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
-| quiet | the quiet schedule (below) | off | off; only the side button does anything: it turns everything on for 30 minutes |
+| quiet | the quiet schedule (below), or put to sleep by the side button | off | off; only the side button does anything (below) |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
 Cluster; the bottom row picks wigle-sync and Services; the last one is free for now. The
-joystick left/right steps through the views. The buttons bounce (a release
+joystick left/right steps through the views. Pressing the front-right button
+(1UP, `KEY_O`) twice within 1.5 seconds starts the `check-all` Jenkins job
+(`scripts/smoke`, then `test-all`) through its webhook, with the webhook secret
+from `~/.config/brick-jenkins/secrets/webhook_secret`. One press only arms it
+(a white flash); the lights then answer blue (started) or amber (Jenkins
+unreachable), show the job's stages, and end green (passed, 30 s) or red
+(failed, 5 min). The front-left button (Coin) is saved for a Hue light toggle.
+The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,
-Coin, joystick up/down) don't change the view but count as input.
+Coin, joystick up/down) don't change the view but count as input. While a game
+is open (brick-retro), the side and front-right buttons do nothing.
 
 The quiet schedule is `BRICK_STATUS_QUIET` in the env file: daily windows
 (`00:00-06:00`) or weekly ones (`Mon 00:00-Fri 16:00`), several per entry
@@ -386,10 +394,20 @@ entry that has started applies, so a schedule change can be set up ahead of
 time. brick9000's is off overnight (00:00-06:00) until 2026-10-09. From then
 it's on weekday evenings, 16:00 to midnight, and all weekend from Friday 16:00
 to Monday 00:01: off Monday 00:01-16:00 and Tuesday to Friday 00:00-16:00. While it's quiet the cabinet keys do nothing except the side button
-(`KEY_ESC`): it turns everything on for 30 minutes
-(`BRICK_STATUS_WAKE_SECONDS`), and the header shows "Awake until ..." until
-then. Pressed while the board is already on, including during those 30
-minutes, it does nothing.
+(`KEY_ESC`), which toggles the board:
+
+- **On** (the schedule's on hours, or a wake): it goes to sleep until the
+  schedule next turns it on, so a sleep at 6 PM Monday lasts until 4 PM
+  Tuesday. A sleep ends by 08:00 at the latest (`BRICK_STATUS_SLEEP_MORNING`),
+  so one on a Friday evening doesn't last the weekend, when nothing is quiet;
+  if it's still quiet hours at 08:00, the schedule keeps it off. The header
+  shows "Asleep until ...". The sleep is saved in
+  `~/.local/state/brick-status/board.json`, so a deploy's restart doesn't end it.
+- **Off after a sleep, in the on hours:** it's on again until the schedule
+  turns it off.
+- **Off in quiet hours:** it turns everything on for 30 minutes
+  (`BRICK_STATUS_WAKE_SECONDS`), and the header shows "Awake until ..." until
+  then.
 
 Idle light patterns, highest priority first:
 

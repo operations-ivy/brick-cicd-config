@@ -112,7 +112,7 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.board.mode(ts(3, 1)), QUIET)
 
     def test_side_button_wakes_for_30_minutes(self):
-        self.assertTrue(self.board.wake_button(ts(3)))
+        self.assertEqual(self.board.side_button(ts(3)), "awake")
         self.assertEqual(self.board.mode(ts(3, 1)), IDLE)
         self.assertEqual(self.board.awake_until(ts(3, 1)), ts(3, 30))
         self.board.press_view(2, ts(3, 10))  # the other buttons work while it's awake
@@ -125,16 +125,9 @@ class BoardTest(unittest.TestCase):
         self.board.keep_awake(ts(3), 60)  # brick-status refreshes this every second
         self.assertEqual(self.board.mode(ts(3, 0) + 59), IDLE)
         self.assertEqual(self.board.mode(ts(3, 0) + 60), QUIET)
-        self.board.wake_button(ts(3, 5))
+        self.board.side_button(ts(3, 5))
         self.board.keep_awake(ts(3, 6), 60)  # never shortens a side-button wake
         self.assertEqual(self.board.awake_until(ts(3, 6)), ts(3, 35))
-
-    def test_side_button_does_nothing_while_on(self):
-        self.assertFalse(self.board.wake_button(ts(12)))  # already on: daytime
-        self.assertIsNone(self.board.awake_until(ts(12)))
-        self.assertTrue(self.board.wake_button(ts(3)))
-        self.assertFalse(self.board.wake_button(ts(3, 20)))  # already awake: no extension
-        self.assertEqual(self.board.mode(ts(3, 30)), QUIET)
 
     def test_other_key_wakes_without_changing_view(self):
         self.board.press_view(2, ts(11, 50))
@@ -145,6 +138,79 @@ class BoardTest(unittest.TestCase):
     def test_step_wraps(self):
         self.board.step_view(-1, ts(12))
         self.assertEqual(self.board.view(ts(12)), len(VIEWS) - 1)
+
+    # ts() is Saturday 2026-09-26; the schedule is quiet 00:00-06:00 daily.
+    def day(self, day, hour, minute=0):
+        return datetime(2026, 9, day, hour, minute).timestamp()
+
+    def test_side_button_sleeps_until_the_schedule_turns_it_on(self):
+        self.assertEqual(self.board.side_button(ts(18)), "asleep")
+        self.assertEqual(self.board.mode(ts(18, 1)), QUIET)
+        self.assertEqual(self.board.asleep_until(ts(18, 1)), self.day(27, 6))
+        self.assertEqual(self.board.mode(self.day(27, 5, 59)), QUIET)
+        self.assertEqual(self.board.mode(self.day(27, 6)), IDLE)
+
+    def test_a_sleep_with_no_quiet_window_coming_ends_in_the_morning(self):
+        board = Board(VIEWS, 120, QuietSchedule.parse("Mon 00:00-Mon 16:00"), 1800, time(8, 0))
+        board.side_button(ts(18))  # Saturday evening: nothing is quiet until Monday
+        self.assertEqual(board.asleep_until(ts(18, 1)), self.day(27, 8))
+        self.assertEqual(board.mode(self.day(27, 8)), IDLE)
+
+    def test_the_users_weekday_sleep(self):
+        work = QuietSchedule.parse("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
+                                   "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
+        board = Board(VIEWS, 120, work, 1800, time(8, 0))
+        monday = lambda d, h, m=0: datetime(2026, 10, d, h, m).timestamp()
+        board.side_button(monday(12, 18))  # 6 PM Monday: off until 4 PM Tuesday
+        self.assertEqual(board.mode(monday(13, 12)), QUIET)
+        self.assertEqual(board.mode(monday(13, 15, 59)), QUIET)
+        self.assertEqual(board.mode(monday(13, 16)), IDLE)
+
+    def test_side_button_puts_a_wake_back_to_sleep(self):
+        self.board.side_button(ts(3))  # woken in quiet hours
+        self.assertEqual(self.board.side_button(ts(3, 5)), "asleep")
+        self.assertEqual(self.board.mode(ts(3, 6)), QUIET)
+        self.assertEqual(self.board.mode(ts(6)), IDLE)  # the schedule's on time
+
+    def test_waking_a_sleep_in_the_on_hours_stays_on(self):
+        self.board.side_button(ts(18))
+        self.assertEqual(self.board.side_button(ts(20)), "on")
+        self.assertIsNone(self.board.asleep_until(ts(20)))
+        self.assertEqual(self.board.mode(ts(21)), IDLE)  # past wake_seconds: still on
+        self.assertEqual(self.board.mode(self.day(27, 0, 1)), QUIET)  # the schedule's off time
+
+    def test_waking_a_sleep_in_quiet_hours_is_a_30_minute_wake(self):
+        self.board.side_button(ts(18))
+        self.assertEqual(self.board.side_button(self.day(27, 2)), "awake")
+        self.assertEqual(self.board.mode(self.day(27, 2, 29)), IDLE)
+        self.assertEqual(self.board.mode(self.day(27, 2, 30)), QUIET)
+
+    def test_sleep_ends_an_active_view_and_ignores_keys(self):
+        self.board.press_view(2, ts(12))
+        self.board.side_button(ts(12, 0) + 1)
+        self.assertEqual(self.board.mode(ts(12, 0) + 2), QUIET)
+        self.board.press_view(1, ts(12, 1))
+        self.board.step_view(1, ts(12, 1))
+        self.board.wake(ts(12, 1))
+        self.assertEqual(self.board.mode(ts(12, 1) + 1), QUIET)
+
+    def test_a_sleep_survives_a_restart(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/state/board.json"
+            Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), state_path=path).side_button(ts(18))
+            again = Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), state_path=path)
+            self.assertEqual(again.mode(ts(19)), QUIET)
+            self.assertEqual(again.side_button(ts(19)), "on")
+            self.assertEqual(Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"),
+                                   state_path=path).mode(ts(19, 1)), IDLE)
+
+    def test_unreadable_state_is_ignored(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "board.json").write_text("not json")
+            board = Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), state_path=f"{d}/board.json")
+            self.assertEqual(board.mode(ts(12)), IDLE)
 
 
 def check(group, state):
@@ -670,6 +736,8 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(button_name(BUTTON_KEYS[0]), "overview")
         self.assertEqual(button_name(BUTTON_KEYS[5]), "button6")
         self.assertEqual(button_name(KEY_WAKE), "side")
+        from brick_status.config import KEY_CHECK
+        self.assertEqual(button_name(KEY_CHECK), "check")
         self.assertEqual(button_name(KEY_LEFT), "left")
         self.assertEqual(button_name(999), "other")
 
@@ -1507,3 +1575,70 @@ class PlasmaLibraryTest(unittest.TestCase):
                                "displayName": "#15 overwatch:0.8.3", "description": "plasma:build"}}]
         [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
         self.assertEqual(c.detail, "overwatch:0.8.3, running 30s, build")
+
+
+class CheckButtonTest(unittest.TestCase):
+    def test_two_presses_within_the_window(self):
+        from brick_status.check import DoublePress
+        d = DoublePress(1.5)
+        self.assertFalse(d.press(10.0))
+        self.assertTrue(d.press(11.0))
+        self.assertFalse(d.press(11.5))  # a third press arms again
+        self.assertFalse(d.press(13.5))  # too late: arms again
+        self.assertTrue(d.press(14.0))
+
+    def serve(self, status, body):
+        import http.server
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append(self.path)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}", seen
+
+    def secret(self, text):
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", delete=False)
+        f.write(text)
+        f.close()
+        self.addCleanup(Path(f.name).unlink)
+        return f.name
+
+    def test_starts_the_job_with_its_token(self):
+        from brick_status.check import start_job
+        url, seen = self.serve(200, b'{"jobs": {"check-all": {"triggered": true}}, "message": "Triggered jobs."}')
+        self.assertTrue(start_job(url, "check-all", self.secret("s3cr&t\n")))
+        self.assertEqual(seen, ["/generic-webhook-trigger/invoke?token=check-all-s3cr%26t"])  # secret-scan: allow (a dummy secret)
+
+    def test_a_secret_never_reaches_the_log(self):
+        from brick_status.check import start_job
+        url, _ = self.serve(404, b'{"jobs": null, "message": "Did not find any jobs"}')
+        with self.assertLogs("brick_status.check") as logs:
+            self.assertFalse(start_job(url, "check-all", self.secret("hunter2")))
+        self.assertNotIn("hunter2", "".join(logs.output))
+        self.assertIn("404", "".join(logs.output))
+
+    def test_nothing_started_is_a_failure(self):
+        from brick_status.check import start_job
+        url, _ = self.serve(200, b'{"jobs": {"check-all": {"triggered": false}}}')
+        with self.assertLogs("brick_status.check"):
+            self.assertFalse(start_job(url, "check-all", self.secret("x")))
+
+    def test_no_secret_or_no_jenkins(self):
+        from brick_status.check import start_job
+        with self.assertLogs("brick_status.check"):
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", "/nonexistent/secret"))
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("  ")))
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("x"), timeout=2))

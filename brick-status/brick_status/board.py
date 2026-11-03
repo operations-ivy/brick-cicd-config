@@ -4,21 +4,44 @@
   and the lights show the most important current event.
 - active: a button was pressed in the last `active_seconds`. The screen shows
   the chosen view and the lights show which button is which view.
-- quiet: inside the quiet schedule (see QuietSchedule). Screen and lights are
-  off and the cabinet keys do nothing, except the side button: it wakes the
-  board for `wake_seconds`, and does nothing while the board is already on.
+- quiet: inside the quiet schedule (see QuietSchedule), or put to sleep by the
+  side button. Screen and lights are off and the cabinet keys do nothing,
+  except the side button.
+
+The side button toggles the board:
+- on: sleep until the schedule next turns it on (the end of the next quiet
+  window), or the next `morning`, whichever is first. The morning cap keeps a
+  Friday-evening sleep from lasting all weekend, when nothing is quiet.
+- off, put to sleep during the schedule's on hours: on again, until the
+  schedule turns it off.
+- off otherwise (quiet hours): on for `wake_seconds`.
+A sleep is saved to `state_path`, so a restart (a deploy) doesn't end it.
 """
 
+import json
+import logging
+import os
 import re
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 IDLE, ACTIVE, QUIET = "idle", "active", "quiet"
+
+log = logging.getLogger(__name__)
 
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 WEEK = 7 * 24 * 60
+
+
+def next_clock(now: float, at: time) -> float:
+    """The next time the local clock reads `at`, after `now` (a timestamp)."""
+    current = datetime.fromtimestamp(now)
+    target = datetime.combine(current.date(), at)
+    if target <= current:
+        target = datetime.combine(current.date() + timedelta(days=1), at)
+    return target.timestamp()
 
 
 def in_quiet_hours(now: time, start: time, end: time) -> bool:
@@ -106,30 +129,94 @@ class QuietSchedule:
 
 class Board:
     def __init__(self, views: list[str], active_seconds: float, quiet: QuietSchedule,
-                 wake_seconds: float = 1800.0):
+                 wake_seconds: float = 1800.0, morning: time = time(8, 0),
+                 state_path: str | None = None):
         self.views = views
         self.active_seconds = active_seconds
         self.quiet = quiet
         self.wake_seconds = wake_seconds
+        self.morning = morning
+        self.state_path = state_path
         self._view = 0
         self._last_press: float | None = None
         self._awake_until: float | None = None
+        self._asleep_until: float | None = self._load_sleep()
         self._lock = threading.Lock()
 
+    def _load_sleep(self) -> float | None:
+        if not self.state_path:
+            return None
+        try:
+            with open(self.state_path) as f:
+                value = json.load(f).get("asleep_until")
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, AttributeError) as e:
+            log.warning("board state %s unreadable, ignored: %s", self.state_path, e)
+            return None
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def _save_sleep(self) -> None:
+        """Best effort: a lost sleep only means the board comes back on."""
+        if not self.state_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
+            tmp = self.state_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"asleep_until": self._asleep_until}, f)
+            os.replace(tmp, self.state_path)
+        except OSError as e:
+            log.warning("couldn't save board state to %s: %s", self.state_path, e)
+
+    def _quiet_at(self, t: float) -> bool:
+        return self.quiet.is_quiet(datetime.fromtimestamp(t))
+
+    def next_on(self, now: float) -> float:
+        """When the schedule next turns the board on after a quiet window that
+        starts from `now`, capped at the next `morning`."""
+        cap = next_clock(now, self.morning)
+        t = now - now % 60 + 60  # minute steps: every window is in whole minutes
+        while t < cap and not self._quiet_at(t):
+            t += 60
+        while t < cap and self._quiet_at(t):
+            t += 60
+        return min(t, cap)
+
     def _asleep(self, now: float) -> bool:
-        """In the quiet schedule and not woken by the side button (lock held)."""
+        """Put to sleep by the side button, or in the quiet schedule and not woken
+        by it (lock held)."""
+        if self._asleep_until is not None and now < self._asleep_until:
+            return True
         if self._awake_until is not None and now < self._awake_until:
             return False
-        return self.quiet.is_quiet(datetime.fromtimestamp(now))
+        return self._quiet_at(now)
 
-    def wake_button(self, now: float) -> bool:
-        """The side button: while asleep, turn everything on for wake_seconds.
-        Does nothing while the board is already on. True if it woke the board."""
+    def side_button(self, now: float) -> str:
+        """Toggle the board (see the module's docstring). Returns what it did:
+        "asleep", "on" (a sleep ended in the on hours) or "awake" (on for
+        wake_seconds in quiet hours)."""
         with self._lock:
-            if not self._asleep(now):
-                return False
-            self._awake_until = now + self.wake_seconds
-            return True
+            if self._asleep(now):
+                slept = self._asleep_until is not None and now < self._asleep_until
+                self._asleep_until = None
+                self._save_sleep()
+                if slept and not self._quiet_at(now):
+                    return "on"
+                self._awake_until = now + self.wake_seconds
+                return "awake"
+            self._asleep_until = self.next_on(now)
+            self._save_sleep()
+            self._awake_until = None
+            self._last_press = None  # a recent press would keep it active
+            return "asleep"
+
+    def asleep_until(self, now: float) -> float | None:
+        """When a side-button sleep ends, while one is keeping the board off."""
+        with self._lock:
+            if self._asleep_until is not None and now < self._asleep_until:
+                return self._asleep_until
+            return None
 
     def wake(self, now: float) -> None:
         """A key that isn't a view button: stay on the current view, but count as a press."""
@@ -160,6 +247,8 @@ class Board:
     def awake_until(self, now: float) -> float | None:
         """When a side-button wake ends, while one is keeping the board on."""
         with self._lock:
+            if self._asleep_until is not None and now < self._asleep_until:
+                return None  # put to sleep since
             if self._awake_until is not None and now < self._awake_until \
                     and self.quiet.is_quiet(datetime.fromtimestamp(now)):
                 return self._awake_until
