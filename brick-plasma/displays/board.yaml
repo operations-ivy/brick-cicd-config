@@ -51,3 +51,27 @@ displays:
     effect: solid
     color: "#000000"
     priority: 100
+
+  # Answers to the front-right button (brick_status/check.py), from the
+  # "board-button" sender: over everything but quiet hours, for a moment.
+  check-armed:
+    effect: flash
+    color: "#ffffff"
+    seconds: 0.5
+    priority: 90
+    ttl: 1.5
+
+  check-started:
+    effect: stream
+    color: "#00c8ff"
+    seconds: 1.0
+    priority: 90
+    ttl: 3
+
+  check-unreachable:
+    effect: pulse
+    color: "#ff8c00"
+    seconds: 0.6
+    low: 0.0
+    priority: 90
+    ttl: 5

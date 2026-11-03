@@ -44,6 +44,19 @@ def plasmaSignal(String kind, int ttl) {
     }
 }
 
+// Any named display (brick-plasma/displays/), e.g. a job's result:
+//   post { success { script { plasmaResult('check-passed', 30) } } }
+def plasmaResult(String pattern, int ttl) {
+    try {
+        httpRequest(url: "http://plasma.brick.nozdormu.cloud/signals/jenkins-${env.JOB_NAME}",
+                    httpMode: 'PUT', contentType: 'APPLICATION_JSON',
+                    requestBody: "{\"pattern\": ${plasmaJson(pattern)}, \"ttl\": ${ttl}, \"show\": ${plasmaShow(pattern)}}",
+                    timeout: 1, quiet: true, consoleLogResponseBody: false, validResponseCodes: '100:599')
+    } catch (Exception e) {
+        echo "plasma: no lights (${e.message})"
+    }
+}
+
 def plasma(String kind, Closure body) {
     def kinds = ['checkout', 'install', 'test', 'build', 'push', 'deploy', 'verify']
     if (!(kind in kinds)) {

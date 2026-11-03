@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import checks, host, lights, notify, units, web
+from . import check, checks, host, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
-from .config import BUTTON_KEYS, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
+from .config import BUTTON_KEYS, KEY_CHECK, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -105,7 +105,7 @@ def button_name(code: int) -> str:
     if code in BUTTON_KEYS:
         i = BUTTON_KEYS.index(code)
         return VIEWS[i] if i < len(VIEWS) else f"button{i + 1}"
-    return {KEY_WAKE: "side", KEY_LEFT: "left", KEY_RIGHT: "right"}.get(code, "other")
+    return {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LEFT: "left", KEY_RIGHT: "right"}.get(code, "other")
 
 
 def send_test_page(settings: Settings) -> None:
@@ -136,6 +136,11 @@ def main() -> None:
     plasma = lights.Plasma(settings.plasma_url)
     screen = Screen(settings.wlopm)
     wake = threading.Event()  # set when anything changed, so lights react at once
+    check_press = check.DoublePress()
+
+    def start_check() -> None:
+        started = check.start_job(settings.jenkins_url, settings.check_job, settings.webhook_secret_file)
+        plasma.answer("check-started" if started else "check-unreachable")
 
     def on_key(code: int) -> None:
         now = time.time()
@@ -152,6 +157,13 @@ def main() -> None:
                     log.info("side button: on for %d minutes", settings.wake_seconds // 60)
                 else:
                     log.info("side button: on until the schedule turns it off")
+        elif code == KEY_CHECK:
+            if board.mode(now) != QUIET and not os.path.exists(settings.retro_flag):
+                board.wake(now)
+                if check_press.press(now):
+                    threading.Thread(target=start_check, daemon=True).start()
+                else:
+                    plasma.answer("check-armed")
         elif code in BUTTON_KEYS:
             board.press_view(BUTTON_KEYS.index(code), now)
         elif code in (KEY_LEFT, KEY_RIGHT):

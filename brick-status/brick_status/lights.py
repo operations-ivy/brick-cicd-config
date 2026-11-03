@@ -88,6 +88,11 @@ class Plasma:
     def show(self, pattern: str) -> None:
         self._put({"pattern": pattern})
 
+    def answer(self, pattern: str) -> None:
+        """A button's answer, once, from its own sender so the board's signal
+        stays put underneath; the display's own priority and time limit apply."""
+        self._send({"pattern": pattern}, "board-button")
+
     def off(self) -> None:
         self.show("off")
 
@@ -115,10 +120,10 @@ class Plasma:
         self.sent = wanted if self._send(wanted) else None
         self.sent_at = now
 
-    def _send(self, body: dict) -> bool:
+    def _send(self, body: dict, source: str = SOURCE) -> bool:
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.TIMEOUT)
         try:
-            connection.request("PUT", f"/signals/{self.SOURCE}", json.dumps(body),
+            connection.request("PUT", f"/signals/{source}", json.dumps(body),
                                {"Content-Type": "application/json"})
             response = connection.getresponse()
             response.read()

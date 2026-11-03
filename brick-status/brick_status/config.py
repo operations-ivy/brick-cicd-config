@@ -23,6 +23,9 @@ KEY_RIGHT = 106
 # The button on the cabinet's left side (KEY_ESC): sleep and wake
 # (board.Board.side_button). Checked on the hardware.
 KEY_WAKE = 1
+# The cabinet's front-right button (1UP, KEY_O): pressed twice, it starts
+# Jenkins' check-all job (check.py). Checked on the hardware.
+KEY_CHECK = 24
 
 
 def _ints(value: str) -> list[int]:
@@ -56,6 +59,10 @@ class Settings:
     # A side-button sleep ends by this time of day at the latest, so one on a
     # Friday evening doesn't last the weekend (nothing is quiet then).
     sleep_morning: time = time(8, 0)
+    # The front-right button's job, and Jenkins' webhook secret (install.sh's
+    # copy for brick9000's Jenkins jobs; never logged).
+    check_job: str = "check-all"
+    webhook_secret_file: str = os.path.expanduser("~/.config/brick-jenkins/secrets/webhook_secret")
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
     # row, then left to right along the bottom.
@@ -112,6 +119,8 @@ class Settings:
             # The older daily-only settings.
             s.quiet = QuietSchedule.parse(f'{env("BRICK_STATUS_QUIET_START")}-{env("BRICK_STATUS_QUIET_END")}')
         s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
+        s.check_job = env("BRICK_STATUS_CHECK_JOB", s.check_job)
+        s.webhook_secret_file = env("BRICK_STATUS_WEBHOOK_SECRET_FILE", s.webhook_secret_file)
         if v := env("BRICK_STATUS_SLEEP_MORNING"):
             s.sleep_morning = time.fromisoformat(v)
         if v := env("BRICK_STATUS_BUTTON_SLOTS"):

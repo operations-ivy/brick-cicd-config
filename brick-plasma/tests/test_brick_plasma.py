@@ -170,6 +170,13 @@ class ShippedDisplaysTest(unittest.TestCase):
         asked = set(re.findall(r'return "([a-z]+)"', lights)) | set(re.findall(r'self\.show\("([a-z]+)"\)', lights))
         script = (root / "brick9000" / "build-status.sh").read_text()
         asked |= set(re.findall(r"plasma_signal ([a-z-]+) \d+", script))
+        main = (root / "brick-status" / "brick_status" / "__main__.py").read_text()
+        answers = set(re.findall(r'answer\("([a-z-]+)"', main)) | set(re.findall(r'"(check-[a-z]+)"', main))
+        self.assertGreaterEqual(len(answers), 3, answers)
+        jobs = "".join(f.read_text() for f in (JENKINS / "jobs").glob("*.groovy"))
+        shown = set(re.findall(r"plasmaResult\('([a-z-]+)'", jobs))
+        self.assertGreaterEqual(len(shown), 2, shown)
+        asked |= answers | shown
         self.assertGreater(len(asked), 10, asked)  # the regexes still find them
         self.assertLessEqual(asked, set(self.named))
 

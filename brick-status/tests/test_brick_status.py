@@ -736,6 +736,8 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(button_name(BUTTON_KEYS[0]), "overview")
         self.assertEqual(button_name(BUTTON_KEYS[5]), "button6")
         self.assertEqual(button_name(KEY_WAKE), "side")
+        from brick_status.config import KEY_CHECK
+        self.assertEqual(button_name(KEY_CHECK), "check")
         self.assertEqual(button_name(KEY_LEFT), "left")
         self.assertEqual(button_name(999), "other")
 
@@ -1573,3 +1575,70 @@ class PlasmaLibraryTest(unittest.TestCase):
                                "displayName": "#15 overwatch:0.8.3", "description": "plasma:build"}}]
         [c] = checks.build_checks(FakeJenkins(jobs), now=NOW)
         self.assertEqual(c.detail, "overwatch:0.8.3, running 30s, build")
+
+
+class CheckButtonTest(unittest.TestCase):
+    def test_two_presses_within_the_window(self):
+        from brick_status.check import DoublePress
+        d = DoublePress(1.5)
+        self.assertFalse(d.press(10.0))
+        self.assertTrue(d.press(11.0))
+        self.assertFalse(d.press(11.5))  # a third press arms again
+        self.assertFalse(d.press(13.5))  # too late: arms again
+        self.assertTrue(d.press(14.0))
+
+    def serve(self, status, body):
+        import http.server
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append(self.path)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}", seen
+
+    def secret(self, text):
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", delete=False)
+        f.write(text)
+        f.close()
+        self.addCleanup(Path(f.name).unlink)
+        return f.name
+
+    def test_starts_the_job_with_its_token(self):
+        from brick_status.check import start_job
+        url, seen = self.serve(200, b'{"jobs": {"check-all": {"triggered": true}}, "message": "Triggered jobs."}')
+        self.assertTrue(start_job(url, "check-all", self.secret("s3cr&t\n")))
+        self.assertEqual(seen, ["/generic-webhook-trigger/invoke?token=check-all-s3cr%26t"])  # secret-scan: allow (a dummy secret)
+
+    def test_a_secret_never_reaches_the_log(self):
+        from brick_status.check import start_job
+        url, _ = self.serve(404, b'{"jobs": null, "message": "Did not find any jobs"}')
+        with self.assertLogs("brick_status.check") as logs:
+            self.assertFalse(start_job(url, "check-all", self.secret("hunter2")))
+        self.assertNotIn("hunter2", "".join(logs.output))
+        self.assertIn("404", "".join(logs.output))
+
+    def test_nothing_started_is_a_failure(self):
+        from brick_status.check import start_job
+        url, _ = self.serve(200, b'{"jobs": {"check-all": {"triggered": false}}}')
+        with self.assertLogs("brick_status.check"):
+            self.assertFalse(start_job(url, "check-all", self.secret("x")))
+
+    def test_no_secret_or_no_jenkins(self):
+        from brick_status.check import start_job
+        with self.assertLogs("brick_status.check"):
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", "/nonexistent/secret"))
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("  ")))
+            self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("x"), timeout=2))
