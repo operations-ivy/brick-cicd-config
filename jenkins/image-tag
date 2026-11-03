@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""The Jenkins image's tag, worked out from what goes into the image.
+
+    jenkins/image-tag            print it, e.g. 2.580.1-3f9c2a1b7e04
+    jenkins/image-tag --write    put it in values.yaml
+    jenkins/image-tag --check    exit 1 if values.yaml names another tag
+
+The tag is the Jenkins version in the Dockerfile's FROM line, then the start of
+a hash of every file the Dockerfile copies in (INPUTS) and the Dockerfile
+itself. Nobody picks a number: the same files always give the same tag and
+any change gives a new one, so two branches can't collide and a tag is never
+reused for different contents. scripts/test runs --check, so a change under
+jenkins/ that forgets --write fails its tests. build-branches builds the tag a
+branch's values.yaml names when Docker Hub doesn't have it yet.
+"""
+
+import hashlib
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+# What the Dockerfile COPYs (a test checks the two agree). Not values.yaml,
+# namespace.yaml, release or seal-secrets: they aren't in the image.
+INPUTS = ["Dockerfile", "plugins.txt", "ssh_config", "seed.groovy", "bin", "jobs", "lib"]
+TAG_LINE = re.compile(r'^(    tag: ")([^"]*)(")$', re.M)
+
+
+def files(root: Path = HERE) -> list[Path]:
+    """The image's input files, as a clean clone of this commit would have
+    them: in a git checkout, what git tracks or would add (not ignored files,
+    bytecode or editor leftovers); otherwise everything on disk."""
+    listed = _git_files(root)
+    out = []
+    for name in INPUTS:
+        path = root / name
+        if path.is_dir():
+            out += sorted(p for p in path.rglob("*") if p.is_file() and (listed is None or p in listed)
+                          and "__pycache__" not in p.parts and p.suffix != ".pyc")
+        else:
+            out.append(path)
+    return out
+
+
+def _git_files(root: Path) -> set[Path] | None:
+    try:
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+                              "--exclude-standard", "--", "."], capture_output=True, check=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {(root / name).resolve() for name in out.decode().split("\0") if name}
+
+
+def tag(root: Path = HERE) -> str:
+    version = re.search(r"^FROM jenkins/jenkins:([\d.]+)", (root / "Dockerfile").read_text(), re.M)
+    if not version:
+        raise SystemExit("image-tag: no 'FROM jenkins/jenkins:<version>' in the Dockerfile")
+    digest = hashlib.sha256()
+    for path in files(root):
+        content = path.read_bytes()
+        digest.update(f"{path.relative_to(root).as_posix()}\0{len(content)}\0".encode())
+        digest.update(content)
+    return f"{version.group(1)}-{digest.hexdigest()[:12]}"
+
+
+def pinned(root: Path = HERE) -> str:
+    m = TAG_LINE.search((root / "values.yaml").read_text())
+    if not m:
+        raise SystemExit("image-tag: no '    tag: \"...\"' line in values.yaml")
+    return m.group(2)
+
+
+def write(root: Path = HERE) -> str:
+    values = root / "values.yaml"
+    new = tag(root)
+    values.write_text(TAG_LINE.sub(lambda m: m.group(1) + new + m.group(3), values.read_text(), count=1))
+    return new
+
+
+def main(argv: list[str]) -> int:
+    if argv == ["--write"]:
+        print(write())
+        return 0
+    if argv == ["--check"]:
+        want, have = tag(), pinned()
+        if want != have:
+            print(f"image-tag: values.yaml says {have}, but jenkins/ is {want}: run jenkins/image-tag --write",
+                  file=sys.stderr)
+            return 1
+        return 0
+    if argv:
+        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+        return 2
+    print(tag())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

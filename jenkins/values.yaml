@@ -9,15 +9,17 @@
 controller:
   # Our image (Dockerfile): plugins, tools, jobs and their scripts all baked
   # in, so a start never needs the internet and the tag says exactly what
-  # runs. This is the single place the tag is set: jenkins/release passes it to
-  # the Dockerfile as BRICK_JENKINS_TAG, which stamps it into the agent pods
-  # (lib/build.groovy's tools, test-brick-cicd-config) where @BRICK_JENKINS_TAG@
-  # stands in. Bump it for any change under jenkins/ except this file, then
-  # build it (jenkins/release) before opening the PR.
+  # runs. The tag is worked out from the image's files, never picked:
+  # after any change under jenkins/, run jenkins/image-tag --write (the tests
+  # fail until you do). build-branches builds it from the pushed branch and
+  # marks the commit on GitHub; merge once that check is green. The build
+  # passes it to the Dockerfile as BRICK_JENKINS_TAG, which stamps it into the
+  # agent pods (lib/build.groovy's tools, test-brick-cicd-config) where
+  # @BRICK_JENKINS_TAG@ stands in.
   image:
     registry: docker.io
     repository: whitepatrick/brick-jenkins
-    tag: "2.580.1-18"
+    tag: "2.580.1-0687f6b2ae59"
     pullPolicy: IfNotPresent
   # The chart's own plugin download would need the internet on every start;
   # the image has them instead. overwritePlugins clears the home's plugins on
