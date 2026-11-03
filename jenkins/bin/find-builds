@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """Print the images pushed branches ask for, one `image tag commit` per line.
 
-    find-builds STATE whitepatrick/wigle-sync=wigle-sync ...
+    find-builds STATE [--statuses FILE] whitepatrick/wigle-sync=wigle-sync ...
+        whitepatrick/brick-jenkins=brick-cicd-config:jenkins/values.yaml
 
 On each app repo (from the image=repo arguments):
 
     feature/*   every image, tagged dev-<commit>
     release/*   every image whose newTag in k8s_config/kustomization.yaml
                 isn't on Docker Hub
+
+An image=repo:path argument names the file its tag is in instead (`tag: "..."`,
+jenkins/values.yaml): every branch of that repo builds the tag its file names,
+if Docker Hub doesn't have it. That tag comes from the image's contents
+(jenkins/image-tag), so one built from another commit is the same image. For
+these, --statuses FILE gets one `repo commit image tag state` line per new
+branch head: pending (to build) or success (already on Docker Hub), for
+GitHub's commit status (bin/github-status).
 
 STATE remembers what's been asked for or found, so a failed build waits for a
 new commit instead of repeating every poll, and a quiet repo costs one
@@ -21,17 +30,20 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 GITHUB = "https://github.com/operations-ivy"
 HUB_INFO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hub-image-info")
 TAG = re.compile(r"-\s+name:\s*(\S+)\s*\n\s+newTag:\s*(\S+)")
+VALUES_TAG = re.compile(r'^    tag: "([A-Za-z0-9][A-Za-z0-9._-]{0,127})"$', re.M)
 MISSING = 3
 
 
-def heads(repo: str) -> dict[str, str]:
-    """Branch name -> commit, for feature/* and release/*."""
-    out = subprocess.run(["git", "ls-remote", "--heads", f"{GITHUB}/{repo}", "refs/heads/feature/*", "refs/heads/release/*"],
+def heads(repo: str, every: bool = False) -> dict[str, str]:
+    """Branch name -> commit, for feature/* and release/* (every: all branches)."""
+    patterns = [] if every else ["refs/heads/feature/*", "refs/heads/release/*"]
+    out = subprocess.run(["git", "ls-remote", "--heads", f"{GITHUB}/{repo}", *patterns],
                          capture_output=True, text=True, check=True, timeout=60).stdout
     pairs = (line.split("\t") for line in out.splitlines())
     return {ref.removeprefix("refs/heads/"): sha for sha, ref in pairs}
@@ -42,6 +54,19 @@ def pinned(repo: str, commit: str) -> dict[str, str]:
     url = f"https://raw.githubusercontent.com/operations-ivy/{repo}/{commit}/k8s_config/kustomization.yaml"
     with urllib.request.urlopen(url, timeout=30) as resp:
         return dict(TAG.findall(resp.read().decode()))
+
+
+def values_tag(repo: str, commit: str, path: str) -> str | None:
+    """The tag the commit's file names, or None if it has none (or a bad one)."""
+    url = f"https://raw.githubusercontent.com/operations-ivy/{repo}/{commit}/{path}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            m = VALUES_TAG.search(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:  # a branch from before the file
+            return None
+        raise
+    return m.group(1) if m else None
 
 
 def on_hub(image: str, tag: str) -> str | None:
@@ -63,44 +88,64 @@ def wanted(branch: str, commit: str, images: list[str], repo: str) -> list[tuple
     return [(image, tags[image]) for image in images if image in tags and tags[image] != released.get(image)]
 
 
-def find(repos: dict[str, list[str]], seen: set[str]) -> tuple[list[tuple[str, str, str]], set[str], bool]:
-    """(what to build, what to remember, whether a release's tag is taken)."""
-    builds, keep, clash = [], set(), False
-    for repo, images in sorted(repos.items()):
-        for branch, commit in sorted(heads(repo).items()):
-            for image, tag in wanted(branch, commit, images, repo):
+def find(repos: dict[str, list[tuple[str, str | None]]], seen: set[str]):
+    """(what to build, statuses to post, what to remember, whether a release's tag is taken)."""
+    builds, statuses, keep, clash = [], [], set(), False
+    for repo, entries in sorted(repos.items()):
+        apps = [image for image, path in entries if path is None]
+        by_values = [(image, path) for image, path in entries if path is not None]
+        for branch, commit in sorted(heads(repo, every=bool(by_values)).items()):
+            todo = []
+            if branch.startswith(("feature/", "release/")):
+                todo += [(image, tag, False) for image, tag in wanted(branch, commit, apps, repo)]
+            for image, path in by_values:
+                tag = values_tag(repo, commit, path)
+                if tag:
+                    todo.append((image, tag, True))
+            for image, tag, own in todo:
                 key = f"{image}:{tag}@{commit}"
                 keep.add(key)
                 if key in seen:
                     continue
                 built = on_hub(image, tag)
+                if own:
+                    statuses.append((repo, commit, image, tag, "pending" if built is None else "success"))
                 if built is None:
                     builds.append((image, tag, commit))
-                elif built != commit and branch.startswith("release/"):
+                elif built != commit and branch.startswith("release/") and not own:
                     print(f"{branch}: {image}:{tag} is already built from {built}, not {commit}: bump the tag",
                           file=sys.stderr)
                     clash = True
-    return builds, keep, clash
+    return builds, statuses, keep, clash
 
 
 def main() -> int:
-    state, repos = sys.argv[1], {}
-    for arg in sys.argv[2:]:
-        image, _, repo = arg.partition("=")
-        repos.setdefault(repo, []).append(image)
+    args = sys.argv[1:]
+    state, args = args[0], args[1:]
+    statuses_file = None
+    if args[:1] == ["--statuses"]:
+        statuses_file, args = args[1], args[2:]
+    repos = {}
+    for arg in args:
+        image, _, where = arg.partition("=")
+        repo, _, path = where.partition(":")
+        repos.setdefault(repo, []).append((image, path or None))
     try:
         with open(state) as f:
             seen = set(f.read().split())
     except FileNotFoundError:
         seen = set()
     try:
-        builds, keep, clash = find(repos, seen)
+        builds, statuses, keep, clash = find(repos, seen)
     except (OSError, RuntimeError, subprocess.SubprocessError) as e:
         # GitHub or Docker Hub having a moment: nothing this time, try again next poll.
         print(f"find-builds: {e}", file=sys.stderr)
         return 0
     with open(state, "w") as f:  # only what's still a branch head, so it can't grow
         f.write("\n".join(sorted(keep)) + "\n")
+    if statuses_file:
+        with open(statuses_file, "w") as f:
+            f.writelines(" ".join(line) + "\n" for line in statuses)
     for build in builds:
         print(*build)
     return 4 if clash else 0

@@ -40,6 +40,9 @@ RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 # Last, so a job change rebuilds only this layer. seed.groovy turns each
 # jobs/<name>.groovy into a job; the jobs run the scripts in bin/.
 COPY --chown=root:root --chmod=644 seed.groovy /usr/share/brick-jenkins/seed.groovy
+# The seed again once jobs are loaded (seed-after-load.groovy). The entrypoint
+# copies ref/ into JENKINS_HOME; .override replaces an older image's copy.
+COPY --chmod=644 seed-after-load.groovy /usr/share/jenkins/ref/init.groovy.d/seed-after-load.groovy.override
 COPY --chown=root:root --chmod=755 jobs /usr/share/brick-jenkins/jobs
 COPY --chown=root:root --chmod=755 bin /usr/share/brick-jenkins/bin
 COPY --chown=root:root --chmod=755 lib /usr/share/brick-jenkins/lib

@@ -23,7 +23,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 # What the Dockerfile COPYs (a test checks the two agree). Not values.yaml,
 # namespace.yaml, release or seal-secrets: they aren't in the image.
-INPUTS = ["Dockerfile", "plugins.txt", "ssh_config", "seed.groovy", "bin", "jobs", "lib"]
+INPUTS = ["Dockerfile", "plugins.txt", "ssh_config", "seed.groovy", "seed-after-load.groovy",
+          "bin", "jobs", "lib"]
 TAG_LINE = re.compile(r'^(    tag: ")([^"]*)(")$', re.M)
 
 

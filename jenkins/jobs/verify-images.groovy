@@ -14,7 +14,7 @@ pipeline {
                 script {
                     def problems = []
                     // One at a time: a no-cache build is a few CPU-minutes on brick2000.
-                    for (image in brickImages().keySet().sort()) {
+                    for (image in brickImages().findAll { it.value.verify != false }.keySet().sort()) {
                         def info = ''
                         container('tools') {
                             info = sh(script: "/usr/share/brick-jenkins/bin/hub-image-info --kv '${image}'", returnStdout: true).trim()

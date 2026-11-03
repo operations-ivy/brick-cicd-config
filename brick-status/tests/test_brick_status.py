@@ -1263,7 +1263,21 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertIn(needle, lib)
         images = set(re.findall(r"'(whitepatrick/[\w-]+)':", lib))
         self.assertEqual(images, {"whitepatrick/wigle-sync", "whitepatrick/wigle-console", "whitepatrick/joke-reader",
-                                  "whitepatrick/joke-importer", "whitepatrick/overwatch"})
+                                  "whitepatrick/joke-importer", "whitepatrick/overwatch", "whitepatrick/brick-jenkins"})
+
+    def test_jenkins_builds_its_own_image_and_marks_the_commit(self):
+        lib = (JENKINS / "lib" / "build.groovy").read_text()
+        entry = re.search(r"'whitepatrick/brick-jenkins': \[(.*?)\]", lib, re.S).group(1)
+        for needle in ("repo: 'brick-cicd-config'", "context: 'jenkins'", "tagArg: 'BRICK_JENKINS_TAG'",
+                       "values: 'jenkins/values.yaml'", "verify: false"):
+            self.assertIn(needle, entry)
+        self.assertIn("ARG BRICK_JENKINS_TAG", (JENKINS / "Dockerfile").read_text())
+        self.assertIn("it.value.verify != false", (JENKINS / "jobs" / "verify-images.groovy").read_text())
+        branches = (JENKINS / "jobs" / "build-branches.groovy").read_text()
+        self.assertIn("--statuses", branches)
+        self.assertIn("entry.values", branches)
+        self.assertEqual(branches.count("/usr/share/brick-jenkins/bin/github-status"), 2)  # after each poll and build
+        self.assertTrue((JENKINS / "bin" / "github-status").stat().st_mode & 0o111)
 
     def test_the_hub_push_credential_comes_from_the_sealed_secret(self):
         values = (JENKINS / "values.yaml").read_text()
