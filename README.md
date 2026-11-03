@@ -414,7 +414,13 @@ The board has three modes:
 | quiet | the quiet schedule (below), or put to sleep by the side button | off | off; only the side button does anything (below) |
 
 The six buttons are two rows of three. The top row picks Overview, Builds and
-Cluster; the bottom row picks wigle-sync and Services; the last one is free for now. The
+Cluster; the bottom row picks Argo CD and Services; the last one is free for now.
+Argo CD's tile and view come from its metrics in Prometheus (`argocd_checks`):
+how many apps are synced and healthy, each app that isn't (out of sync is
+"syncing" until it has lasted 15 minutes, then a failure; Degraded or Missing
+health fails; a failed last sync warns), and the last four syncs. wigle-sync's
+checks moved to the Services view (and its button's colour), and still feed its
+page, the "uploading" lights and the CRT label. The
 joystick left/right steps through the views. Pressing the front-right button
 (1UP, `KEY_O`) twice within 1.5 seconds starts the `check-all` Jenkins job
 (`scripts/smoke`, then `test-all`) through its webhook, with the webhook secret

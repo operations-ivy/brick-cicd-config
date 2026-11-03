@@ -199,6 +199,8 @@ def main() -> None:
         elif mode == ACTIVE:
             states = {g: v["state"] for g, v in summary["groups"].items()}
             states["overview"] = summary["overall"]
+            # The Services view shows wigle-sync's checks too, so its button does.
+            states["services"] = checks.worst([s for s in (states.get("services"), states.get("wigle")) if s])
             plasma.buttons(states, VIEWS, settings.button_slots, board.view(now))
         else:  # idle: the lights show the most important event
             all_checks = [c for g in summary["groups"].values() for c in g["checks"]]

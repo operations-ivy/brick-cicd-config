@@ -228,17 +228,18 @@
 <script src="/static/vendor/addon-fit.js"></script>
 <script src="/static/vendor/addon-webgl.js"></script>
 <script>
-const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", wigle: "wigle-sync", services: "Services" };
+const LABELS = { overview: "Overview", builds: "Builds", cluster: "Cluster", argocd: "Argo CD", wigle: "wigle-sync", services: "Services" };
 const WORDS = {
   builds: { ok: "Passing", warn: "Unstable", fail: "Failing", active: "Running", unknown: "No data" },
   cluster: { ok: "Healthy", warn: "Degraded", fail: "Down", active: "Changing", unknown: "No data" },
+  argocd: { ok: "In sync", warn: "Sync failed", fail: "Drifting", active: "Syncing", unknown: "No data" },
   wigle: { ok: "OK", warn: "Behind", fail: "Failing", active: "Uploading", unknown: "No data" },
   services: { ok: "Running", warn: "Failing", fail: "Failing", active: "Running", unknown: "No data" },
 };
 const SEVERITY = ["fail", "warn", "unknown", "active", "ok"];
 const MAX_ROWS = 9;
 // Physical buttons: two rows of three. The board's views take the first five.
-const PAD = ["overview", "builds", "cluster", "wigle", "services", null];
+const PAD = ["overview", "builds", "cluster", "argocd", "services", null];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bySeverity = (a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state);
 
@@ -262,8 +263,15 @@ const butler = state => `/static/vendor/jenkins/${state === "fail" ? "pixelart-f
 // apart otherwise (failing, behind, or no data).
 function tileArt(name, state) {
   if (name === "builds") return butler(state);
+  if (name === "argocd") return `/static/art/sync-${{fail: "fail", warn: "warn", unknown: "warn"}[state] || "ok"}.svg`;
   if (name === "cluster") return `/static/art/server-${{fail: "fire", warn: "warn"}[state] || "ok"}.svg`;
   return `/static/art/${state === "ok" || state === "active" ? "plugs-connected" : "plugs-disconnected"}.svg`;
+}
+
+// Services, then wigle-sync's runs under a heading of their own.
+function servicesView(services, wigle) {
+  const heading = `<div class="more mono">wigle-sync</div>`;
+  return rows(services) + (wigle ? heading + rows(wigle) : "");
 }
 
 function jenkinsView(group) {
@@ -453,8 +461,9 @@ function render(s) {
   document.body.classList.toggle("overview", overview);
   document.getElementById("view").textContent = s.view === "overview" ? "" : LABELS[s.view];
   setHTML("content", s.view === "overview"
-    ? `<div class="tiles">${["builds", "cluster", "wigle"].map(n => tile(n, g[n])).join("")}</div>`
-    : s.view === "builds" ? jenkinsView(g.builds) : rows(g[s.view]));
+    ? `<div class="tiles">${["builds", "cluster", "argocd"].map(n => tile(n, g[n])).join("")}</div>`
+    : s.view === "builds" ? jenkinsView(g.builds)
+    : s.view === "services" ? servicesView(g.services, g.wigle) : rows(g[s.view]));
 
   if (overview) setHTML("vitals", vitals(s.vitals));
 
