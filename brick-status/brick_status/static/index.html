@@ -464,7 +464,11 @@ function render(s) {
   // (image pulls, WiGLE uploads) are downgraded while it's down.
   document.getElementById("internet").hidden = s.host?.internet !== false;
   // Quiet: brick9000's screen is off; a mirror still shows the data.
-  document.getElementById("display-off").hidden = s.mode !== "quiet";
+  // Put to sleep by the side button: say when it comes back on.
+  const off = document.getElementById("display-off");
+  off.hidden = s.mode !== "quiet";
+  off.textContent = s.asleep_until ? "Asleep until " + new Date(s.asleep_until * 1000).toLocaleString("en-US",
+    { weekday: "short", hour: "numeric", minute: "2-digit", hour12: true }) : "Display Off";
   // Woken by the side button during the quiet schedule: say when it turns off again.
   const awake = document.getElementById("awake");
   awake.hidden = !s.awake_until;

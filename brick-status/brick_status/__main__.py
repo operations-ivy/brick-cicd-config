@@ -130,7 +130,8 @@ def main() -> None:
         send_test_page(settings)
         return
 
-    board = Board(VIEWS, settings.active_seconds, settings.quiet, settings.wake_seconds)
+    board = Board(VIEWS, settings.active_seconds, settings.quiet, settings.wake_seconds,
+                  settings.sleep_morning, settings.board_state)
     status = Status()
     plasma = lights.Plasma(settings.plasma_url)
     screen = Screen(settings.wlopm)
@@ -140,8 +141,17 @@ def main() -> None:
         now = time.time()
         bm.BUTTONS.inc(button=button_name(code))
         if code == KEY_WAKE:
-            if board.wake_button(now):
-                log.info("side button: on for %d minutes", settings.wake_seconds // 60)
+            if os.path.exists(settings.retro_flag):
+                log.info("side button: ignored, a game is open")
+            else:
+                did = board.side_button(now)
+                if did == "asleep":
+                    log.info("side button: asleep until %s",
+                             time.strftime("%a %H:%M", time.localtime(board.asleep_until(now))))
+                elif did == "awake":
+                    log.info("side button: on for %d minutes", settings.wake_seconds // 60)
+                else:
+                    log.info("side button: on until the schedule turns it off")
         elif code in BUTTON_KEYS:
             board.press_view(BUTTON_KEYS.index(code), now)
         elif code in (KEY_LEFT, KEY_RIGHT):

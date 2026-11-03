@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from datetime import time
 
 from .board import QuietSchedule
 
@@ -19,7 +20,8 @@ VIEWS = ["overview", "builds", "cluster", "wigle", "services"]
 BUTTON_KEYS = [29, 56, 57, 42, 44, 45]
 KEY_LEFT = 105
 KEY_RIGHT = 106
-# The button on the cabinet's side (KEY_ESC). Checked on the hardware.
+# The button on the cabinet's left side (KEY_ESC): sleep and wake
+# (board.Board.side_button). Checked on the hardware.
 KEY_WAKE = 1
 
 
@@ -51,6 +53,9 @@ class Settings:
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
     # How long the side button turns everything on for, while it's quiet.
     wake_seconds: float = 1800.0
+    # A side-button sleep ends by this time of day at the latest, so one on a
+    # Friday evening doesn't last the weekend (nothing is quiet then).
+    sleep_morning: time = time(8, 0)
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
     # row, then left to right along the bottom.
@@ -107,6 +112,8 @@ class Settings:
             # The older daily-only settings.
             s.quiet = QuietSchedule.parse(f'{env("BRICK_STATUS_QUIET_START")}-{env("BRICK_STATUS_QUIET_END")}')
         s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
+        if v := env("BRICK_STATUS_SLEEP_MORNING"):
+            s.sleep_morning = time.fromisoformat(v)
         if v := env("BRICK_STATUS_BUTTON_SLOTS"):
             s.button_slots = _ints(v)
         s.ntfy_url = env("BRICK_STATUS_NTFY_URL", s.ntfy_url).rstrip("/")
@@ -115,3 +122,8 @@ class Settings:
         s.ntfy_click = env("BRICK_STATUS_NTFY_CLICK", s.ntfy_click)
         s.notify_dir = env("BRICK_STATUS_NOTIFY_DIR", s.notify_dir)
         return s
+
+    @property
+    def board_state(self) -> str:
+        """The side button's sleep, kept across restarts (board.Board)."""
+        return os.path.join(self.notify_dir, "board.json")
