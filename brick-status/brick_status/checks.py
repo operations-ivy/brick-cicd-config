@@ -242,11 +242,65 @@ def upnp_checks(prom: Prometheus) -> list[Check]:
     return [check]
 
 
+# Argo CD, from its application controller's metrics in Prometheus (no login,
+# and nothing new for brick9000 to depend on).
+ARGO_OUT_OF_SYNC_MINUTES = 15  # longer than an auto-sync takes: stuck
+ARGO_RECENT_SYNCS = 4
+ARGO_HEALTH = {"Healthy": OK, "Suspended": OK, "Progressing": ACTIVE, "Degraded": FAIL,
+               "Missing": FAIL, "Unknown": UNKNOWN}
+# When each app's sync counter last moved, by result: a sync's time, to the
+# minute, from the last day (the counters start again with the controller).
+ARGO_LAST_SYNCS = ("max by (name, phase) (max_over_time("
+                   "(timestamp(changes(argocd_app_sync_total[2m]) > 0))[24h:1m]))")
+
+
+def argocd_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
+    """A summary, each app that isn't synced and healthy, and the last few syncs."""
+    now = time.time() if now is None else now
+    apps = {m["name"]: (m.get("sync_status", "Unknown"), m.get("health_status", "Unknown"))
+            for m, _ in prom.query("argocd_app_info") if m.get("name")}
+    if not apps:
+        return [Check("argocd", "apps", UNKNOWN, "no data from Argo CD")]
+    stuck = {m["name"] for m, _ in prom.query(
+        f'argocd_app_info{{sync_status="OutOfSync"}} and on (name) '
+        f'(argocd_app_info{{sync_status="OutOfSync"}} offset {ARGO_OUT_OF_SYNC_MINUTES}m)') if m.get("name")}
+    last: dict[str, tuple[float, str]] = {}  # app -> (when, result) of its newest sync
+    for m, ts in prom.query(ARGO_LAST_SYNCS):
+        name = m.get("name")
+        if name and (name not in last or ts > last[name][0]):
+            last[name] = (ts, m.get("phase", ""))
+
+    checks = []
+    for name in sorted(apps):
+        sync, health = apps[name]
+        state = ARGO_HEALTH.get(health, UNKNOWN)
+        if sync == "OutOfSync":
+            state = worst([state, FAIL if name in stuck else ACTIVE])
+        elif sync != "Synced":
+            state = worst([state, UNKNOWN])
+        if name in last and last[name][1] in ("Failed", "Error"):
+            state = worst([state, WARN])
+        if state == OK:
+            continue
+        detail = f"{sync}, {health}" + (f" for {ARGO_OUT_OF_SYNC_MINUTES}m+" if name in stuck else "")
+        if name in last:
+            detail += f", last sync {last[name][1].lower()} {_ago(now - last[name][0])} ago"
+        checks.append(Check("argocd", name, state, detail))
+
+    good = sum(1 for sync, health in apps.values() if sync == "Synced" and ARGO_HEALTH.get(health) == OK)
+    summary = Check("argocd", "apps", worst([c.state for c in checks]) if checks else OK,
+                    f"{good}/{len(apps)} synced and healthy")
+    recent = sorted(last.items(), key=lambda item: -item[1][0])[:ARGO_RECENT_SYNCS]
+    updates = [Check("argocd", f"synced {name}", WARN if result in ("Failed", "Error") else OK,
+                     f"{result.lower() or 'done'}, {_ago(now - ts)} ago") for name, (ts, result) in recent]
+    return [summary, *checks, *updates]
+
+
 def collect(prom: Prometheus, jenkins: Jenkins, internet: bool = True) -> list[Check]:
     """Run every check. A group whose Prometheus queries fail becomes one unknown check."""
     checks = build_checks(jenkins)
     for group, fn in [("cluster", lambda p: cluster_checks(p, internet) + upnp_checks(p)),
-                      ("wigle", wigle_checks)]:
+                      ("wigle", wigle_checks), ("argocd", argocd_checks)]:
         try:
             checks.extend(fn(prom))
         except Exception as e:  # network errors, bad responses: show them, keep going

@@ -221,6 +221,63 @@ RRRR
     return c
 
 
+GLYPHS = {  # the middle of the sync ring, by mood
+    "ok": """
+.....G
+....GG
+G..GG.
+GGGG..
+.GG...
+""",
+    "warn": """
+..AA..
+..AA..
+..AA..
+......
+..AA..
+""",
+    "fail": """
+RR..RR
+.RRRR.
+..RR..
+.RRRR.
+RR..RR
+""",
+}
+
+
+def sync_ring(mood: str) -> Canvas:
+    """Argo CD's tile: two arrows chasing round a ring (git and the cluster
+    keeping in step), with how it's going in the middle. Our own drawing."""
+    import math
+    c = Canvas()
+    arcs = {"ok": ("C", "P"), "warn": ("A", "A"), "fail": ("F", "R")}[mood]
+    gaps = [(60, 105), (240, 285)]
+    broken = mood == "fail"
+    for deg in range(0, 360, 2):
+        if any(a <= deg <= b for a, b in gaps) or (broken and 160 <= deg <= 185):
+            continue
+        colour = arcs[0] if deg < 180 else arcs[1]
+        for r, col in ((5.6, "K"), (6.6, colour), (7.6, colour), (8.6, "K")):
+            x = round(11.5 + r * math.cos(math.radians(deg)))
+            y = round(11.5 - r * math.sin(math.radians(deg)))
+            if c.px.get((x, y)) not in (arcs[0], arcs[1]) or col != "K":
+                c.dot(x, y, col)
+    for end, colour in ((60, arcs[1]), (240, arcs[0])):  # arrowheads, pointing on round the ring
+        for step, radii in ((0, (4.6, 5.6, 6.6, 7.6, 8.6, 9.6)), (5, (5.6, 6.6, 7.6, 8.6)), (10, (6.6, 7.6))):
+            for r in radii:
+                a = math.radians(end - step)
+                c.dot(round(11.5 + r * math.cos(a)), round(11.5 - r * math.sin(a)), colour)
+    c.draw(9, 10, GLYPHS[mood])
+    if mood == "ok":
+        for x, y in ((2, 2), (21, 3), (20, 21)):
+            c.draw(x - 1, y - 1, ".W.\nWCW\n.W.")
+    elif broken:
+        c.draw(0, 9, ".R\nR.\n.R")             # sparks at the break
+        c.dot(3, 14, "Y"); c.dot(1, 12, "Y")
+    return c
+
+
 def read_png(path: Path, block: int) -> dict[tuple[int, int], str]:
     """The pixels of a palette PNG drawn in block x block squares (the pixel-art
     Jenkins is 32x32 blown up 8x), one per square; transparent ones left out."""
@@ -316,6 +373,8 @@ def drawings() -> dict[Path, Canvas]:
     return {OUT / "server-ok.svg": healthy_server(), OUT / "server-warn.svg": degraded_server(),
             OUT / "server-fire.svg": burning_server(),
             OUT / "plugs-connected.svg": plugs(True), OUT / "plugs-disconnected.svg": plugs(False),
+            OUT / "sync-ok.svg": sync_ring("ok"), OUT / "sync-warn.svg": sync_ring("warn"),
+            OUT / "sync-fail.svg": sync_ring("fail"),
             JENKINS / "pixelart-fire.svg": jenkins_on_fire()}
 
 

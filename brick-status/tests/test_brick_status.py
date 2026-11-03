@@ -407,6 +407,53 @@ class ChecksTest(unittest.TestCase):
             "wigle_sync_.+": [({"__name__": f"wigle_sync_{k}"}, v) for k, v in metrics.items()],
         })
 
+    def argo(self, apps, stuck=(), syncs=()):
+        # FakeProm takes the first key in the query: the stuck query has "offset"
+        # and also names argocd_app_info, so it goes first.
+        info = [({"name": n, "sync_status": sync, "health_status": health}, 1.0) for n, sync, health in apps]
+        return checks.argocd_checks(FakeProm({
+            "offset": [({"name": n}, 1.0) for n in stuck],
+            "argocd_app_sync_total": [({"name": n, "phase": phase}, ts) for n, phase, ts in syncs],
+            "argocd_app_info": info,
+        }), now=ts(12))
+
+    def test_argocd_all_in_sync_is_a_summary_and_the_last_syncs(self):
+        got = self.argo([("jenkins", "Synced", "Healthy"), ("secrets", "Synced", "Healthy")],
+                        syncs=[("jenkins", "Succeeded", ts(11, 40)), ("secrets", "Succeeded", ts(11, 57))])
+        self.assertEqual([(c.name, c.state, c.detail) for c in got], [
+            ("apps", "ok", "2/2 synced and healthy"),
+            ("synced secrets", "ok", "succeeded, 3m ago"),
+            ("synced jenkins", "ok", "succeeded, 20m ago")])
+        self.assertTrue(all(c.group == "argocd" for c in got))
+
+    def test_argocd_out_of_sync_is_syncing_until_its_stuck(self):
+        got = {c.name: c for c in self.argo([("a", "OutOfSync", "Healthy"), ("b", "OutOfSync", "Healthy"),
+                                              ("c", "Synced", "Healthy")], stuck=["b"])}
+        self.assertEqual(got["a"].state, "active")
+        self.assertEqual(got["b"].state, "fail")
+        self.assertIn("for 15m+", got["b"].detail)
+        self.assertNotIn("c", got)  # healthy apps aren't listed one by one
+        self.assertEqual((got["apps"].state, got["apps"].detail), ("fail", "1/3 synced and healthy"))
+
+    def test_argocd_health_and_a_failed_sync(self):
+        got = {c.name: c for c in self.argo(
+            [("down", "Synced", "Degraded"), ("rolling", "Synced", "Progressing"), ("oops", "Synced", "Healthy")],
+            syncs=[("oops", "Succeeded", ts(10)), ("oops", "Failed", ts(11))])}
+        self.assertEqual(got["down"].state, "fail")
+        self.assertEqual(got["rolling"].state, "active")
+        self.assertEqual(got["oops"].state, "warn")
+        self.assertIn("last sync failed 60m ago", got["oops"].detail)
+        self.assertEqual(got["synced oops"].state, "warn")  # the newest result per app
+
+    def test_argocd_without_metrics_is_unknown(self):
+        got = self.argo([])
+        self.assertEqual([(c.name, c.state) for c in got], [("apps", "unknown")])
+
+    def test_argocd_shows_only_the_newest_syncs(self):
+        apps = [(f"app{i}", "Synced", "Healthy") for i in range(6)]
+        got = self.argo(apps, syncs=[(f"app{i}", "Succeeded", ts(11, i)) for i in range(6)])
+        self.assertEqual([c.name for c in got[1:]], ["synced app5", "synced app4", "synced app3", "synced app2"])
+
     def test_wigle_shows_last_sync_uploads_and_next_sync(self):
         now = datetime(2026, 9, 30, 17, 10).timestamp()
         prom = self.wigle_prom({"last_pi_online_timestamp_seconds": now - 2 * 3600,
@@ -521,7 +568,8 @@ class ChecksTest(unittest.TestCase):
         summary = checks.summarize(checks.collect(Broken(), FakeJenkins([])))
         self.assertEqual(summary["groups"]["cluster"]["state"], "unknown")
         self.assertEqual(summary["groups"]["wigle"]["state"], "unknown")
-        self.assertEqual(set(summary["groups"]), {"builds", "cluster", "wigle"})
+        self.assertEqual(summary["groups"]["argocd"]["state"], "unknown")
+        self.assertEqual(set(summary["groups"]), {"builds", "cluster", "wigle", "argocd"})
 
 
 class MirrorTest(unittest.TestCase):
