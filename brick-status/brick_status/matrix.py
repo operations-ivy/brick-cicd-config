@@ -47,7 +47,7 @@ PROGRAMS = {
     "cmatrix": Program(("cmatrix", "-b", "-s", "-C", "{colour}"), tint=False),
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery"), font=7),
     # Not in the playlist: the page plays it while the plasma API has activity.
-    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=20),
+    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=9),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
     # held the Pi 4 at 96% CPU (#28).
 }

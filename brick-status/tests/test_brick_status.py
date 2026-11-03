@@ -1642,3 +1642,186 @@ class CheckButtonTest(unittest.TestCase):
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", "/nonexistent/secret"))
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("  ")))
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("x"), timeout=2))
+
+
+class CrtLogsTest(unittest.TestCase):
+    def test_clean_drops_escapes_and_controls(self):
+        from brick_status.crt_logs import clean
+        self.assertEqual(clean("\x1b[32m+ poetry install\x1b[0m\r"), "+ poetry install")
+        self.assertEqual(clean("\x1b]8;;http://x\x07link\x1b]8;;\x07\tdone\x07"), "link    done")
+
+    def test_clean_blanks_secrets(self):
+        from brick_status.crt_logs import clean
+        for line, gone in [
+            ("export WEBHOOK_SECRET=abc123", "abc123"),
+            ("password: hunter2", "hunter2"),
+            ('{"api_key": "k-1234"}', "k-1234"),
+            ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+            ("curl -X POST 'https://jenkins/invoke?token=check-all-s3cr'", "s3cr"),  # secret-scan: allow (a dummy)
+            ("git clone https://bot:ghp_shh@github.com/x/y", "ghp_shh"),  # secret-scan: allow (a dummy)
+            ("pushed " + "A1b2" * 10, "A1b2" * 10),
+            ("checked out " + "0123456789abcdef" * 2 + "01234567", "0123456789abcdef"),
+        ]:
+            with self.subTest(line=line):
+                self.assertNotIn(gone, clean(line))
+                self.assertIn("[hidden]", clean(line))
+
+    def test_clean_keeps_ordinary_lines_and_digests(self):
+        from brick_status.crt_logs import clean
+        digest = "sha256:" + "0123456789abcdef" * 4
+        self.assertEqual(clean(f"pushed docker.io/whitepatrick/overwatch:0.8.7@{digest}"),
+                         f"pushed docker.io/whitepatrick/overwatch:0.8.7@{digest}")
+        self.assertEqual(clean("Ran 133 tests in 6.1s"), "Ran 133 tests in 6.1s")
+
+    def test_jenkins_log_reads_on_from_where_it_was(self):
+        import http.server
+        from brick_status.crt_logs import JenkinsLog
+        console = ["Started by webhook\nRunning on built-in\n+ smo", "ke\nall up\n"]
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                start = int(self.path.rpartition("start=")[2])
+                text = "".join(console)[start:].encode()
+                self.send_response(200)
+                self.send_header("X-Text-Size", str(start + len(text)))
+                self.end_headers()
+                self.wfile.write(text)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        full = "".join(console)
+        console[:] = [console[0]]
+        log = JenkinsLog(f"http://127.0.0.1:{server.server_port}", "brick-status", "pw", "check-all", 7)
+        self.assertEqual(log.poll(), ["Started by webhook", "Running on built-in"])  # "+ smo" waits for its end
+        console[:] = [full]
+        self.assertEqual(log.poll(), ["+ smoke", "all up"])
+        self.assertEqual(log.poll(), [])
+        self.assertEqual(seen[0][0], "/job/check-all/7/logText/progressiveText?start=0")
+        self.assertTrue(seen[1][0].endswith(f"?start={len(console[0]) - len('ke' + chr(10) + 'all up' + chr(10))}"))
+        self.assertTrue(seen[0][1].startswith("Basic "))
+
+    def test_jenkins_log_unreachable_is_no_lines(self):
+        from brick_status.crt_logs import JenkinsLog
+        self.assertEqual(JenkinsLog("http://127.0.0.1:9", "u", "p", "x", 1, timeout=1).poll(), [])
+
+    def test_journal_log_follows_the_cursor(self):
+        import tempfile
+        from brick_status.crt_logs import JournalLog
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d, "journalctl")
+            fake.write_text('#!/bin/sh\necho "$@" >> "$0.args"\n'
+                            'case "$*" in *--after-cursor*) echo "restarting brick-status"; echo "-- cursor: c2";;\n'
+                            '*) echo "fetching"; echo "tests passed"; echo "-- cursor: c1";; esac\n')
+            fake.chmod(0o755)
+            log = JournalLog("brick-deploy.service", journalctl=str(fake))
+            self.assertEqual(log.poll(), ["fetching", "tests passed"])
+            self.assertEqual(log.poll(), ["restarting brick-status"])
+            args = Path(d, "journalctl.args").read_text().splitlines()
+            self.assertIn("_SYSTEMD_USER_UNIT=brick-deploy.service", args[0])
+            self.assertIn("-n 50", args[0])
+            self.assertIn("--after-cursor c1", args[1])
+
+    def test_which_items_have_a_log(self):
+        from brick_status.crt_logs import JenkinsLog, JournalLog, for_item
+        env = {"BRICK_STATUS_JENKINS_URL": "https://j", "BRICK_STATUS_JENKINS_PASSWORD": "pw"}
+        log = for_item({"source": "jenkins-build-image", "details": {"job": "build-image", "build": "#36"}}, env)
+        self.assertIsInstance(log, JenkinsLog)
+        self.assertEqual(log.url, "https://j/job/build-image/36/logText/progressiveText")
+        self.assertIsInstance(for_item({"source": "brick9000-deploy", "details": {}}, env), JournalLog)
+        self.assertIsNone(for_item({"source": "jenkins-x", "details": {"job": "x"}}, env))
+        self.assertIsNone(for_item({"source": "jenkins-x", "details": {"job": "x", "build": "#?"}}, env))
+        self.assertIsNone(for_item({"source": "brick9000-image", "details": {}}, env))
+
+
+class CrtActivityLogTest(unittest.TestCase):
+    ONE = {"source": "jenkins-check-all", "title": "check-all", "status": "verify",
+           "details": {"job": "check-all", "build": "#3"}}
+    TWO = {"source": "jenkins-test-all", "title": "test-all", "status": "test",
+           "details": {"job": "test-all", "build": "#9"}}
+
+    class Log:
+        def __init__(self, name):
+            self.name, self.pending = name, []
+
+        def poll(self):
+            out, self.pending = self.pending, []
+            return out
+
+    def setUp(self):
+        self.out, self.now, self.logs = [], 100.0, {}
+
+        def log_for(item):
+            self.logs[item["source"]] = self.Log(item["source"])
+            return self.logs[item["source"]]
+
+        self.screen = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now,
+                                          rows=20, log_for=log_for)
+
+    def drawn(self):
+        text = "".join(self.out)
+        self.out.clear()
+        return text
+
+    def test_the_log_scrolls_below_the_details(self):
+        self.screen.update([self.ONE])
+        self.logs["jenkins-check-all"].pending = [f"line {n}" for n in range(30)]
+        self.now += 1
+        self.screen.update([self.ONE])
+        text = self.drawn()
+        self.assertIn("-- log ", text)
+        self.assertIn("line 29", text)
+        self.assertNotIn("line 5\x1b", text)  # only the newest that fit
+        self.assertLess(text.index("-- log "), text.index("line 29"))
+
+    def test_it_reads_the_log_once_a_second(self):
+        self.screen.update([self.ONE])
+        log = self.logs["jenkins-check-all"]
+        log.pending = ["later"]
+        self.now += 0.5
+        self.screen.update([self.ONE])
+        self.assertEqual(log.pending, ["later"])
+        self.now += 0.5
+        self.screen.update([self.ONE])
+        self.assertEqual(log.pending, [])
+
+    def test_the_newest_job_is_followed(self):
+        self.screen.update([self.ONE])
+        self.logs["jenkins-check-all"].pending = ["parent line"]
+        self.now += 1
+        self.screen.update([self.ONE])
+        self.screen.update([self.ONE, self.TWO])  # check-all started test-all
+        self.logs["jenkins-test-all"].pending = ["child line"]
+        self.now += 1
+        self.drawn()
+        self.screen.update([self.ONE, self.TWO])
+        text = self.drawn()
+        self.assertIn("child line", text)
+        self.assertNotIn("parent line", text)
+
+    def test_the_log_isnt_drawn_again_when_it_hasnt_changed(self):
+        self.screen.update([self.ONE])
+        self.logs["jenkins-check-all"].pending = ["a"]
+        self.now += 1
+        self.screen.update([self.ONE])
+        self.drawn()
+        self.now += 1
+        self.screen.update([self.ONE])  # only "running" ticks on
+        text = self.drawn()
+        self.assertNotIn("-- log ", text)
+        self.assertIn("running  2s", text)
+
+    def test_no_log_without_room_or_a_source(self):
+        small = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now, rows=8,
+                                    log_for=lambda item: self.Log("x"))
+        small.update([self.ONE])
+        self.assertNotIn("-- log ", self.drawn())
+        plain = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now, rows=20)
+        plain.update([self.ONE])
+        self.assertNotIn("-- log ", self.drawn())

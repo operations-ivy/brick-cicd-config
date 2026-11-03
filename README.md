@@ -343,7 +343,12 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   a gallery of public-domain paintings drawn with chafa
   (`brick-status/art/paintings/`, credits in its `CREDITS.md`). While something
   is building or deploying it shows that instead (`crt_activity.py`), and the
-  bezel says which. The window is a
+  bezel says which. Below the title and details, the newest job's log scrolls
+  by (`crt_logs.py`): a Jenkins build's console, read as brick-status' read-only
+  user, or brick9000's own deploy from the journal. Colour codes go, and
+  anything that looks like a secret (`token=`, `password:`, `Authorization`,
+  `user:pass@`, any blob of 32+ characters but an image digest) shows as
+  `[hidden]`, on the screen and the mirror alike. The window is a
   square-ish CRT frame about a quarter of the screen, with the three tiles
   stacked beside it and the vitals below; each program names a font size
   (smaller shows more of the paintings). Only names in
