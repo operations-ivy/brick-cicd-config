@@ -156,6 +156,12 @@
                 radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
   }
   .crt #term { position: absolute; inset: 0.5em 0.6em; }
+  /* While a job runs: what's running (big) over its log (small), split at --split. */
+  .crt { --split: 45%; }
+  .crt #term-log { display: none; position: absolute; left: 0.6em; right: 0.6em; bottom: 0.5em;
+    top: calc(var(--split) + 0.4em); border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
+  .crt.split #term { bottom: auto; height: calc(var(--split) - 0.5em); }
+  .crt.split #term-log { display: block; }
   .crt .xterm-viewport { background: transparent !important; overflow: hidden !important; }
   .crt .label {
     position: absolute; left: 0.7em; bottom: 0.2em;
@@ -209,7 +215,7 @@
   <span class="clock mono" id="clock"></span>
 </header>
 <main>
-  <div class="crt plate" id="crt"><div class="glass"><div id="term"></div></div><div class="label" id="crt-label"></div><div class="program mono" id="crt-program"></div></div>
+  <div class="crt plate" id="crt"><div class="glass"><div id="term"></div><div id="term-log"></div></div><div class="label" id="crt-label"></div><div class="program mono" id="crt-program"></div></div>
   <div id="content"></div>
   <div class="vitals plate" id="vitals"></div>
 </main>
@@ -393,7 +399,8 @@ function crtProgram(s) {
   return list[slot % list.length];
 }
 
-const matrix = {
+// One per terminal: the window's program, and while a job runs, its log below.
+function makeTerm(elementId) { return {
   term: null, fit: null, source: null, key: null,
   start(colour, program = { name: "cmatrix", tint: false }) {
     if (MIRROR) return;
@@ -408,7 +415,7 @@ const matrix = {
       });
       this.fit = new FitAddon.FitAddon();
       this.term.loadAddon(this.fit);
-      this.term.open(document.getElementById("term"));
+      this.term.open(document.getElementById(elementId));
       // Draw on the GPU; the default DOM renderer kept Chromium's renderer
       // process above one full core on the Pi 4.
       try {
@@ -430,7 +437,9 @@ const matrix = {
     if (this.source) { this.source.close(); this.source = null; }
     this.key = null;
   },
-};
+}; }
+const matrix = makeTerm("term");
+const matrixLog = makeTerm("term-log");
 
 // Only touch the DOM when the markup changes, so animations don't restart every poll.
 function setHTML(id, html) {
@@ -450,13 +459,21 @@ function render(s) {
   if (overview) setHTML("vitals", vitals(s.vitals));
 
   const crt = document.getElementById("crt");
-  crt.className = `crt plate ${s.overall || "unknown"}`;
-  document.getElementById("crt-label").textContent = crtLabel(s);
-  document.getElementById("crt-program").textContent = `now showing: ${crtProgram(s).name}`;
-  // cmatrix runs only while the overview is on screen; not overnight with the screen off.
   const program = crtProgram(s);
-  if (overview && s.mode !== "quiet") matrix.start(matrixColour(s), program);
-  else matrix.stop();
+  // A job running: split the window, its log streaming in the lower terminal.
+  const split = program.name === "activity" && !!s.crt?.activity_log;
+  crt.className = `crt plate ${s.overall || "unknown"}${split ? " split" : ""}`;
+  document.getElementById("crt-label").textContent = crtLabel(s);
+  document.getElementById("crt-program").textContent = `now showing: ${program.name}`;
+  // cmatrix runs only while the overview is on screen; not overnight with the screen off.
+  if (overview && s.mode !== "quiet") {
+    matrix.start(matrixColour(s), program);
+    if (split) matrixLog.start(matrixColour(s), s.crt.activity_log);
+    else matrixLog.stop();
+  } else {
+    matrix.stop();
+    matrixLog.stop();
+  }
 
   // Nothing on the board needs sshd, so it only earns header space when it's down.
   document.getElementById("sshd").hidden = s.host?.sshd !== false;

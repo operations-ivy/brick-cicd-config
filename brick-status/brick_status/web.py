@@ -51,7 +51,7 @@ def crt_playlist(settings) -> dict:
     programs = [entry(n) for n in settings.crt_programs
                 if n in matrix.PROGRAMS and matrix.PROGRAMS[n].available(settings.cmatrix)]
     return {"programs": programs or [entry("cmatrix")], "minutes": settings.crt_minutes,
-            "activity": entry("activity")}
+            "activity": entry("activity"), "activity_log": entry("activity-log")}
 
 
 def serve(settings, board, status) -> None:

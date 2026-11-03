@@ -343,9 +343,12 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   a gallery of public-domain paintings drawn with chafa
   (`brick-status/art/paintings/`, credits in its `CREDITS.md`). While something
   is building or deploying it shows that instead (`crt_activity.py`), and the
-  bezel says which. Below the title and details, the newest job's log scrolls
-  by (`crt_logs.py`): a Jenkins build's console, read as brick-status' read-only
-  user, or brick9000's own deploy from the journal. Colour codes go, and
+  bezel says which. The window splits while it does: the title and details at
+  font 15 on top, and below, in a terminal of its own at font 9, the newest
+  job's log scrolls by (`crt_logs.py`, the `activity-log` program in matrix.py's
+  `log` slot): a Jenkins build's console, read as brick-status' read-only user,
+  or brick9000's own deploy from the journal. `--split` in the page's CSS sets
+  where the window divides. Colour codes go, and
   anything that looks like a secret (`token=`, `password:`, `Authorization`,
   `user:pass@`, any blob of 32+ characters but an image digest) shows as
   `[hidden]`, on the screen and the mirror alike. The window is a

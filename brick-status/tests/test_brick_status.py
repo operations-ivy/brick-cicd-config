@@ -1459,7 +1459,7 @@ class CrtTest(unittest.TestCase):
         self.assertEqual(crt["minutes"], 360.0)
 
     def test_the_other_programs_are_gone(self):
-        self.assertEqual(set(matrix.PROGRAMS), {"cmatrix", "gallery", "activity"})
+        self.assertEqual(set(matrix.PROGRAMS), {"cmatrix", "gallery", "activity", "activity-log"})
 
     def test_playlist_skips_programs_that_are_not_installed(self):
         s = Settings()
@@ -1740,88 +1740,107 @@ class CrtLogsTest(unittest.TestCase):
         self.assertIsNone(for_item({"source": "brick9000-image", "details": {}}, env))
 
 
-class CrtActivityLogTest(unittest.TestCase):
-    ONE = {"source": "jenkins-check-all", "title": "check-all", "status": "verify",
-           "details": {"job": "check-all", "build": "#3"}}
-    TWO = {"source": "jenkins-test-all", "title": "test-all", "status": "test",
-           "details": {"job": "test-all", "build": "#9"}}
+class CrtLogFollowerTest(unittest.TestCase):
+    CHECK = {"source": "jenkins-check-all", "title": "check-all", "details": {"job": "check-all", "build": "#3"}}
+    TESTS = {"source": "jenkins-test-all", "title": "test-all", "details": {"job": "test-all", "build": "#9"}}
 
     class Log:
-        def __init__(self, name):
-            self.name, self.pending = name, []
+        def __init__(self):
+            self.pending = []
 
         def poll(self):
             out, self.pending = self.pending, []
             return out
 
     def setUp(self):
+        from brick_status.crt_logs import Follower
         self.out, self.now, self.logs = [], 100.0, {}
 
         def log_for(item):
-            self.logs[item["source"]] = self.Log(item["source"])
+            self.logs[item["source"]] = self.Log()
             return self.logs[item["source"]]
 
-        self.screen = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now,
-                                          rows=20, log_for=log_for)
+        self.follower = Follower(40, self.out.append, log_for=log_for, clock=lambda: self.now)
 
-    def drawn(self):
+    def lines(self):
         text = "".join(self.out)
         self.out.clear()
-        return text
+        return [line for line in text.split("\r\n") if line]
 
-    def test_the_log_scrolls_below_the_details(self):
-        self.screen.update([self.ONE])
-        self.logs["jenkins-check-all"].pending = [f"line {n}" for n in range(30)]
-        self.now += 1
-        self.screen.update([self.ONE])
-        text = self.drawn()
-        self.assertIn("-- log ", text)
-        self.assertIn("line 29", text)
-        self.assertNotIn("line 5\x1b", text)  # only the newest that fit
-        self.assertLess(text.index("-- log "), text.index("line 29"))
+    def test_a_header_then_the_lines_as_they_come(self):
+        self.follower.update([self.CHECK])
+        self.assertEqual(self.lines(), ["\x1b[1m-- check-all " + "-" * 26 + "\x1b[0m"])
+        self.logs["jenkins-check-all"].pending = ["+ smoke", "", "ok   status.brick"]
+        self.follower.update([self.CHECK])
+        self.assertEqual(self.lines(), ["+ smoke", "ok   status.brick"])  # blank lines skipped
+        self.follower.update([self.CHECK])
+        self.assertEqual(self.lines(), [])
 
-    def test_it_reads_the_log_once_a_second(self):
-        self.screen.update([self.ONE])
-        log = self.logs["jenkins-check-all"]
-        log.pending = ["later"]
-        self.now += 0.5
-        self.screen.update([self.ONE])
-        self.assertEqual(log.pending, ["later"])
-        self.now += 0.5
-        self.screen.update([self.ONE])
-        self.assertEqual(log.pending, [])
+    def test_long_lines_are_cut_not_wrapped(self):
+        self.follower.update([self.CHECK])
+        self.lines()
+        self.logs["jenkins-check-all"].pending = ["x" * 100]
+        self.follower.update([self.CHECK])
+        self.assertEqual(self.lines(), ["x" * 39])
 
-    def test_the_newest_job_is_followed(self):
-        self.screen.update([self.ONE])
-        self.logs["jenkins-check-all"].pending = ["parent line"]
+    def test_follows_the_newest_and_back(self):
+        self.follower.update([self.CHECK])
         self.now += 1
-        self.screen.update([self.ONE])
-        self.screen.update([self.ONE, self.TWO])  # check-all started test-all
-        self.logs["jenkins-test-all"].pending = ["child line"]
-        self.now += 1
-        self.drawn()
-        self.screen.update([self.ONE, self.TWO])
-        text = self.drawn()
-        self.assertIn("child line", text)
-        self.assertNotIn("parent line", text)
+        self.follower.update([self.CHECK, self.TESTS])  # check-all started test-all
+        self.assertTrue(self.lines()[-1].startswith("\x1b[1m-- test-all"))
+        self.logs["jenkins-check-all"].pending = ["parent"]
+        self.logs["jenkins-test-all"].pending = ["child"]
+        self.follower.update([self.CHECK, self.TESTS])
+        self.assertEqual(self.lines(), ["child"])
+        self.follower.update([self.CHECK])  # test-all done: back to check-all, from now on
+        self.assertTrue(self.lines()[-1].startswith("\x1b[1m-- check-all"))
 
-    def test_the_log_isnt_drawn_again_when_it_hasnt_changed(self):
-        self.screen.update([self.ONE])
-        self.logs["jenkins-check-all"].pending = ["a"]
-        self.now += 1
-        self.screen.update([self.ONE])
-        self.drawn()
-        self.now += 1
-        self.screen.update([self.ONE])  # only "running" ticks on
-        text = self.drawn()
-        self.assertNotIn("-- log ", text)
-        self.assertIn("running  2s", text)
+    def test_no_log_still_says_whats_running(self):
+        from brick_status.crt_logs import Follower
+        follower = Follower(40, self.out.append, log_for=lambda item: None)
+        follower.update([{"source": "brick9000-image", "title": "overwatch:0.8.7"}])
+        self.assertEqual(len(self.lines()), 1)
+        follower.update([])
+        follower.update([])
+        self.assertEqual(self.lines(), [])
 
-    def test_no_log_without_room_or_a_source(self):
-        small = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now, rows=8,
-                                    log_for=lambda item: self.Log("x"))
-        small.update([self.ONE])
-        self.assertNotIn("-- log ", self.drawn())
-        plain = crt_activity.Screen(60, self.out.append, sleep=lambda s: None, clock=lambda: self.now, rows=20)
-        plain.update([self.ONE])
-        self.assertNotIn("-- log ", self.drawn())
+
+class CrtSlotsTest(unittest.TestCase):
+    def setUp(self):
+        self.saved = dict(matrix.PROGRAMS)
+        self.addCleanup(lambda: (matrix.PROGRAMS.clear(), matrix.PROGRAMS.update(self.saved)))
+        matrix.PROGRAMS["main-a"] = matrix.Program(("sleep", "30"))
+        matrix.PROGRAMS["main-b"] = matrix.Program(("sleep", "30"))
+        matrix.PROGRAMS["log"] = matrix.Program(("sleep", "30"), slot="log")
+
+    def start(self, name):
+        stream = matrix.stream(name, 80, 24, "green")
+        thread = threading.Thread(target=lambda: list(stream), daemon=True)
+        thread.start()
+        for _ in range(100):
+            if any(p.args[0] == "sleep" and p.poll() is None and p not in self.before
+                   for p in matrix._current.values()):
+                break
+            pytime.sleep(0.02)
+        return stream
+
+    def test_a_log_runs_beside_the_main_program_and_each_slot_replaces_its_own(self):
+        self.before = set(matrix._current.values())
+        self.start("main-a")
+        main_a = matrix._current["main"]
+        self.before = set(matrix._current.values())
+        self.start("log")
+        log = matrix._current["log"]
+        self.assertIsNone(main_a.poll())  # still running beside the log
+        self.before = set(matrix._current.values())
+        self.start("main-b")
+        main_a.wait(timeout=5)  # replaced
+        self.assertIsNone(log.poll())  # the log is in its own slot
+        for proc in list(matrix._current.values()):
+            matrix._stop(proc)
+
+    def test_the_log_program_is_in_the_playlist_for_the_page(self):
+        crt = web.crt_playlist(Settings())
+        self.assertEqual(crt["activity"]["font"], 15)
+        self.assertEqual(crt["activity_log"], {"name": "activity-log", "tint": True, "font": 9})
+        self.assertEqual(self.saved["activity-log"].slot, "log")
