@@ -22,6 +22,7 @@ def brickImages() {
         'whitepatrick/joke-reader':   [repo: 'chucks-wisdom', dockerfile: 'Dockerfile.web'],
         'whitepatrick/joke-importer': [repo: 'chucks-wisdom', dockerfile: 'Dockerfile.db'],
         'whitepatrick/overwatch':     [repo: 'overwatch', dockerfile: 'Dockerfile'],
+        'whitepatrick/presto-photos': [repo: 'presto', dockerfile: 'Dockerfile'],
         'whitepatrick/brick-jenkins': [repo: 'brick-cicd-config', dockerfile: 'Dockerfile', context: 'jenkins',
                                        tagArg: 'BRICK_JENKINS_TAG', values: 'jenkins/values.yaml', verify: false],
     ]

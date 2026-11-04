@@ -1311,7 +1311,8 @@ class JenkinsJobsTest(unittest.TestCase):
             self.assertIn(needle, lib)
         images = set(re.findall(r"'(whitepatrick/[\w-]+)':", lib))
         self.assertEqual(images, {"whitepatrick/wigle-sync", "whitepatrick/wigle-console", "whitepatrick/joke-reader",
-                                  "whitepatrick/joke-importer", "whitepatrick/overwatch", "whitepatrick/brick-jenkins"})
+                                  "whitepatrick/joke-importer", "whitepatrick/overwatch", "whitepatrick/presto-photos",
+                                  "whitepatrick/brick-jenkins"})
 
     def test_jenkins_builds_its_own_image_and_marks_the_commit(self):
         lib = (JENKINS / "lib" / "build.groovy").read_text()
