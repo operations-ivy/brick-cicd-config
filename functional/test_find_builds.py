@@ -57,6 +57,18 @@ class FindBuilds(unittest.TestCase):
         code, lines, err, _ = self.poll({"release/x": A}, pins)
         self.assertEqual((code, lines, err), (0, [f"{CONSOLE} 0.1.19 {A}"], ""))
 
+    def test_a_new_repos_first_release_builds_with_nothing_on_main(self):
+        # main has no k8s_config/ yet (operations-ivy/presto's first release)
+        pins = {"main": {}, A: {SYNC: "0.2.0"}}
+        code, lines, err, _ = self.poll({"release/x": A}, pins)
+        self.assertEqual((code, lines, err), (0, [f"{SYNC} 0.2.0 {A}"], ""))
+
+    def test_no_kustomization_at_a_commit_pins_nothing(self):
+        def missing(url, timeout):
+            raise fb.urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        with mock.patch.object(fb.urllib.request, "urlopen", side_effect=missing):
+            self.assertEqual(fb.pinned("presto", "main"), {})
+
     def test_a_failed_build_waits_for_a_new_commit(self):
         self.assertTrue(self.poll({"feature/x": A})[1])
         code, lines, _, calls = self.poll({"feature/x": A})

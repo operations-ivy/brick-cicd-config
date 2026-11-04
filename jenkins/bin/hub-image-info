@@ -9,6 +9,8 @@ have no JSON step here).
 
 Anonymous reads of public images; nothing to authenticate. Used by
 verify-images (and build-image, to refuse a tag that already exists: exit 3).
+Exit 3 also when the repository itself doesn't exist yet (an image's first
+build: the registry says 401 for it, Docker Hub's API 404).
 """
 
 import json
@@ -32,8 +34,26 @@ def get(url: str, headers: dict | None = None):
         return resp.headers, json.load(resp)
 
 
+def repo_exists(repo: str) -> bool:
+    """Whether Docker Hub has the repository at all. The registry answers 401,
+    not 404, for a repository that doesn't exist yet (an image's first build),
+    so a 401 alone can't tell "missing" from a real auth problem."""
+    try:
+        get(f"https://hub.docker.com/v2/repositories/{repo}/")
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise
+
+
 def newest_tag(repo: str) -> str | None:
-    _, page = get(f"https://hub.docker.com/v2/repositories/{repo}/tags?page_size=100&ordering=last_updated")
+    try:
+        _, page = get(f"https://hub.docker.com/v2/repositories/{repo}/tags?page_size=100&ordering=last_updated")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:  # no such repository yet
+            return None
+        raise
     # dev-*: a branch's trial images (build-branches), not releases.
     tags = [t["name"] for t in page.get("results", []) if t["name"] != "latest" and not t["name"].startswith("dev-")]
     return tags[0] if tags else None
@@ -62,7 +82,7 @@ def main() -> int:
     try:
         headers, manifest = get(f"{registry}/manifests/{tag}", {**auth, "Accept": ACCEPT})
     except urllib.error.HTTPError as e:
-        if e.code == 404:
+        if e.code == 404 or (e.code == 401 and not repo_exists(repo)):
             emit({"image": repo, "tag": tag, "exists": False}, kv)
             return 3
         raise
