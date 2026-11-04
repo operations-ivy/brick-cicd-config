@@ -50,10 +50,16 @@ def heads(repo: str, every: bool = False) -> dict[str, str]:
 
 
 def pinned(repo: str, commit: str) -> dict[str, str]:
-    """Image -> newTag, from the commit's kustomization."""
+    """Image -> newTag, from the commit's kustomization; none if it has none (a new
+    repo's main before its first release, or a branch from before k8s_config/)."""
     url = f"https://raw.githubusercontent.com/operations-ivy/{repo}/{commit}/k8s_config/kustomization.yaml"
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        return dict(TAG.findall(resp.read().decode()))
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return dict(TAG.findall(resp.read().decode()))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}
+        raise
 
 
 def values_tag(repo: str, commit: str, path: str) -> str | None:
