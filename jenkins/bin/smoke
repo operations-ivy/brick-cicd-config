@@ -25,7 +25,7 @@ import urllib.request
 
 # name -> the statuses that mean "up" (logins redirect or refuse). status
 # redirects to Grafana while brick9000 is away.
-NAMES = {"status": {200, 302}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200},
+NAMES = {"status": {200, 302}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200}, "presto": {200},
          "homeassistant": {200, 302}, "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403},
          "argocd": {200}, "dashboard": {200}}
 # host -> (needed by the homelab?, units)
