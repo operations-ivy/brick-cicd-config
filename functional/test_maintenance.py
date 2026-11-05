@@ -64,7 +64,7 @@ class Pure(unittest.TestCase):
         with self.assertRaises(SystemExit):
             mt.until_for("2h", 0)
 
-    def test_choices_are_online_bricks_plus_maintenance_never_brick420(self):
+    def test_choices_are_seen_bricks_plus_maintenance_never_brick420(self):
         got = mt.choices(["brick420", "brick2000", "brick666"], ["brick9000", "brick1982", "brick420", "laptop"],
                          ["brick69"])
         self.assertEqual(got, ["brick69", "brick666", "brick1982", "brick2000", "brick9000"])
@@ -120,10 +120,20 @@ class WithStubs(unittest.TestCase):
             path = Path(d) / "choices/maintenance-nodes"
             with mock.patch.object(mt.time, "time", return_value=100.0):
                 self.assertEqual(mt.refresh(path), mt.CHANGED)
-                # brick666's window ended at 1.0: deleted, and not listed (it isn't online)
+                # brick666's window ended at 1.0: deleted, and not listed (monitoring hasn't seen it)
                 self.assertEqual(self.push.calls, [("DELETE", "/metrics/job/maintenance/node/brick666", "")])
                 self.assertEqual(Path(path).read_text(), "brick1982\nbrick2000\nbrick9000\n")
                 self.assertEqual(mt.refresh(path), 0)  # unchanged: no re-seed
+
+    def test_refresh_lists_bricks_seen_lately_not_only_online(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            mt.refresh(Path(d) / "choices")
+        looked = [q for q in self.prom.queries if "kube_node_status_condition" in q or "node_uname_info" in q]
+        self.assertEqual(len(looked), 2)
+        for q in looked:  # over the last 7 days, so a brick that's off for a move is still listed
+            self.assertIn("max_over_time(", q)
+            self.assertIn("[7d]", q)
+            self.assertNotIn("== 1", q)
 
 
 if __name__ == "__main__":

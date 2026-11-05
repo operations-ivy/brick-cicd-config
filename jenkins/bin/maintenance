@@ -21,12 +21,13 @@ import os
 import sys
 import time
 import urllib.parse
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
 PUSHGATEWAY = os.environ.get("PUSHGATEWAY_URL", "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091")
 METRIC = "brick_maintenance_until_seconds"
+SEEN = "7d"  # a brick monitoring saw this recently is listed, online or not (one being moved is off)
 NEVER_LISTED = {"brick420"}  # the control plane: not a maintenance-window node (the user)
 DURATIONS = {"1h": 3600, "4h": 4 * 3600, "12h": 12 * 3600, "24h": 24 * 3600, "indefinite": math.inf}
 CHANGED = 10  # refresh's exit code when the choices changed (the job re-seeds then)
@@ -44,10 +45,11 @@ def describe(until: float, now: float) -> str:
     return f"until {time.strftime('%Y-%m-%d %H:%M %Z', time.localtime(until))} ({round((until - now) / 3600, 1)} h)"
 
 
-def choices(ready: list[str], hosts_up: list[str], in_maintenance: list[str]) -> list[str]:
-    """The node dropdown: every brick online, plus any in maintenance (it may be off
-    for the work), never brick420, in number order."""
-    names = (set(ready) | set(hosts_up) | set(in_maintenance)) - NEVER_LISTED
+def choices(nodes: list[str], hosts: list[str], in_maintenance: list[str]) -> list[str]:
+    """The node dropdown: every brick seen in the last SEEN, online or off (the user,
+    2026-11-05: a node being moved is off and still needs a window), plus any in
+    maintenance, never brick420, in number order."""
+    names = (set(nodes) | set(hosts) | set(in_maintenance)) - NEVER_LISTED
     return sorted((n for n in names if n.startswith("brick")), key=lambda n: (len(n), n))
 
 
@@ -82,10 +84,14 @@ def delete(node: str) -> None:
     urllib.request.urlopen(urllib.request.Request(group_url(node), method="DELETE"), timeout=10).close()
 
 
-def online() -> tuple[list[str], list[str]]:
-    ready = [m["node"] for m, v in query('kube_node_status_condition{condition="Ready",status="true"} == 1')]
-    hosts = [m.get("nodename", "") for m, _ in query("node_uname_info")]
-    return ready, hosts
+def seen_labels(selector: str, label: str) -> list[str]:
+    """Each value of label on a selector series monitoring saw in the last SEEN, up now or not."""
+    return [m.get(label, "") for m, _ in query(f"max by ({label}) (max_over_time({selector}[{SEEN}]))")]
+
+
+def seen() -> tuple[list[str], list[str]]:
+    """Cluster nodes and hosts seen lately."""
+    return seen_labels('kube_node_status_condition{condition="Ready"}', "node"), seen_labels("node_uname_info", "nodename")
 
 
 def window() -> None:
@@ -118,8 +124,8 @@ def refresh(path: Path) -> int:
         if until <= now:
             delete(node)
             print(f"{node}: its window ended; removed")
-    ready, hosts = online()
-    listed = choices(ready, hosts, list(active(current, now)))
+    nodes, hosts = seen()
+    listed = choices(nodes, hosts, list(active(current, now)))
     if not write_if_changed(path, "\n".join(listed) + "\n"):
         return 0
     print("node choices:", ", ".join(listed))
