@@ -34,7 +34,7 @@ class StubPushgateway:
         class Handler(BaseHTTPRequestHandler):
             def _answer(self, body=b""):
                 stub.calls.append((self.command, self.path, body.decode()))
-                self.send_response(202 if self.command == "PUT" else 202)
+                self.send_response(202)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
@@ -117,7 +117,7 @@ class WithStubs(unittest.TestCase):
 
     def test_refresh_prunes_ended_windows_and_writes_choices(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
-            path = f"{d}/choices/maintenance-nodes"
+            path = Path(d) / "choices/maintenance-nodes"
             with mock.patch.object(mt.time, "time", return_value=100.0):
                 self.assertEqual(mt.refresh(path), mt.CHANGED)
                 # brick666's window ended at 1.0: deleted, and not listed (it isn't online)

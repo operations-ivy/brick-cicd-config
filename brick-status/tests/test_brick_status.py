@@ -2039,5 +2039,6 @@ class MaintenanceTest(unittest.TestCase):
         summary = cluster_summary(("control plane", "ok", "API up"), ("brick2000", "ok", "maintenance until 14:00"),
                                   ("brick666", "fail", "NotReady"))
         vitals = [{"node": "brick2000", "disk": 99.0}, {"node": "brick9000", "disk": 90.0}]
-        found, _ = notify.find_problems(summary, True, vitals)
+        found, seen = notify.find_problems(summary, True, vitals)
         self.assertEqual({p.key for p in found}, {"node:brick666", "disk:brick9000"})
+        self.assertIn("disk:brick2000", seen)  # seen and fine: an open disk page for it clears

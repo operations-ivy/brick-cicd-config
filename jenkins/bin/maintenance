@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import urllib.parse
+from pathlib import Path
 import urllib.request
 
 PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
@@ -102,7 +103,15 @@ def window() -> None:
     print(f"{node}: in maintenance {describe(until, now)}. The board and the Presto show it calm.")
 
 
-def refresh(path: str) -> int:
+def write_if_changed(path: Path, text: str) -> bool:
+    if path.exists() and path.read_text() == text:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return True
+
+
+def refresh(path: Path) -> int:
     now = time.time()
     current = windows()
     for node, until in current.items():
@@ -111,24 +120,22 @@ def refresh(path: str) -> int:
             print(f"{node}: its window ended; removed")
     ready, hosts = online()
     listed = choices(ready, hosts, list(active(current, now)))
-    text = "\n".join(listed) + "\n"
-    try:
-        with open(path) as f:
-            if f.read() == text:
-                return 0
-    except FileNotFoundError:
-        pass
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(text)
+    if not write_if_changed(path, "\n".join(listed) + "\n"):
+        return 0
     print("node choices:", ", ".join(listed))
     return CHANGED
 
 
+def main(argv: list[str]) -> int:
+    match argv:
+        case ["window"]:
+            window()
+            return 0
+        case ["refresh", path]:
+            return refresh(Path(path))
+        case _:
+            sys.exit("usage: maintenance window | maintenance refresh <choices file>")
+
+
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["window"]:
-        window()
-    elif sys.argv[1:2] == ["refresh"] and len(sys.argv) == 3:
-        sys.exit(refresh(sys.argv[2]))
-    else:
-        sys.exit("usage: maintenance window | maintenance refresh <choices file>")
+    sys.exit(main(sys.argv[1:]))

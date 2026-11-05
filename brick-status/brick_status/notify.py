@@ -24,7 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from .checks import FAIL, UNKNOWN, WARN
+from .checks import FAIL, MAINTENANCE_PREFIX, UNKNOWN, WARN
 
 log = logging.getLogger("brick-status.notify")
 
@@ -98,15 +98,15 @@ def find_problems(summary: dict, internet: bool, vitals: list[dict]) -> tuple[li
         if last["state"] == FAIL:
             found.append(Problem("wigle"))
 
-    # a node in a maintenance window (checks.py) doesn't page for its disk either
-    resting = {c["name"] for c in cluster if c.get("detail", "").startswith("maintenance")}
+    # a node in a maintenance window (checks.py) doesn't page for its disk either; it's
+    # still seen, so a disk problem open when the window starts clears instead of holding
+    resting = {c["name"] for c in cluster if c["detail"].startswith(MAINTENANCE_PREFIX)}
     for v in vitals:
-        if v["node"] in resting:
+        if "disk" not in v:
             continue
-        if "disk" in v:
-            seen.add(f"disk:{v['node']}")
-            if v["disk"] > DISK_LIMIT:
-                found.append(Problem("disk", v["node"]))
+        seen.add(f"disk:{v['node']}")
+        if v["disk"] > DISK_LIMIT and v["node"] not in resting:
+            found.append(Problem("disk", v["node"]))
     return found, seen
 
 

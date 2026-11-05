@@ -6,6 +6,7 @@ build or a wigle-sync upload), or unknown (no data).
 
 import base64
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -71,8 +72,13 @@ def maintenance(prom: Prometheus) -> dict[str, float]:
     """Each node in a maintenance window now, and when it ends."""
     try:
         return {m["node"]: v for m, v in prom.query(MAINTENANCE) if "node" in m}
-    except Exception:  # no Pushgateway, no windows: the board carries on as before
+    except (OSError, RuntimeError, ValueError, KeyError):  # no answer, no windows: the board carries on
         return {}
+
+
+def _runs_on(pods, namespace: str, workload: str) -> bool:
+    """Any of these (namespace, pod) is one of the workload's: its pods are <workload>-<suffix>."""
+    return any(ns == namespace and pod.startswith(f"{workload}-") for ns, pod in pods)
 
 
 def until_text(end: float) -> str:
@@ -88,7 +94,7 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
     maint = maintenance(prom)
     on_maint = set()  # (namespace, pod) of pods on those nodes
     if maint:
-        nodes = "|".join(sorted(maint))
+        nodes = "|".join(re.escape(n) for n in sorted(maint))
         on_maint = {(m["namespace"], m["pod"]) for m, _ in prom.query(f'kube_pod_info{{node=~"{nodes}"}}')}
     for m, v in prom.query('kube_node_status_condition{condition="Ready",status="true"}'):
         if m["node"] in maint:
@@ -118,12 +124,12 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         "kube_statefulset_replicas - kube_statefulset_status_replicas_ready > 0")
     for m, v in unavailable + unready_sts:
         name = m.get("deployment") or m.get("statefulset")
-        if any(ns == m["namespace"] and pod.startswith(f"{name}-") for ns, pod in on_maint):
+        if _runs_on(on_maint, m["namespace"], name):
             checks.append(Check("cluster", f"{m['namespace']}/{name}", OK,
                                 f"{int(v)} not ready, {MAINTENANCE_PREFIX}"))
             continue
         # A workload's pods are named <workload>-<suffix>.
-        if any(ns == m["namespace"] and pod.startswith(f"{name}-") for ns, pod in offline):
+        if _runs_on(offline, m["namespace"], name):
             detail = f"{int(v)} not ready, internet down"
         else:
             detail = f"{int(v)} not ready"
