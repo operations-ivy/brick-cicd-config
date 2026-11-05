@@ -55,7 +55,8 @@ def in_maintenance() -> set[str]:
     try:
         with urllib.request.urlopen(f"{PROMETHEUS}/api/v1/query?{qs}", timeout=10) as r:
             return {m["metric"].get("node", "") for m in json.load(r)["data"]["result"]}
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError) as e:
+        print(f"note: no maintenance windows ({e!r}); a host that's down fails", file=sys.stderr)
         return set()
 
 

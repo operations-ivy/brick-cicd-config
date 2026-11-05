@@ -19,17 +19,23 @@ smoke = importlib.util.module_from_spec(spec)
 loader.exec_module(smoke)
 
 
+def fake_ssh(host, command):
+    """brick1982 is off (no answer); brick9000 is up."""
+    if host == "brick1982":
+        return ""
+    return "active" if "is-active" in command else "{}"
+
+
 class Maintenance(unittest.TestCase):
     def run_smoke(self, windows):
         prom = StubPrometheus({"brick_maintenance_until_seconds": windows})
         self.addCleanup(prom.close)
         out = io.StringIO()
-        # every name answers; brick1982 is off (no SSH answer), brick9000 is up
-        def ssh(host, command):
-            return "" if host == "brick1982" else ("active" if "is-active" in command else "{}")
-
-        with mock.patch.multiple(smoke, PROMETHEUS=prom.url, ssh=ssh, status=lambda url: 200), \
-                mock.patch.object(smoke.time, "time", return_value=0.0), contextlib.redirect_stdout(out):
+        with (
+            mock.patch.multiple(smoke, PROMETHEUS=prom.url, ssh=fake_ssh, status=lambda url: 200),  # every name answers
+            mock.patch.object(smoke.time, "time", return_value=0.0),
+            contextlib.redirect_stdout(out),
+        ):
             rc = smoke.main()
         return rc, out.getvalue()
 
@@ -45,8 +51,11 @@ class Maintenance(unittest.TestCase):
         self.assertIn("all up", said)
 
     def test_no_prometheus_excuses_nothing(self):
-        with mock.patch.object(smoke, "PROMETHEUS", "http://127.0.0.1:9"), contextlib.redirect_stdout(io.StringIO()):
+        err = io.StringIO()
+        with mock.patch.object(smoke.urllib.request, "urlopen", side_effect=OSError("no route")), \
+                contextlib.redirect_stderr(err):
             self.assertEqual(smoke.in_maintenance(), set())
+        self.assertIn("no maintenance windows", err.getvalue())
 
 
 if __name__ == "__main__":
