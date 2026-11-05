@@ -550,7 +550,8 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(reply, {"source": "job-1", "pattern": "stage-test", "priority": 60, "ttl": 90.0})
         self.assertEqual(self.showing(), {"source": "job-1", "pattern": "stage-test", "priority": 60,
-                                          "expires_in": 90.0})
+                                          "expires_in": 90.0,
+                                          "look": {"effect": "scanner", "color": "#00ff00", "seconds": 1.6}})
         winner = self.board.winner(self.clock.now)
         self.assertIs(winner.frames, self.catalog.named["stage-test"].frames)
 
@@ -581,6 +582,18 @@ class ApiTest(unittest.TestCase):
         first = self.board.winner(self.clock.now).frames
         self.call("PUT", "/signals/a", {"color": [1, 2, 3], "effect": "pulse"})
         self.assertIs(self.board.winner(self.clock.now).frames, first)
+
+    def test_a_custom_signal_says_how_it_looks(self):
+        self.call("PUT", "/signals/a", {"color": [255, 128, 0], "effect": "pulse", "seconds": 1})
+        self.assertEqual(self.showing()["look"], {"effect": "pulse", "color": "#ff8000", "seconds": 1.0})
+
+    def test_a_colourless_display_looks_like_its_effect(self):
+        self.call("PUT", "/signals/a", {"pattern": "stage-build"})
+        self.assertEqual(self.showing()["look"], {"effect": "rainbow", "seconds": 0.75})
+
+    def test_the_boards_buttons_have_no_look(self):  # they're brick9000's own, slot by slot
+        self.call("PUT", "/signals/board", {"buttons": {"colors": {"1": [255, 0, 0]}}})
+        self.assertIsNone(self.showing()["look"])
 
     def test_buttons(self):
         body = {"buttons": {"colors": {"1": [255, 0, 0], "3": "#00ff00"}, "selected": 1, "busy": [3]}}
