@@ -21,8 +21,8 @@ import os
 import sys
 import time
 import urllib.parse
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
 PUSHGATEWAY = os.environ.get("PUSHGATEWAY_URL", "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091")
@@ -84,11 +84,14 @@ def delete(node: str) -> None:
     urllib.request.urlopen(urllib.request.Request(group_url(node), method="DELETE"), timeout=10).close()
 
 
+def seen_labels(selector: str, label: str) -> list[str]:
+    """Each value of label on a selector series monitoring saw in the last SEEN, up now or not."""
+    return [m.get(label, "") for m, _ in query(f"max by ({label}) (max_over_time({selector}[{SEEN}]))")]
+
+
 def seen() -> tuple[list[str], list[str]]:
-    """Cluster nodes and hosts monitoring saw in the last SEEN, up now or not."""
-    nodes = [m["node"] for m, _ in query(f'max by (node) (max_over_time(kube_node_status_condition{{condition="Ready"}}[{SEEN}]))')]
-    hosts = [m.get("nodename", "") for m, _ in query(f"max by (nodename) (max_over_time(node_uname_info[{SEEN}]))")]
-    return nodes, hosts
+    """Cluster nodes and hosts seen lately."""
+    return seen_labels('kube_node_status_condition{condition="Ready"}', "node"), seen_labels("node_uname_info", "nodename")
 
 
 def window() -> None:
