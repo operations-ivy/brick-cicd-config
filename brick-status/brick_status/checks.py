@@ -6,6 +6,7 @@ build or a wigle-sync upload), or unknown (no data).
 
 import base64
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -61,11 +62,49 @@ class Prometheus:
         return [(r["metric"], float(r["value"][1])) for r in body["data"]["result"]]
 
 
+# Maintenance windows (jenkins/bin/maintenance, the maintenance-window job): one
+# Pushgateway series per node, its end as a unix time (+Inf: until it's ended).
+MAINTENANCE = "brick_maintenance_until_seconds > time()"
+MAINTENANCE_PREFIX = "maintenance"  # every check a window calms starts its detail with this
+
+
+def maintenance(prom: Prometheus) -> dict[str, float]:
+    """Each node in a maintenance window now, and when it ends."""
+    try:
+        return {m["node"]: v for m, v in prom.query(MAINTENANCE) if "node" in m}
+    except (OSError, RuntimeError, ValueError, KeyError):  # no answer, no windows: the board carries on
+        return {}
+
+
+def _runs_on(pods, namespace: str, workload: str) -> bool:
+    """Any of these (namespace, pod) is one of the workload's: its pods are <workload>-<suffix>."""
+    return any(ns == namespace and pod.startswith(f"{workload}-") for ns, pod in pods)
+
+
+def until_text(end: float) -> str:
+    if end == float("inf"):
+        return f"{MAINTENANCE_PREFIX}, no end set"
+    return f"{MAINTENANCE_PREFIX} until {datetime.fromtimestamp(end).strftime('%H:%M')}"
+
+
 def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
     checks = []
+    # A node in maintenance, and everything on it, shows calm (OK): no amber, no red,
+    # no page (notify.py only pages NotReady). The user, 2026-11-04.
+    maint = maintenance(prom)
+    on_maint = set()  # (namespace, pod) of pods on those nodes
+    if maint:
+        nodes = "|".join(re.escape(n) for n in sorted(maint))
+        on_maint = {(m["namespace"], m["pod"]) for m, _ in prom.query(f'kube_pod_info{{node=~"{nodes}"}}')}
     for m, v in prom.query('kube_node_status_condition{condition="Ready",status="true"}'):
+        if m["node"] in maint:
+            checks.append(Check("cluster", m["node"], OK, until_text(maint[m["node"]])))
+            continue
         checks.append(Check("cluster", m["node"], OK if v == 1 else FAIL,
                             "Ready" if v == 1 else "NotReady"))
+    listed = {c.name for c in checks}
+    for node in sorted(set(maint) - listed):  # a host outside the cluster (brick9000, brick1982)
+        checks.append(Check("cluster", node, OK, until_text(maint[node])))
     # Prometheus (on brick2000) still scrapes the API server while it's down,
     # whereas node readiness comes through the API and goes stale with it.
     for _, v in prom.query('up{job="apiserver"}'):
@@ -85,8 +124,12 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         "kube_statefulset_replicas - kube_statefulset_status_replicas_ready > 0")
     for m, v in unavailable + unready_sts:
         name = m.get("deployment") or m.get("statefulset")
+        if _runs_on(on_maint, m["namespace"], name):
+            checks.append(Check("cluster", f"{m['namespace']}/{name}", OK,
+                                f"{int(v)} not ready, {MAINTENANCE_PREFIX}"))
+            continue
         # A workload's pods are named <workload>-<suffix>.
-        if any(ns == m["namespace"] and pod.startswith(f"{name}-") for ns, pod in offline):
+        if _runs_on(offline, m["namespace"], name):
             detail = f"{int(v)} not ready, internet down"
         else:
             detail = f"{int(v)} not ready"
@@ -95,14 +138,21 @@ def cluster_checks(prom: Prometheus, internet: bool = True) -> list[Check]:
         checks.append(Check("cluster", "workloads", OK, "all replicas ready"))
 
     for m, _ in stuck:
+        if (m["namespace"], m["pod"]) in on_maint:
+            continue
         offline_pod = (m["namespace"], m["pod"]) in offline
         checks.append(Check("cluster", f"{m['namespace']}/{m['pod']}", WARN,
                             f"{m['reason']}, internet down" if offline_pod else m["reason"]))
 
     # A finished Job's pod (the chuck importer) stays behind until the Job is
     # deleted, and Prometheus keeps trying to scrape it; it isn't down, it's done.
+    hosts = {m["instance"]: m.get("nodename", "") for m, _ in prom.query("node_uname_info")} if maint else {}
     for m, _ in prom.query('up == 0 unless on (namespace, pod) '
                            '(kube_pod_status_phase{phase=~"Succeeded|Failed"} == 1)'):
+        instance = m.get("instance", "")
+        host = hosts.get(instance) or instance.split(":")[0]
+        if host in maint or (m.get("namespace"), m.get("pod")) in on_maint:
+            continue  # its node is in maintenance
         checks.append(Check("cluster", f"scrape {m.get('job', '?')}", WARN,
                             f"{m.get('instance', '')} down"))
     return checks

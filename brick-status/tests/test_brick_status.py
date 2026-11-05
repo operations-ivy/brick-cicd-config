@@ -1247,11 +1247,13 @@ class JenkinsJobsTest(unittest.TestCase):
         for job in jobs:
             header = list(itertools.takewhile(lambda l: l.startswith("//"), job.read_text().splitlines()))
             lines = [l[2:].strip() for l in header]
-            about = [l for l in lines if not l.startswith(("param ", "cron "))]
+            about = [l for l in lines if not l.startswith(("param ", "choice ", "cron "))]
             self.assertTrue(about, f"{job.name}: no description comment")
             for line in lines:
                 if line.startswith("param "):
                     self.assertRegex(line, r"^param (\w+)=(\S*)\s*(.*)$", job.name)
+                if line.startswith("choice "):  # a dropdown: listed options, or @list from $JENKINS_HOME/choices
+                    self.assertRegex(line, r"^choice (\w+)=(@[a-z0-9-]+|[^,\s]+(,[^,\s]+)*)\s*(.*)$", job.name)
             self.assertIn("pipeline {", job.read_text(), job.name)
             self.assertRegex(job.stem, r"^[a-z0-9-]+$")
 
@@ -1983,3 +1985,60 @@ class CrtSlotsTest(unittest.TestCase):
         self.assertEqual(crt["activity"]["font"], 15)
         self.assertEqual(crt["activity_log"], {"name": "activity-log", "tint": True, "font": 9})
         self.assertEqual(self.saved["activity-log"].slot, "log")
+
+
+class MaintenanceTest(unittest.TestCase):
+    """A node in a maintenance window (the maintenance-window job): calm, never amber or paged."""
+
+    def prom(self, **extra):
+        results = {
+            "brick_maintenance_until_seconds": [({"node": "brick2000"}, 1893456000.0), ({"node": "brick1982"}, float("inf"))],
+            'kube_pod_info{node=~"brick1982|brick2000"}': [({"namespace": "chuck", "pod": "reader-5d9-abcde"}, 1),
+                                                           ({"namespace": "presto", "pod": "presto-photos-web-1-x"}, 1)],
+            "kube_node_status_condition": [({"node": "brick2000"}, 0), ({"node": "brick666"}, 0)],
+            "kube_deployment_status_replicas_unavailable": [({"namespace": "chuck", "deployment": "reader"}, 1),
+                                                            ({"namespace": "wigle", "deployment": "console"}, 1)],
+            "kube_pod_container_status_waiting_reason": [
+                ({"namespace": "presto", "pod": "presto-photos-web-1-x", "reason": "CrashLoopBackOff"}, 1)],
+            "node_uname_info": [({"instance": "brick1982", "nodename": "brick1982"}, 1)],
+            "up == 0": [({"job": "brick1982-node", "instance": "brick1982"}, 0),
+                        ({"job": "lcars", "instance": "brick1982:8767"}, 0),
+                        ({"job": "overwatch", "instance": "10.42.0.9:8080", "namespace": "overwatch", "pod": "ow-1"}, 0)],
+        }
+        results.update(extra)
+        return FakeProm(results)
+
+    def test_nodes_and_what_runs_on_them_are_calm(self):
+        got = {c.name: (c.state, c.detail) for c in checks.cluster_checks(self.prom())}
+        self.assertEqual(got["brick2000"][0], checks.OK)
+        self.assertTrue(got["brick2000"][1].startswith("maintenance until "))
+        self.assertEqual(got["brick1982"], (checks.OK, "maintenance, no end set"))  # a host, not a k8s node
+        self.assertEqual(got["brick666"], (checks.FAIL, "NotReady"))  # not in maintenance: still down
+        self.assertEqual(got["chuck/reader"], (checks.OK, "1 not ready, maintenance"))
+        self.assertEqual(got["wigle/console"], (checks.WARN, "1 not ready"))  # not on a resting node
+        self.assertNotIn("presto/presto-photos-web-1-x", got)  # its crash loop is on brick2000
+        scrapes = [n for n in got if n.startswith("scrape")]
+        self.assertEqual(scrapes, ["scrape overwatch"])  # brick1982's two are hidden
+
+    def test_no_windows_changes_nothing(self):
+        plain = self.prom(brick_maintenance_until_seconds=[])
+        got = {c.name: c.state for c in checks.cluster_checks(plain)}
+        self.assertEqual(got["brick2000"], checks.FAIL)
+        self.assertNotIn("brick1982", got)
+
+    def test_a_broken_query_means_no_windows(self):
+        class Broken(FakeProm):
+            def query(self, promql):
+                if "brick_maintenance" in promql:
+                    raise OSError("no pushgateway")
+                return super().query(promql)
+
+        self.assertEqual(checks.maintenance(Broken({})), {})
+
+    def test_resting_nodes_never_page(self):
+        summary = cluster_summary(("control plane", "ok", "API up"), ("brick2000", "ok", "maintenance until 14:00"),
+                                  ("brick666", "fail", "NotReady"))
+        vitals = [{"node": "brick2000", "disk": 99.0}, {"node": "brick9000", "disk": 90.0}]
+        found, seen = notify.find_problems(summary, True, vitals)
+        self.assertEqual({p.key for p in found}, {"node:brick666", "disk:brick9000"})
+        self.assertIn("disk:brick2000", seen)  # seen and fine: an open disk page for it clears
