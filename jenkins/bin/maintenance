@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Maintenance windows for the bricks: while a node is in one, brick9000's board
+and the Presto don't alert or turn amber for it (the user, 2026-11-04).
+
+A window is one metric in the Pushgateway, which Prometheus already scrapes and
+both the board and presto-feed already read:
+
+    brick_maintenance_until_seconds{job="maintenance", node="<node>"} <unix time, or +Inf>
+
+Readers treat a node as in maintenance while that value is in the future, so a
+window ends on time even if Jenkins is down; `refresh` deletes expired ones.
+
+    maintenance window          the maintenance-window job: NODE, DURATION, END
+    maintenance refresh <file>  the maintenance-refresh job: prune expired windows,
+                                write the node choices (exit 10 if they changed)
+"""
+
+import json
+import math
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
+PUSHGATEWAY = os.environ.get("PUSHGATEWAY_URL", "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091")
+METRIC = "brick_maintenance_until_seconds"
+NEVER_LISTED = {"brick420"}  # the control plane: not a maintenance-window node (the user)
+DURATIONS = {"1h": 3600, "4h": 4 * 3600, "12h": 12 * 3600, "24h": 24 * 3600, "indefinite": math.inf}
+CHANGED = 10  # refresh's exit code when the choices changed (the job re-seeds then)
+
+
+def until_for(duration: str, now: float) -> float:
+    if duration not in DURATIONS:
+        raise SystemExit(f"maintenance: DURATION must be one of {', '.join(DURATIONS)}, not {duration!r}")
+    return now + DURATIONS[duration]
+
+
+def describe(until: float, now: float) -> str:
+    if until == math.inf:
+        return "indefinitely (until it's ended)"
+    return f"until {time.strftime('%Y-%m-%d %H:%M %Z', time.localtime(until))} ({round((until - now) / 3600, 1)} h)"
+
+
+def choices(ready: list[str], hosts_up: list[str], in_maintenance: list[str]) -> list[str]:
+    """The node dropdown: every brick online, plus any in maintenance (it may be off
+    for the work), never brick420, in number order."""
+    names = (set(ready) | set(hosts_up) | set(in_maintenance)) - NEVER_LISTED
+    return sorted((n for n in names if n.startswith("brick")), key=lambda n: (len(n), n))
+
+
+def active(windows: dict[str, float], now: float) -> dict[str, float]:
+    return {n: u for n, u in windows.items() if u > now}
+
+
+# --- I/O ---------------------------------------------------------------------
+def query(promql: str) -> list[tuple[dict, float]]:
+    qs = urllib.parse.urlencode({"query": promql})
+    with urllib.request.urlopen(f"{PROMETHEUS}/api/v1/query?{qs}", timeout=10) as r:
+        body = json.load(r)
+    return [(m["metric"], float(m["value"][1])) for m in body["data"]["result"]]
+
+
+def windows() -> dict[str, float]:
+    return {m["node"]: v for m, v in query(METRIC) if "node" in m}
+
+
+def group_url(node: str) -> str:
+    return f"{PUSHGATEWAY}/metrics/job/maintenance/node/{urllib.parse.quote(node, safe='')}"
+
+
+def push(node: str, until: float) -> None:
+    value = "+Inf" if until == math.inf else f"{until:.0f}"
+    body = f"# TYPE {METRIC} gauge\n{METRIC} {value}\n".encode()
+    req = urllib.request.Request(group_url(node), data=body, method="PUT")
+    urllib.request.urlopen(req, timeout=10).close()
+
+
+def delete(node: str) -> None:
+    urllib.request.urlopen(urllib.request.Request(group_url(node), method="DELETE"), timeout=10).close()
+
+
+def online() -> tuple[list[str], list[str]]:
+    ready = [m["node"] for m, v in query('kube_node_status_condition{condition="Ready",status="true"} == 1')]
+    hosts = [m.get("nodename", "") for m, _ in query("node_uname_info")]
+    return ready, hosts
+
+
+def window() -> None:
+    node, duration = os.environ.get("NODE", "").strip(), os.environ.get("DURATION", "").strip()
+    end = os.environ.get("END", "false") == "true"
+    if not node or node in NEVER_LISTED or not node.startswith("brick"):
+        raise SystemExit(f"maintenance: NODE must be a brick other than brick420, not {node!r}")
+    if end:
+        delete(node)
+        print(f"{node}: out of maintenance; alerts and caution colours are back")
+        return
+    now = time.time()
+    until = until_for(duration, now)
+    push(node, until)
+    print(f"{node}: in maintenance {describe(until, now)}. The board and the Presto show it calm.")
+
+
+def refresh(path: str) -> int:
+    now = time.time()
+    current = windows()
+    for node, until in current.items():
+        if until <= now:
+            delete(node)
+            print(f"{node}: its window ended; removed")
+    ready, hosts = online()
+    listed = choices(ready, hosts, list(active(current, now)))
+    text = "\n".join(listed) + "\n"
+    try:
+        with open(path) as f:
+            if f.read() == text:
+                return 0
+    except FileNotFoundError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(text)
+    print("node choices:", ", ".join(listed))
+    return CHANGED
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["window"]:
+        window()
+    elif sys.argv[1:2] == ["refresh"] and len(sys.argv) == 3:
+        sys.exit(refresh(sys.argv[2]))
+    else:
+        sys.exit("usage: maintenance window | maintenance refresh <choices file>")

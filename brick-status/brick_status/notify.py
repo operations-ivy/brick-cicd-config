@@ -98,7 +98,11 @@ def find_problems(summary: dict, internet: bool, vitals: list[dict]) -> tuple[li
         if last["state"] == FAIL:
             found.append(Problem("wigle"))
 
+    # a node in a maintenance window (checks.py) doesn't page for its disk either
+    resting = {c["name"] for c in cluster if c.get("detail", "").startswith("maintenance")}
     for v in vitals:
+        if v["node"] in resting:
+            continue
         if "disk" in v:
             seen.add(f"disk:{v['node']}")
             if v["disk"] > DISK_LIMIT:
