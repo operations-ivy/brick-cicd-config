@@ -28,6 +28,7 @@ class Signal:
     order: int
     first: int  # when this sender started holding a signal: a new stage isn't a new job
     show: dict | None = None  # what the board's CRT says about it (web.py, "show")
+    look: dict | None = None  # what it looks like, for other lights (displays.look)
 
 
 class Signals:
@@ -38,20 +39,20 @@ class Signals:
         self._on_change = on_change
 
     def put(self, source: str, label: str, frames: tuple, priority: int, ttl: float, now: float,
-            show: dict | None = None) -> None:
+            show: dict | None = None, look: dict | None = None) -> None:
         expires = now + ttl
         with self._lock:
             self._expire(now)
             held = self._signals.get(source)
             if held and held.frames is frames and held.priority == priority:
                 held.expires = expires  # a heartbeat: not news, so it can't jump the queue
-                held.show = show
+                held.show, held.look = show, look
                 return
             if not held and len(self._signals) >= MAX_SIGNALS:
                 raise Full
             self._order += 1
             first = held.first if held else self._order
-            self._signals[source] = Signal(source, label, frames, priority, expires, self._order, first, show)
+            self._signals[source] = Signal(source, label, frames, priority, expires, self._order, first, show, look)
         self._on_change()
 
     def remove(self, source: str) -> bool:

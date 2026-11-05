@@ -497,7 +497,7 @@ curl -m 1 -X DELETE http://plasma.brick.nozdormu.cloud/signals/my-job
 | --- | --- |
 | `PUT /signals/<source>` | Hold a signal. Exactly one of `pattern` (a display, below), `color` (`[r, g, b]` or `"#rrggbb"`, with `effect` and `seconds`) or `buttons`, plus `priority` (0-100) and `ttl` (seconds, at most 3600). Without those, a display's own apply, or 50 and 30. A repeat of the same signal only extends its time |
 | `DELETE /signals/<source>` | Let it go |
-| `GET /` | What's showing and every signal held |
+| `GET /` | What's showing and every signal held, each with its `look` (`effect`, `color`, `seconds`; none for `buttons`), which other lights copy: the Presto's back LEDs |
 | `GET /patterns` | Every display with its priority, time limit and file, the effects, and any file that failed to load |
 | `GET /metrics`, `GET /healthz` | Prometheus' job `brick-plasma`; up or not |
 

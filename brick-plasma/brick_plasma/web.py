@@ -4,10 +4,11 @@ import json
 import re
 import time
 from functools import lru_cache
+from typing import NamedTuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import apa102, patterns, signals
+from . import apa102, displays, patterns, signals
 
 SOURCE = re.compile(r"^/signals/([A-Za-z0-9._-]{1,64})$")
 MAX_BODY = 4096
@@ -59,6 +60,15 @@ def _show(body: dict) -> dict | None:
             "details": {_text(k, "a detail's name"): _text(v, f"show.details.{k}") for k, v in details.items()}}
 
 
+class Resolved(NamedTuple):
+    """What a request asks the lights for, with its defaults."""
+    label: str
+    frames: tuple
+    priority: int
+    ttl: float
+    look: dict | None  # None: no look to copy (brick9000's own buttons)
+
+
 class Catalog:
     """Turns a request into frames ready to clock out. The same request gets
     the same object back, which is how a repeat is known to be one."""
@@ -77,8 +87,8 @@ class Catalog:
             frames = patterns.make(kind, color=colour, seconds=seconds)
         return tuple(apa102.encode(f) for f in frames)
 
-    def resolve(self, body: dict) -> tuple[str, tuple, int, float]:
-        """A body's (label, frames, default priority, default time limit)."""
+    def resolve(self, body: dict) -> Resolved:
+        """A body's label, frames, default priority and time limit, and look."""
         asked = [k for k in ("pattern", "color", "buttons") if k in body]
         if len(asked) != 1:
             raise BadRequest("send exactly one of pattern, color or buttons")
@@ -87,19 +97,21 @@ class Catalog:
             if not isinstance(name, str) or name not in self.named:
                 raise BadRequest(f"no pattern {name!r}: GET /patterns")
             shown = self.named[name]
-            return name, shown.frames, shown.priority, shown.ttl
+            return Resolved(name, shown.frames, shown.priority, shown.ttl, shown.look)
         if asked == ["color"]:
             effect = body.get("effect", "solid")
             if not isinstance(effect, str) or effect not in patterns.EFFECTS:
                 raise BadRequest(f"no effect {effect!r}: GET /patterns")
             seconds = _number(body, "seconds", 2.0, MIN_SECONDS, MAX_SECONDS)
+            colour = _colour(body["color"])
             try:
-                frames = self.custom(effect, _colour(body["color"]), seconds)
+                frames = self.custom(effect, colour, seconds)
             except ValueError as e:
                 raise BadRequest(str(e)) from None
-            return "custom", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL
+            look = displays.look(effect, colour, seconds)
+            return Resolved("custom", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL, look)
         frames = self.custom("buttons", *self._buttons(body["buttons"]))
-        return "buttons", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL
+        return Resolved("buttons", frames, signals.DEFAULT_PRIORITY, signals.DEFAULT_TTL, None)
 
     @staticmethod
     def _buttons(spec) -> tuple:
@@ -123,7 +135,7 @@ class Catalog:
 
 def describe(signal, now: float) -> dict:
     return {"source": signal.source, "pattern": signal.label, "priority": signal.priority,
-            "expires_in": round(signal.expires - now, 1)}
+            "expires_in": round(signal.expires - now, 1), "look": signal.look}
 
 
 def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, stats, clock=time.monotonic):
@@ -161,16 +173,16 @@ def make_server(host: str, port: int, catalog: Catalog, board: signals.Signals, 
             try:
                 if body is None:
                     raise BadRequest("the body must be a JSON object")
-                label, frames, priority, ttl = catalog.resolve(body)
-                priority = int(_number(body, "priority", priority, 0, 100))
-                ttl = _number(body, "ttl", ttl, 0.1, signals.MAX_TTL)
-                board.put(match[1], label, frames, priority, ttl, clock(), _show(body))
+                asked = catalog.resolve(body)
+                priority = int(_number(body, "priority", asked.priority, 0, 100))
+                ttl = _number(body, "ttl", asked.ttl, 0.1, signals.MAX_TTL)
+                board.put(match[1], asked.label, asked.frames, priority, ttl, clock(), _show(body), asked.look)
             except BadRequest as e:
                 self._json(400, {"error": str(e)})
             except signals.Full:
                 self._json(429, {"error": f"{signals.MAX_SIGNALS} signals held already"})
             else:
-                self._json(200, {"source": match[1], "pattern": label, "priority": priority, "ttl": ttl})
+                self._json(200, {"source": match[1], "pattern": asked.label, "priority": priority, "ttl": ttl})
 
         def do_DELETE(self):
             match = SOURCE.match(urlsplit(self.path).path)

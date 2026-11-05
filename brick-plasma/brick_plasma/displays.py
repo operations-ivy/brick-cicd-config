@@ -37,6 +37,7 @@ class Display:
     priority: int
     ttl: float
     file: str
+    look: dict | None = None  # effect, color, seconds: for other lights to copy (GET /, "look")
 
 
 def build(spec: dict, defaults: dict, file: str) -> Display:
@@ -62,7 +63,17 @@ def build(spec: dict, defaults: dict, file: str) -> Display:
     frames = patterns.make(effect, **params)
     if "slots" in spec:
         frames = patterns.only_slots(frames, spec["slots"])
-    return Display(tuple(apa102.encode(f) for f in frames), priority, float(ttl), file)
+    return Display(tuple(apa102.encode(f) for f in frames), priority, float(ttl), file,
+                   look(effect, params.get("color"), params["seconds"]))
+
+
+def look(effect: str, colour: tuple[int, int, int] | None, seconds: float) -> dict:
+    """What a display looks like, in words another set of lights can play: the Presto's
+    seven LEDs copy the buttons with it. colour is an (r, g, b) or None."""
+    out = {"effect": effect, "seconds": float(seconds)}
+    if colour is not None:
+        out["color"] = "#%02x%02x%02x" % tuple(colour)
+    return out
 
 
 def load(directory: Path = DIRECTORY) -> tuple[dict[str, Display], list[str]]:
