@@ -7,6 +7,8 @@
 - every *.brick.nozdormu.cloud name answers through the front door (Caddy on
   the cluster at 192.168.1.221 since 2026-10-17)
 - the LCARS panel's kiosk on brick1982 is running (over SSH)
+- a host in a maintenance window (the maintenance-window job) is still
+  checked, but shows "mnt" and doesn't fail the run (the user, 2026-11-05)
 - brick9000 (the arcade and the board, no longer anything the homelab
   needs): brick-status running and the board's data fresh. Only a warning
   when it's down: brick9000 is optional since its hardware failed on
@@ -16,11 +18,13 @@ Exits 1 if anything the homelab needs is down.
 """
 
 import json
+import os
 import ssl
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # name -> the statuses that mean "up" (logins redirect or refuse). status
@@ -28,6 +32,7 @@ import urllib.request
 NAMES = {"status": {200, 302}, "radar": {200}, "wigle": {200}, "reader": {200}, "overwatch": {200}, "presto": {200},
          "homeassistant": {200, 302}, "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403},
          "argocd": {200}, "dashboard": {200}}
+PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
 # host -> (needed by the homelab?, units)
 SERVICES = {"brick1982": (True, [("", "lcars-kiosk"), ("--user", "lcars-deploy.timer")]),
             "brick9000": (False, [("--user", "brick-status")])}
@@ -43,6 +48,18 @@ def status(url: str) -> int:
         return 0
 
 
+def in_maintenance() -> set[str]:
+    """Hosts in a maintenance window (bin/maintenance). None when Prometheus
+    can't be asked (the laptop): then nothing is excused."""
+    qs = urllib.parse.urlencode({"query": "brick_maintenance_until_seconds > time()"})
+    try:
+        with urllib.request.urlopen(f"{PROMETHEUS}/api/v1/query?{qs}", timeout=10) as r:
+            return {m["metric"].get("node", "") for m in json.load(r)["data"]["result"]}
+    except (OSError, ValueError, KeyError) as e:
+        print(f"note: no maintenance windows ({e!r}); a host that's down fails", file=sys.stderr)
+        return set()
+
+
 def ssh(host: str, command: str) -> str:
     out = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"zaphod@{host}", command],
                          capture_output=True, text=True)
@@ -50,7 +67,7 @@ def ssh(host: str, command: str) -> str:
 
 
 def main() -> int:
-    problems, warnings = [], []
+    problems, warnings, resting = [], [], in_maintenance()
     for name, ok in NAMES.items():
         code = status(f"https://{name}.brick.nozdormu.cloud/")
         print(f"{'ok  ' if code in ok else 'DOWN'} {name}.brick.nozdormu.cloud ({code or 'no answer'})")
@@ -59,10 +76,14 @@ def main() -> int:
     for host, (needed, units) in SERVICES.items():
         for scope, unit in units:
             state = ssh(host, f"systemctl {scope} is-active {unit}") or "unreachable"
-            mark = "ok  " if state == "active" else ("DOWN" if needed else "warn")
-            print(f"{mark} {host} {unit} ({state})")
-            if state != "active":
+            if state == "active":
+                mark = "ok  "
+            elif host in resting:  # in a maintenance window: reported, not failed
+                mark = "mnt "
+            else:
+                mark = "DOWN" if needed else "warn"
                 (problems if needed else warnings).append(f"{host}/{unit}")
+            print(f"{mark} {host} {unit} ({state})")
     # The board's data: brick-status's own state, read on brick9000 (it only
     # listens on localhost there).
     try:

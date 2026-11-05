@@ -723,7 +723,7 @@ a host; rpi_lcars' deploy for brick1982 too).
 
 After a deploy, `scripts/smoke` checks the live result, read-only: every
 `*.brick.nozdormu.cloud` name answers through the proxy, the services on
-brick9000 and brick1982 are running, and the board's data is fresh. It exits 1 if anything is down.
+brick9000 and brick1982 are running, and the board's data is fresh. It exits 1 if anything is down, except a host in a maintenance window, which shows `mnt` instead.
 
 ## Games (brick-retro, on brick9000)
 
