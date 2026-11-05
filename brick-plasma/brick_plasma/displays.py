@@ -67,7 +67,7 @@ def build(spec: dict, defaults: dict, file: str) -> Display:
                    look(effect, params.get("color"), params["seconds"]))
 
 
-def look(effect: str, colour, seconds: float) -> dict:
+def look(effect: str, colour: tuple[int, int, int] | None, seconds: float) -> dict:
     """What a display looks like, in words another set of lights can play: the Presto's
     seven LEDs copy the buttons with it. colour is an (r, g, b) or None."""
     out = {"effect": effect, "seconds": float(seconds)}
