@@ -75,3 +75,59 @@ displays:
     low: 0.0
     priority: 90
     ttl: 5
+
+  # Answers to the front-left button (brick_status/lamp.py), the Hue lamp:
+  # "board-button" sender, over everything but quiet hours, for a moment.
+  # lamp-scene-N is lamp.yaml's Nth scene.
+  lamp-on:
+    effect: rush
+    color: "#ffb46b"
+    seconds: 0.8
+    priority: 90
+    ttl: 1.5
+
+  lamp-off:
+    effect: converge
+    color: "#40281a"
+    seconds: 0.8
+    priority: 90
+    ttl: 1.5
+
+  lamp-scene-1:
+    effect: flash
+    color: "#ffe6c8"
+    seconds: 0.6
+    priority: 90
+    ttl: 1.5
+
+  lamp-scene-2:
+    effect: flash
+    color: "#ff8c32"
+    seconds: 0.6
+    priority: 90
+    ttl: 1.5
+
+  # hacker: green scanlines across the cabinet.
+  lamp-scene-3:
+    effect: scanner
+    color: "#00ff41"
+    seconds: 1.0
+    priority: 90
+    ttl: 2
+
+  lamp-night:
+    effect: pulse
+    color: "#ff5000"
+    seconds: 2.0
+    low: 0.0
+    high: 0.5
+    priority: 90
+    ttl: 2
+
+  lamp-unreachable:
+    effect: pulse
+    color: "#ff8c00"
+    seconds: 0.6
+    low: 0.0
+    priority: 90
+    ttl: 5

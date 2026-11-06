@@ -26,6 +26,8 @@ SSHD = REGISTRY.gauge("brick_status_sshd_up", "1 when sshd runs on brick9000.")
 MODE = REGISTRY.gauge("brick_status_mode", "1 for the board's current mode (idle, active, quiet).", ["mode"])
 VIEW = REGISTRY.gauge("brick_status_view", "1 for the view on screen.", ["view"])
 BUTTONS = REGISTRY.counter("brick_status_button_presses_total", "Cabinet buttons pressed.", ["button"])
+LAMP = REGISTRY.counter("brick_status_lamp_actions_total",
+                        "The front-left button's lamp actions, by gesture and result.", ["gesture", "result"])
 LIGHTS = REGISTRY.gauge("brick_status_lights_state",
                         "1 for what the board asks of the plasma lights: off, active or idle.", ["state"])
 OPEN = REGISTRY.gauge("brick_status_open_problems", "Problems the pager is holding or has paged.")

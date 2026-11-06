@@ -28,6 +28,9 @@ KEY_WAKE = 1
 # The cabinet's front-right button (1UP, KEY_O): pressed twice, it starts
 # Jenkins' check-all job (check.py). Checked on the hardware.
 KEY_CHECK = 24
+# The cabinet's front-left button (COIN, KEY_I): the Hue lamp beside it, by
+# single, double and long press (lamp.py).
+KEY_LAMP = 23
 
 
 def _ints(value: str) -> list[int]:
@@ -64,6 +67,11 @@ class Settings:
     # The front-right button's job, and Jenkins' webhook secret (install.sh's
     # copy for brick9000's Jenkins jobs; never logged).
     check_job: str = "check-all"
+    # The front-left button's lamp, through Home Assistant as its Board user
+    # (the token is in the env file, put there by home-assistant's scripts/setup).
+    ha_url: str = "https://homeassistant.brick.nozdormu.cloud"
+    ha_token: str = ""
+    lamp_file: str = ""
     webhook_secret_file: str = os.path.expanduser("~/.config/brick-jenkins/secrets/webhook_secret")
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
@@ -122,6 +130,9 @@ class Settings:
             s.quiet = QuietSchedule.parse(f'{env("BRICK_STATUS_QUIET_START")}-{env("BRICK_STATUS_QUIET_END")}')
         s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
         s.check_job = env("BRICK_STATUS_CHECK_JOB", s.check_job)
+        s.ha_url = env("BRICK_STATUS_HA_URL", s.ha_url).rstrip("/")
+        s.ha_token = env("BRICK_STATUS_HA_TOKEN", s.ha_token)
+        s.lamp_file = env("BRICK_STATUS_LAMP_FILE", s.lamp_file)
         s.webhook_secret_file = env("BRICK_STATUS_WEBHOOK_SECRET_FILE", s.webhook_secret_file)
         if v := env("BRICK_STATUS_SLEEP_MORNING"):
             s.sleep_morning = time.fromisoformat(v)

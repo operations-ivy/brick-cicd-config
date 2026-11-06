@@ -787,6 +787,8 @@ class MetricsTest(unittest.TestCase):
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
         self.assertEqual(button_name(KEY_LEFT), "left")
+        from brick_status.config import KEY_LAMP
+        self.assertEqual(button_name(KEY_LAMP), "lamp")
         self.assertEqual(button_name(999), "other")
 
     def test_http_paths_are_bounded(self):
@@ -2042,3 +2044,165 @@ class MaintenanceTest(unittest.TestCase):
         found, seen = notify.find_problems(summary, True, vitals)
         self.assertEqual({p.key for p in found}, {"node:brick666", "disk:brick9000"})
         self.assertIn("disk:brick2000", seen)  # seen and fine: an open disk page for it clears
+
+
+class LampGesturesTest(unittest.TestCase):
+    def run_events(self, events, until):
+        """events: (t, "down"|"up"); polled every 10 ms up to `until`."""
+        from brick_status.lamp import Gestures
+        g, out, i, t = Gestures(0.4, 0.8), [], 0, 0.0
+        events = sorted(events)
+        while t <= until:
+            while i < len(events) and events[i][0] <= t:
+                at, kind = events[i]
+                if kind == "down":
+                    g.press(at)
+                elif (r := g.release(at)):
+                    out.append((round(at, 1), r))
+                i += 1
+            if (r := g.poll(t)):
+                out.append((round(t, 1), r))  # within a 10 ms poll
+            t = round(t + 0.01, 2)
+        return out
+
+    def test_single_waits_out_the_double_window(self):
+        out = self.run_events([(1.0, "down"), (1.1, "up")], 3)
+        self.assertEqual(out, [(1.5, "single")])
+
+    def test_double_fires_on_the_second_release(self):
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.3, "down"), (1.4, "up")], 3)
+        self.assertEqual(out, [(1.4, "double")])
+
+    def test_long_fires_while_held_and_its_release_does_nothing(self):
+        out = self.run_events([(1.0, "down"), (2.5, "up")], 4)
+        self.assertEqual(out, [(1.8, "long")])
+
+    def test_two_slow_presses_are_two_singles(self):
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (2.0, "down"), (2.1, "up")], 4)
+        self.assertEqual(out, [(1.5, "single"), (2.5, "single")])
+
+    def test_a_key_up_without_a_key_down_is_ignored(self):
+        # The debouncer dropped a bounced key-down, but its key-up still comes.
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.15, "up")], 3)
+        self.assertEqual(out, [(1.5, "single")])
+
+    def test_a_quick_double_press_is_a_double(self):
+        # 60 ms between them: inside the board Debouncer's window, which the
+        # lamp key skips.
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.16, "down"), (1.26, "up")], 3)
+        self.assertEqual(out, [(1.3, "double")])
+
+    def test_bounce_after_a_release_is_ignored(self):
+        # A phantom 10 ms key-down 40 ms after the release.
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.14, "down"), (1.15, "up")], 3)
+        self.assertEqual(out, [(1.5, "single")])
+
+    def test_bounce_after_a_long_press_is_ignored(self):
+        out = self.run_events([(1.0, "down"), (2.0, "up"), (2.05, "down"), (2.06, "up")], 4)
+        self.assertEqual(out, [(1.8, "long")])
+
+    def test_it_keeps_the_last_press_for_the_log(self):
+        from brick_status.lamp import Gestures
+        g = Gestures()
+        g.press(1.0)
+        g.release(1.1)
+        g.press(1.15)
+        g.release(1.16)
+        held, gap, bounce = g.last
+        self.assertAlmostEqual(held, 0.01)
+        self.assertAlmostEqual(gap, 0.05)
+        self.assertTrue(bounce)
+
+
+class LampTest(unittest.TestCase):
+    """The lamp's actions against a fake Home Assistant."""
+
+    def setUp(self):
+        import http.server
+
+        from brick_status import lamp
+
+        calls = self.calls = []
+        self.status, self.reply = 200, []
+        test = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                calls.append((self.path, self.headers["Authorization"], body))
+                data = json.dumps(test.reply).encode()
+                self.send_response(test.status)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.lamp = lamp
+        self.config = lamp.LampConfig.load(lamp.DEFAULT_FILE)
+        ha = lamp.HomeAssistant(f"http://127.0.0.1:{self.server.server_port}", "tok")
+        self.it = lamp.Lamp(self.config, ha)
+
+    def test_single_toggles_and_answers_with_the_new_state(self):
+        self.reply = [{"entity_id": "light.lamp", "state": "on"}]
+        self.assertEqual(self.it.do("single"), "lamp-on")
+        self.assertEqual(self.calls, [("/api/services/light/toggle", "Bearer tok", {"entity_id": "light.lamp"})])
+        self.reply = [{"entity_id": "light.lamp", "state": "off"}]
+        self.assertEqual(self.it.do("single"), "lamp-off")
+
+    def test_double_steps_through_the_scenes_and_wraps(self):
+        n = len(self.config.scenes)
+        answers = [self.it.do("double") for _ in range(n + 1)]
+        self.assertEqual(answers, [f"lamp-scene-{i + 1}" for i in range(n)] + ["lamp-scene-1"])
+        path, _, body = self.calls[-1]
+        self.assertEqual(path, "/api/services/light/turn_on")
+        self.assertNotIn("name", body)  # the name is for the logs, not Home Assistant
+        self.assertEqual(body["entity_id"], "light.lamp")
+
+    def test_long_is_the_dim_warm_night_light(self):
+        self.assertEqual(self.it.do("long"), "lamp-night")
+        body = self.calls[-1][2]
+        self.assertLessEqual(body["brightness_pct"], 10)
+        self.assertLessEqual(body["color_temp_kelvin"], 2200)
+
+    def test_the_button_times_gestures_and_answers_off_its_thread(self):
+        clock = FakeClock()
+        done = threading.Event()
+        answers = []
+
+        def answered(gesture, answer):
+            answers.append((gesture, answer))
+            done.set()
+
+        self.reply = [{"entity_id": "light.lamp", "state": "on"}]
+        button = self.lamp.LampButton(self.it, self.lamp.Gestures(0.4, 0.8), answered, clock=clock)
+        button.press()
+        clock.now += 0.1
+        button.release()
+        button.tick()
+        self.assertEqual(answers, [])  # still waiting for a second press
+        clock.now += 0.5
+        button.tick()
+        self.assertTrue(done.wait(5))
+        self.assertEqual(answers, [("single", "lamp-on")])
+
+    def test_refused_or_unreachable_answers_amber(self):
+        self.status = 401
+        self.assertEqual(self.it.do("single"), "lamp-unreachable")
+        down = self.lamp.Lamp(self.config, self.lamp.HomeAssistant("http://127.0.0.1:9", "tok", timeout=1))
+        self.assertEqual(down.do("long"), "lamp-unreachable")
+        none = self.lamp.Lamp(self.config, self.lamp.HomeAssistant("http://127.0.0.1:9", ""))
+        self.assertEqual(none.do("single"), "lamp-unreachable")
+
+    def test_every_answer_is_a_board_display(self):
+        import yaml
+        displays = yaml.safe_load((Path(__file__).resolve().parents[2] / "brick-plasma" / "displays" /
+                                   "board.yaml").read_text())["displays"]
+        answers = {"lamp-on", "lamp-off", "lamp-night", "lamp-unreachable"}
+        answers |= {f"lamp-scene-{i + 1}" for i in range(len(self.config.scenes))}
+        self.assertLessEqual(answers, set(displays))
