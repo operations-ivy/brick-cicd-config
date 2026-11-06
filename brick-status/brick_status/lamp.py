@@ -11,16 +11,21 @@ the lights then answer amber.
 
 import json
 import logging
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Self
 
 import yaml
 
 log = logging.getLogger(__name__)
 
 SINGLE, DOUBLE, LONG = "single", "double", "long"
+UNREACHABLE = "lamp-unreachable"  # the lights' answer when Home Assistant can't be reached
 DEFAULT_FILE = Path(__file__).resolve().parent.parent / "lamp.yaml"
 
 
@@ -83,17 +88,16 @@ class LampConfig:
     night: dict = field(default_factory=lambda: {"brightness_pct": 5, "color_temp_kelvin": 2000})
 
     @classmethod
-    def load(cls, path: str | Path) -> "LampConfig":
+    def load(cls, path: str | Path) -> Self:
         data = yaml.safe_load(Path(path).read_text()) or {}
-        c = cls()
-        c.entity = data.get("entity", c.entity)
-        c.double_seconds = float(data.get("double_press_seconds", c.double_seconds))
-        c.long_seconds = float(data.get("long_press_seconds", c.long_seconds))
-        if scenes := data.get("scenes"):
-            c.scenes = [dict(s) for s in scenes]
-        if night := data.get("night"):
-            c.night = dict(night)
-        return c
+        defaults = cls()
+        return cls(
+            entity=data.get("entity", defaults.entity),
+            double_seconds=float(data.get("double_press_seconds", defaults.double_seconds)),
+            long_seconds=float(data.get("long_press_seconds", defaults.long_seconds)),
+            scenes=[dict(s) for s in data.get("scenes") or defaults.scenes],
+            night=dict(data.get("night") or defaults.night),
+        )
 
 
 class HomeAssistant:
@@ -104,13 +108,12 @@ class HomeAssistant:
         self.token = token
         self.timeout = timeout
 
-    def call(self, service: str, entity: str, **data) -> str | None:
-        """Call light.<service> on `entity`. The entity's new state ("on",
-        "off") when Home Assistant says, "" when it took the call but didn't
-        say, None when it couldn't be reached or refused."""
+    def call(self, service: str, entity: str, **data) -> tuple[bool, str]:
+        """Call light.<service> on `entity`: (whether Home Assistant took it,
+        the entity's new state: "on", "off", or "" when it didn't say)."""
         if not self.token:
             log.warning("lamp: no BRICK_STATUS_HA_TOKEN; run home-assistant's scripts/setup")
-            return None
+            return False, ""
         body = json.dumps({"entity_id": entity, **data}).encode()
         request = urllib.request.Request(
             f"{self.url}/api/services/light/{service}", data=body, method="POST",
@@ -120,19 +123,18 @@ class HomeAssistant:
                 changed = json.loads(response.read() or b"[]")
         except urllib.error.HTTPError as e:
             log.warning("lamp: Home Assistant answered %d to light.%s", e.code, service)
-            return None
+            return False, ""
         except (OSError, ValueError) as e:
             log.warning("lamp: couldn't reach Home Assistant (%s)", getattr(e, "reason", type(e).__name__))
-            return None
-        for s in changed if isinstance(changed, list) else []:
-            if isinstance(s, dict) and s.get("entity_id") == entity:
-                return str(s.get("state", ""))
-        return ""
+            return False, ""
+        states = changed if isinstance(changed, list) else []
+        return True, next((str(s.get("state", "")) for s in states
+                           if isinstance(s, dict) and s.get("entity_id") == entity), "")
 
 
 class Lamp:
     """What each gesture does, and the button lights' answer (a board.yaml
-    display name), or None for no answer."""
+    display name)."""
 
     def __init__(self, config: LampConfig, ha: HomeAssistant):
         self.config = config
@@ -142,19 +144,59 @@ class Lamp:
     def do(self, gesture: str) -> str:
         entity = self.config.entity
         if gesture == SINGLE:
-            state = self.ha.call("toggle", entity)
-            if state is None:
-                return "lamp-unreachable"
+            ok, state = self.ha.call("toggle", entity)
+            if not ok:
+                return UNREACHABLE
             return "lamp-off" if state == "off" else "lamp-on"
         if gesture == DOUBLE:
             self._scene = (self._scene + 1) % len(self.config.scenes)
             scene = dict(self.config.scenes[self._scene])
             name = scene.pop("name", str(self._scene + 1))
             log.info("lamp: scene %s", name)
-            ok = self.ha.call("turn_on", entity, **scene) is not None
-            return f"lamp-scene-{self._scene + 1}" if ok else "lamp-unreachable"
+            ok, _ = self.ha.call("turn_on", entity, **scene)
+            return f"lamp-scene-{self._scene + 1}" if ok else UNREACHABLE
         if gesture == LONG:
             log.info("lamp: night light")
-            return "lamp-night" if self.ha.call("turn_on", entity, **self.config.night) is not None \
-                else "lamp-unreachable"
+            ok, _ = self.ha.call("turn_on", entity, **self.config.night)
+            return "lamp-night" if ok else UNREACHABLE
         raise ValueError(f"unknown gesture {gesture!r}")
+
+
+class LampButton:
+    """The button itself, thread-safe: key-downs and key-ups from the input
+    thread, gestures timed out by run(), and each gesture's action on a
+    thread of its own (Home Assistant can be slow), its answer to `answered`."""
+
+    def __init__(self, lamp: Lamp, gestures: Gestures, answered: Callable[[str, str], None],
+                 clock: Callable[[], float] = time.monotonic):
+        self.lamp = lamp
+        self.gestures = gestures
+        self.answered = answered
+        self.clock = clock
+        self._lock = threading.Lock()
+
+    def press(self) -> None:
+        with self._lock:
+            self.gestures.press(self.clock())
+
+    def release(self) -> None:
+        with self._lock:
+            gesture = self.gestures.release(self.clock())
+        self._dispatch(gesture)
+
+    def tick(self) -> None:
+        with self._lock:
+            gesture = self.gestures.poll(self.clock())
+        self._dispatch(gesture)
+
+    def run(self, every: float = 0.02) -> None:
+        while True:
+            time.sleep(every)
+            self.tick()
+
+    def _dispatch(self, gesture: str | None) -> None:
+        if gesture is not None:
+            threading.Thread(target=self._do, args=(gesture,), daemon=True).start()
+
+    def _do(self, gesture: str) -> None:
+        self.answered(gesture, self.lamp.do(gesture))

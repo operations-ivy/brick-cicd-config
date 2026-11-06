@@ -2143,6 +2143,27 @@ class LampTest(unittest.TestCase):
         self.assertLessEqual(body["brightness_pct"], 10)
         self.assertLessEqual(body["color_temp_kelvin"], 2200)
 
+    def test_the_button_times_gestures_and_answers_off_its_thread(self):
+        clock = FakeClock()
+        done = threading.Event()
+        answers = []
+
+        def answered(gesture, answer):
+            answers.append((gesture, answer))
+            done.set()
+
+        self.reply = [{"entity_id": "light.lamp", "state": "on"}]
+        button = self.lamp.LampButton(self.it, self.lamp.Gestures(0.4, 0.8), answered, clock=clock)
+        button.press()
+        clock.now += 0.1
+        button.release()
+        button.tick()
+        self.assertEqual(answers, [])  # still waiting for a second press
+        clock.now += 0.5
+        button.tick()
+        self.assertTrue(done.wait(5))
+        self.assertEqual(answers, [("single", "lamp-on")])
+
     def test_refused_or_unreachable_answers_amber(self):
         self.status = 401
         self.assertEqual(self.it.do("single"), "lamp-unreachable")
