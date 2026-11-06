@@ -3,7 +3,7 @@
 import logging
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 log = logging.getLogger(__name__)
 
@@ -30,9 +30,12 @@ class Debouncer:
 
 
 def watch_buttons(device_name: str, on_key: Callable[[int], None],
-                  on_release: Callable[[int], None] | None = None) -> None:
+                  on_release: Callable[[int], None] | None = None,
+                  undebounced: Collection[int] = ()) -> None:
     """Call on_key(code) for each key press on the named input device, forever,
-    and on_release(code) for each key-up.
+    and on_release(code) for each key-up. Key-downs of the `undebounced` codes
+    skip the Debouncer: their owner tells bounce from a quick second press
+    itself (the lamp button's double press is one).
 
     The device is grabbed so presses only reach brick-status, not Chromium
     (Space would scroll the page, arrows would move around it).
@@ -58,7 +61,8 @@ def watch_buttons(device_name: str, on_key: Callable[[int], None],
             for event in device.read_loop():
                 if event.type != evdev.ecodes.EV_KEY:
                     continue
-                if event.value == 1 and debounce.press(event.code, event.timestamp()):
+                if event.value == 1 and (event.code in undebounced
+                                         or debounce.press(event.code, event.timestamp())):
                     on_key(event.code)
                 elif event.value == 0:
                     debounce.release(event.code, event.timestamp())

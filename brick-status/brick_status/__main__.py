@@ -196,7 +196,8 @@ def main() -> None:
         wake.set()
 
     threading.Thread(target=poll, args=(settings, status, wake), daemon=True).start()
-    threading.Thread(target=watch_buttons, args=(settings.input_device_name, on_key, on_release),
+    threading.Thread(target=watch_buttons,
+                     args=(settings.input_device_name, on_key, on_release, {KEY_LAMP}),
                      daemon=True).start()
     threading.Thread(target=lamp_button.run, daemon=True).start()
     threading.Thread(target=web.serve, args=(settings, board, status),

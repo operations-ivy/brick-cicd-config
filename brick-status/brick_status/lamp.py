@@ -36,16 +36,27 @@ class Gestures:
     A long press fires while the button is still held, once it has been down
     `long_seconds`; its release is then ignored. A single press waits
     `double_seconds` after its release for a second one; the second press's
-    release makes it a double. Key-ups without a key-down (the debouncer
-    dropped a bounced key-down) are ignored.
+    release makes it a double.
+
+    The arcade buttons bounce: a release can be followed by a phantom
+    key-down and key-up. The board's Debouncer drops any key-down within
+    150 ms of a release, which would also drop a quick double press's second
+    press, so this key skips it: a press held under `bounce_seconds` is
+    bounce, and ignored. Key-ups without a key-down are ignored too.
     """
 
-    def __init__(self, double_seconds: float = 0.4, long_seconds: float = 0.8):
+    def __init__(self, double_seconds: float = 0.4, long_seconds: float = 0.8,
+                 bounce_seconds: float = 0.03):
         self.double_seconds = double_seconds
         self.long_seconds = long_seconds
+        self.bounce_seconds = bounce_seconds
         self._down_at: float | None = None
         self._long_fired = False
         self._released_at: float | None = None  # a first press, waiting for a second
+        self._last_up: float | None = None
+        # The last press, for the log: (seconds held, seconds since the
+        # release before it or None, whether it counted as bounce).
+        self.last: tuple[float, float | None, bool] | None = None
 
     def press(self, now: float) -> None:
         self._down_at = now
@@ -54,8 +65,12 @@ class Gestures:
     def release(self, now: float) -> str | None:
         if self._down_at is None:
             return None
-        self._down_at = None
-        if self._long_fired:
+        down_at, self._down_at = self._down_at, None
+        gap = None if self._last_up is None else down_at - self._last_up
+        self._last_up = now
+        bounce = now - down_at < self.bounce_seconds
+        self.last = (now - down_at, gap, bounce)
+        if bounce or self._long_fired:
             return None
         if self._released_at is not None:
             self._released_at = None
@@ -182,6 +197,12 @@ class LampButton:
     def release(self) -> None:
         with self._lock:
             gesture = self.gestures.release(self.clock())
+            last = self.gestures.last
+        if last is not None:
+            held, gap, bounce = last
+            log.info("lamp: key held %d ms%s%s", held * 1000,
+                     "" if gap is None or gap > 2 else f", {gap * 1000:.0f} ms after the last release",
+                     " (bounce, ignored)" if bounce else "")
         self._dispatch(gesture)
 
     def tick(self) -> None:

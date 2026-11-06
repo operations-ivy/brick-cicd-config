@@ -2086,6 +2086,33 @@ class LampGesturesTest(unittest.TestCase):
         out = self.run_events([(1.0, "down"), (1.1, "up"), (1.15, "up")], 3)
         self.assertEqual(out, [(1.5, "single")])
 
+    def test_a_quick_double_press_is_a_double(self):
+        # 60 ms between them: inside the board Debouncer's window, which the
+        # lamp key skips.
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.16, "down"), (1.26, "up")], 3)
+        self.assertEqual(out, [(1.3, "double")])
+
+    def test_bounce_after_a_release_is_ignored(self):
+        # A phantom 10 ms key-down 40 ms after the release.
+        out = self.run_events([(1.0, "down"), (1.1, "up"), (1.14, "down"), (1.15, "up")], 3)
+        self.assertEqual(out, [(1.5, "single")])
+
+    def test_bounce_after_a_long_press_is_ignored(self):
+        out = self.run_events([(1.0, "down"), (2.0, "up"), (2.05, "down"), (2.06, "up")], 4)
+        self.assertEqual(out, [(1.8, "long")])
+
+    def test_it_keeps_the_last_press_for_the_log(self):
+        from brick_status.lamp import Gestures
+        g = Gestures()
+        g.press(1.0)
+        g.release(1.1)
+        g.press(1.15)
+        g.release(1.16)
+        held, gap, bounce = g.last
+        self.assertAlmostEqual(held, 0.01)
+        self.assertAlmostEqual(gap, 0.05)
+        self.assertTrue(bounce)
+
 
 class LampTest(unittest.TestCase):
     """The lamp's actions against a fake Home Assistant."""
