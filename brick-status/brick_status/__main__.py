@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lights, notify, units, web
+from . import check, checks, host, lamp, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
-from .config import BUTTON_KEYS, KEY_CHECK, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
+from .config import BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -105,7 +105,8 @@ def button_name(code: int) -> str:
     if code in BUTTON_KEYS:
         i = BUTTON_KEYS.index(code)
         return VIEWS[i] if i < len(VIEWS) else f"button{i + 1}"
-    return {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LEFT: "left", KEY_RIGHT: "right"}.get(code, "other")
+    return {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_LEFT: "left",
+            KEY_RIGHT: "right"}.get(code, "other")
 
 
 def send_test_page(settings: Settings) -> None:
@@ -142,9 +143,46 @@ def main() -> None:
         started = check.start_job(settings.jenkins_url, settings.check_job, settings.webhook_secret_file)
         plasma.answer("check-started" if started else "check-unreachable")
 
+    lamp_config = lamp.LampConfig.load(settings.lamp_file or lamp.DEFAULT_FILE)
+    the_lamp = lamp.Lamp(lamp_config, lamp.HomeAssistant(settings.ha_url, settings.ha_token))
+    lamp_gestures = lamp.Gestures(lamp_config.double_seconds, lamp_config.long_seconds)
+    lamp_lock = threading.Lock()
+
+    def lamp_do(gesture: str) -> None:
+        answer = the_lamp.do(gesture)
+        bm.LAMP.inc(gesture=gesture, result="unreachable" if answer == "lamp-unreachable" else "ok")
+        # The lamp works in quiet hours too (that's when the night light is
+        # for), but the button lights stay dark then.
+        if board.mode(time.time()) != QUIET:
+            plasma.answer(answer)
+
+    def lamp_dispatch(gesture: str | None) -> None:
+        if gesture is not None:
+            threading.Thread(target=lamp_do, args=(gesture,), daemon=True).start()
+
+    def lamp_tick() -> None:
+        while True:
+            time.sleep(0.02)
+            with lamp_lock:
+                gesture = lamp_gestures.poll(time.monotonic())
+            lamp_dispatch(gesture)
+
+    def on_release(code: int) -> None:
+        if code == KEY_LAMP:
+            with lamp_lock:
+                gesture = lamp_gestures.release(time.monotonic())
+            lamp_dispatch(gesture)
+
     def on_key(code: int) -> None:
         now = time.time()
         bm.BUTTONS.inc(button=button_name(code))
+        if code == KEY_LAMP:
+            # Not while a game is open (COIN is a game's button then). It
+            # doesn't wake the board: the lamp is for the room, not the screen.
+            if not os.path.exists(settings.retro_flag):
+                with lamp_lock:
+                    lamp_gestures.press(time.monotonic())
+            return
         if code == KEY_WAKE:
             if os.path.exists(settings.retro_flag):
                 log.info("side button: ignored, a game is open")
@@ -173,8 +211,9 @@ def main() -> None:
         wake.set()
 
     threading.Thread(target=poll, args=(settings, status, wake), daemon=True).start()
-    threading.Thread(target=watch_buttons, args=(settings.input_device_name, on_key),
+    threading.Thread(target=watch_buttons, args=(settings.input_device_name, on_key, on_release),
                      daemon=True).start()
+    threading.Thread(target=lamp_tick, daemon=True).start()
     threading.Thread(target=web.serve, args=(settings, board, status),
                      daemon=True).start()
     log.info("brick-status up: prometheus=%s board=http://%s:%d",

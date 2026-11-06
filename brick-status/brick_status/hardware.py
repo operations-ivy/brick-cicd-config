@@ -29,8 +29,10 @@ class Debouncer:
         self._released[code] = t
 
 
-def watch_buttons(device_name: str, on_key: Callable[[int], None]) -> None:
-    """Call on_key(code) for each key press on the named input device, forever.
+def watch_buttons(device_name: str, on_key: Callable[[int], None],
+                  on_release: Callable[[int], None] | None = None) -> None:
+    """Call on_key(code) for each key press on the named input device, forever,
+    and on_release(code) for each key-up.
 
     The device is grabbed so presses only reach brick-status, not Chromium
     (Space would scroll the page, arrows would move around it).
@@ -60,6 +62,8 @@ def watch_buttons(device_name: str, on_key: Callable[[int], None]) -> None:
                     on_key(event.code)
                 elif event.value == 0:
                     debounce.release(event.code, event.timestamp())
+                    if on_release is not None:
+                        on_release(event.code)
         except OSError as e:
             log.warning("lost input device: %s", e)
             time.sleep(5)

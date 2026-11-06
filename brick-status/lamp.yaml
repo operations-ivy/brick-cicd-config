@@ -1,0 +1,27 @@
+# brick9000's front-left button (COIN) and the Hue lamp beside it
+# (brick_status/lamp.py): one press toggles it, two step through the scenes,
+# holding it sets the night light. Each scene and the night light are
+# Home Assistant's light.turn_on data; the button lights answer in
+# brick-plasma/displays/board.yaml (lamp-scene-N matches the Nth scene).
+entity: light.lamp
+double_press_seconds: 0.4
+long_press_seconds: 0.8
+
+scenes:
+  - name: bright
+    brightness_pct: 100
+    color_temp_kelvin: 4000
+    transition: 0.5
+  - name: relax
+    brightness_pct: 55
+    color_temp_kelvin: 2700
+    transition: 1
+  - name: hacker
+    brightness_pct: 70
+    rgb_color: [0, 255, 65]
+    transition: 1
+
+night:
+  brightness_pct: 5
+  color_temp_kelvin: 2000
+  transition: 2

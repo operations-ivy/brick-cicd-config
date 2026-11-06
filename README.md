@@ -429,11 +429,21 @@ joystick left/right steps through the views. Pressing the front-right button
 from `~/.config/brick-jenkins/secrets/webhook_secret`. One press only arms it
 (a white flash); the lights then answer blue (started) or amber (Jenkins
 unreachable), show the job's stages, and end green (passed, 30 s) or red
-(failed, 5 min). The front-left button (Coin) is saved for a Hue light toggle.
+(failed, 5 min). The front-left button (Coin, `KEY_I`) works the Hue lamp beside
+the cabinet through Home Assistant (`brick-status/lamp.yaml`, `lamp.py`): one
+press toggles it, two within 0.4 s step through the scenes (bright, relax,
+hacker green), and holding it 0.8 s sets the night light (5 %, 2000 K). The
+lights answer warm (on), dim (off), each scene's colour, a slow orange pulse
+(night) or amber (Home Assistant unreachable: the lamp is a Bluetooth bulb
+driven through brick2000, so it's out of reach while the cluster is). It
+calls Home Assistant as its **Board** user, `BRICK_STATUS_HA_TOKEN` in the env
+file, which home-assistant's `scripts/setup` puts there. It works during quiet
+hours (the lights stay dark), doesn't wake the board, and does nothing while
+a game is open.
 The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,
-Coin, joystick up/down) don't change the view but count as input. While a game
+joystick up/down) don't change the view but count as input. While a game
 is open (brick-retro), the side and front-right buttons do nothing.
 
 The quiet schedule is `BRICK_STATUS_QUIET` in the env file: daily windows
