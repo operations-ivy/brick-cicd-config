@@ -36,7 +36,11 @@ sync() {
     shift
     mkdir -p "$dest/$system"
     # psx/PS1 on brick2000 is a second copy of the .chd games beside it.
+    # psx/psp-eboots (brick_retro's links to the PS1 games converted for the
+    # PSP) and psx/unpacked (games unpacked by hand from brick2000's .ecm and
+    # .7z files) aren't on brick2000: --delete leaves them alone.
     rsync -rt --delete --prune-empty-dirs --bwlimit="$bwlimit" -e "$ssh" \
+        --filter='P /psp-eboots/' --filter='P /unpacked/' \
         --exclude=/PS1/ --include='*/' $(includes "$@" srm) --exclude='*' \
         "$src:roms/$system/" "$dest/$system/"
 }
@@ -48,11 +52,12 @@ sync gbc gbc zip
 sync gba gba zip
 sync megadrive md gen smd bin zip
 sync mastersystem sms zip
+sync gamegear gg zip
 sync sega32x 32x bin
 # Arcade zips; brick-retro lists only those FinalBurn Neo knows.
 sync neogeo zip
-# BIOS files: PlayStation, Sega CD and Neo Geo (needed; brick2000 has no
-# Neo Geo one FinalBurn Neo accepts yet), Game Boy family and Sega (optional,
+# BIOS files: PlayStation, Sega CD, PC Engine CD and Neo Geo (needed; brick2000 has no
+# Neo Geo one FinalBurn Neo accepts yet), Game Boy family, Sega and Game Gear (optional,
 # used when a core's option asks for them). -d: this folder's files, not its subfolders
 # (without it rsync skips the folder altogether).
 mkdir -p "$system_dir"
@@ -61,7 +66,7 @@ rsync -dt -e "$ssh" \
     --include=gb_bios.bin --include=gbc_bios.bin --include=gba_bios.bin \
     --include=bios_U.sms --include=bios_E.sms --include=bios_MD.bin \
     --include=bios_CD_U.bin --include=bios_CD_E.bin --include=bios_CD_J.bin \
-    --include=neogeo.zip --exclude='*' \
+    --include=neogeo.zip --include=bios.gg --include=syscard3.pce --exclude='*' \
     "$src:BIOS/system/" "$system_dir/"
 # Dreamcast (Flycast boots without them, but fewer games work).
 mkdir -p "$system_dir/dc"
@@ -78,6 +83,14 @@ playlists
 sync Dreamcast chd cue gdi bin raw
 playlists
 sync psp iso cso
+# The PlayStation games converted for the PSP (an EBOOT.PBP in a folder each,
+# in brick2000's psp folder): mirrored as they are, then linked into the psx
+# list under their titles by the playlists step (brick_retro/games.py).
+mkdir -p "$HOME/games/eboots"
+rsync -rt --delete --prune-empty-dirs --bwlimit="$bwlimit" -e "$ssh" \
+    --include='*/' --include=EBOOT.PBP --exclude='*' "$src:roms/psp/" "$HOME/games/eboots/"
+# PC Engine: HuCards, and CD games (cue sheets and their tracks).
+sync pcengine pce cue bin ccd img sub chd
 playlists
 # Box art, title screens and screenshots for any game that hasn't got them,
 # from libretro's server at about 1 MB/s (brick_retro/thumbnails.py).

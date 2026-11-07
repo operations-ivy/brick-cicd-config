@@ -169,7 +169,8 @@ class GamesTests(unittest.TestCase):
     def test_playlists_list_each_systems_games_by_name(self):
         counts = self.write()
         self.assertEqual(counts, {"nes": 2, "snes": 3, "gb": 1, "gbc": 0, "gba": 1, "megadrive": 1,
-                                  "mastersystem": 0, "psx": 6, "segacd": 0, "sega32x": 0, "psp": 0,
+                                  "mastersystem": 0, "gamegear": 0, "pcengine": 0, "psx": 6, "segacd": 0,
+                                  "sega32x": 0, "psp": 0,
                                   "Dreamcast": 0, "neogeo": 0})
         nes = json.loads((self.root / "playlists/Nintendo - Nintendo Entertainment System.lpl").read_text())
         self.assertEqual([i["label"] for i in nes["items"]], ["Adventure Island", "Bomberman"])
@@ -288,6 +289,80 @@ class GamesTests(unittest.TestCase):
         (saves / "Zelda.srm").write_text("played on brick9000")
         self.assertEqual(games.import_saves(self.roms, saves), [])
         self.assertEqual((saves / "Zelda.srm").read_text(), "played on brick9000")
+
+
+def pbp(path: Path, title: str, data: bytes) -> None:
+    """A minimal EBOOT.PBP: a PARAM.SFO with TITLE, and DATA.PSAR starting with data."""
+    key, value = b"TITLE\0", title.encode() + b"\0"
+    keys_at, data_at = 20 + 16, 20 + 16 + len(key)
+    sfo = (b"\0PSF" + struct.pack("<I3I", 0x101, keys_at, data_at, 1)
+           + struct.pack("<HHIII", 0, 0x0204, len(value), len(value), 0) + key + value)
+    sfo_at = 40
+    psar_at = sfo_at + len(sfo)
+    offsets = [sfo_at] + [psar_at] * 7  # icon0..data.psp empty, then DATA.PSAR
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\0PBP" + struct.pack("<I", 0x10000) + struct.pack("<8I", *offsets) + sfo + data)
+
+
+class EbootTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.eboots, self.roms = self.root / "eboots", self.root / "roms"
+        pbp(self.eboots / "SLUS00330/EBOOT.PBP", "Mortal Kombat Trilogy", b"PSISOIMG0000")
+        pbp(self.eboots / "NPUJ00594/EBOOT.PBP", "Final: Fantasy?", b"PSTITLEIMG00")
+        pbp(self.eboots / "Homebrew/EBOOT.PBP", "A PSP game", b"\x7fELF")
+
+    def test_title_and_kind_come_from_the_pbp(self):
+        first = self.eboots / "SLUS00330/EBOOT.PBP"
+        self.assertEqual(games.pbp_title(first), "Mortal Kombat Trilogy")
+        self.assertTrue(games.is_ps1_eboot(first))
+        self.assertTrue(games.is_ps1_eboot(self.eboots / "NPUJ00594/EBOOT.PBP"))  # several discs
+        self.assertFalse(games.is_ps1_eboot(self.eboots / "Homebrew/EBOOT.PBP"))
+        junk = self.root / "junk.pbp"
+        junk.write_bytes(b"not a pbp")
+        self.assertEqual(games.pbp_title(junk), "")
+
+    def test_ps1_eboots_are_linked_into_the_psx_list_under_their_titles(self):
+        links = games.link_eboots(self.eboots, self.roms)
+        names = sorted(p.name for p in links)
+        self.assertEqual(names, ["Final Fantasy.pbp", "Mortal Kombat Trilogy.pbp"])  # no PSP game
+        link = self.roms / "psx/psp-eboots/Mortal Kombat Trilogy.pbp"
+        self.assertTrue(link.samefile(self.eboots / "SLUS00330/EBOOT.PBP"))  # a hard link: no copy
+        counts = games.write_playlists(self.roms, self.root / "pl", Path("/cores"), self.root / "m3u",
+                                       self.root / "system")
+        self.assertEqual(counts["psx"], 2)
+        self.assertEqual(counts["psp"], 0)
+
+    def test_links_follow_the_mirror(self):
+        games.link_eboots(self.eboots, self.roms)
+        (self.eboots / "SLUS00330/EBOOT.PBP").unlink()
+        games.link_eboots(self.eboots, self.roms)
+        self.assertFalse((self.roms / "psx/psp-eboots/Mortal Kombat Trilogy.pbp").exists())
+        # rsync replaces a changed file with a new one: the link is remade, not left stale.
+        pbp(self.eboots / "NPUJ00594/EBOOT.PBP", "Final: Fantasy?", b"PSTITLEIMG01")
+        games.link_eboots(self.eboots, self.roms)
+        self.assertTrue((self.roms / "psx/psp-eboots/Final Fantasy.pbp").samefile(self.eboots / "NPUJ00594/EBOOT.PBP"))
+
+    def test_no_mirror_yet_is_no_links(self):
+        self.assertEqual(games.link_eboots(self.root / "none", self.roms), [])
+
+
+class GameGearAndPCEngineTests(unittest.TestCase):
+    def test_hucards_and_cd_games_share_the_pc_engine_list(self):
+        root = Path(tempfile.mkdtemp())
+        roms = root / "roms"
+        for rel in ("pcengine/Blazing Lazers (USA).pce", "pcengine/Ys I & II (Track 01).bin",
+                    "pcengine/Ys I & II (Track 02).bin", "pcengine/stray.bin",
+                    "gamegear/0_9/5 in 1 Funpak.zip", "gamegear/S/Sonic (W).gg", "gamegear/S/Sonic.bmp"):
+            (roms / rel).parent.mkdir(parents=True, exist_ok=True)
+            (roms / rel).write_text("x")
+        (roms / "pcengine/Ys I & II.cue").write_text(
+            'FILE "Ys I & II (Track 01).bin" BINARY\nFILE "Ys I & II (Track 02).bin" BINARY\n')
+        counts = games.write_playlists(roms, root / "pl", Path("/cores"), root / "m3u", root / "system")
+        self.assertEqual((counts["pcengine"], counts["gamegear"]), (2, 2))  # tracks and strays aren't games
+        pce = json.loads((root / "pl/NEC - PC Engine - TurboGrafx 16.lpl").read_text())
+        self.assertEqual([i["label"] for i in pce["items"]], ["Blazing Lazers", "Ys I & II"])
+        self.assertTrue(pce["default_core_path"].endswith("beetle_pce_fast_libretro.so"))
 
 
 class LookTest(unittest.TestCase):

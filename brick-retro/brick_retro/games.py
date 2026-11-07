@@ -2,8 +2,10 @@
 old RetroPie saves."""
 
 import json
+import os
 import re
 import shutil
+import struct
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import defaultdict
@@ -11,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Built from source by install.sh: Debian packages none of these cores.
+BEETLE_PCE_FAST = "/usr/local/lib/libretro/beetle_pce_fast_libretro.so"
 PCSX_REARMED = "/usr/local/lib/libretro/pcsx_rearmed_libretro.so"
 PICODRIVE = "/usr/local/lib/libretro/picodrive_libretro.so"
 PPSSPP = "/usr/local/lib/libretro/ppsspp_libretro.so"
@@ -46,6 +49,14 @@ SYSTEMS = (
            (".md", ".gen", ".smd", ".bin", ".zip")),
     System("mastersystem", "Sega - Master System - Mark III", "genesis_plus_gx_libretro.so",
            "Genesis Plus GX", (".sms", ".zip")),
+    System("gamegear", "Sega - Game Gear", "genesis_plus_gx_libretro.so", "Genesis Plus GX",
+           (".gg", ".zip")),
+    # HuCards and CD games in one folder, as on brick2000; the CDs need
+    # syscard3.pce in the system directory (sync-roms copies it), the HuCards nothing.
+    System("pcengine", "NEC - PC Engine - TurboGrafx 16", BEETLE_PCE_FAST, "Beetle PCE Fast",
+           (".pce", ".cue", ".ccd", ".chd"), discs=True),
+    # Also psp-eboots/: the PlayStation games converted for the PSP that sit in
+    # brick2000's psp folder, linked under their titles (link_eboots).
     System("psx", "Sony - PlayStation", PCSX_REARMED, "PCSX-ReARMed",
            (".chd", ".cue", ".ccd", ".pbp", ".bin"), discs=True),
     # PicoDrive, not Debian's Genesis Plus GX: that one is built without CHD
@@ -56,7 +67,8 @@ SYSTEMS = (
     # label is "Doom", which the thumbnail server's "Doom (Japan, USA)" matches.
     System("sega32x", "Sega - 32X", PICODRIVE, "PicoDrive", (".32x", ".bin"), drop=r"\s+32X\b"),
     # Only disc images: the .pbp files in brick2000's psp folder are
-    # PlayStation games converted for the PSP, which PPSSPP can't run.
+    # PlayStation games converted for the PSP, which PPSSPP can't run; they're
+    # in the PlayStation list instead (link_eboots).
     # Scene names ("Crisis_Core_Final_Fantasy_VII_USA_READNFO_PSP-Googlecus")
     # lose everything from the region on.
     System("psp", "Sony - PlayStation Portable", PPSSPP, "PPSSPP", (".iso", ".cso"),
@@ -67,6 +79,70 @@ SYSTEMS = (
     System("neogeo", "SNK - Neo Geo", FBNEO, "FinalBurn Neo", (".zip",), arcade_dat=FBNEO_NEOGEO_DAT,
            needs="neogeo.zip"),
 )
+
+
+# The PlayStation games converted for the PSP ("PS1 classics"): every one is an
+# EBOOT.PBP in a folder of its own. sync-roms mirrors them to EBOOT_DIR, and
+# link_eboots hard-links each into the psx folder under its title, so each game
+# has its own name for the menu, the thumbnails and its save.
+EBOOTS = "psp-eboots"
+_PS1_EBOOT = (b"PSISOIMG", b"PSTITLEIMG")  # one disc, several discs
+
+
+def pbp_title(path: Path) -> str:
+    """The TITLE in a PBP's PARAM.SFO, or "" if it has none or isn't a PBP."""
+    with path.open("rb") as f:
+        head = f.read(40)
+        if len(head) < 40 or head[:4] != b"\0PBP":
+            return ""
+        sfo_at, icon_at = struct.unpack_from("<2I", head, 8)
+        f.seek(sfo_at)
+        sfo = f.read(icon_at - sfo_at)
+    if sfo[:4] != b"\0PSF" or len(sfo) < 20:
+        return ""
+    keys_at, data_at, count = struct.unpack_from("<3I", sfo, 8)
+    for i in range(count):
+        key_off, _fmt, length, _max, data_off = struct.unpack_from("<HHIII", sfo, 20 + 16 * i)
+        key = sfo[keys_at + key_off:].split(b"\0", 1)[0]
+        if key == b"TITLE":
+            raw = sfo[data_at + data_off:data_at + data_off + length]
+            return raw.split(b"\0", 1)[0].decode("utf-8", "replace").strip()
+    return ""
+
+
+def is_ps1_eboot(path: Path) -> bool:
+    """A PBP whose data is a PlayStation disc image (or several)."""
+    with path.open("rb") as f:
+        head = f.read(40)
+        if head[:4] != b"\0PBP":
+            return False
+        f.seek(struct.unpack_from("<I", head, 36)[0])  # DATA.PSAR
+        return f.read(10).startswith(_PS1_EBOOT)
+
+
+def link_eboots(eboot_dir: Path, rom_dir: Path) -> list[Path]:
+    """Hard-link each PlayStation EBOOT.PBP under eboot_dir into
+    rom_dir/psx/psp-eboots as "<title>.pbp" (its folder's name without a
+    title), and remove links whose source is gone. Returns the links."""
+    out = rom_dir / "psx" / EBOOTS
+    out.mkdir(parents=True, exist_ok=True)
+    wanted = {}
+    for pbp in sorted(eboot_dir.rglob("*")) if eboot_dir.is_dir() else []:
+        if not pbp.is_file() or pbp.suffix.lower() != ".pbp" or not is_ps1_eboot(pbp):
+            continue
+        top = pbp.relative_to(eboot_dir).parts[0]
+        name = " ".join(re.sub(r'[/\\:*?"<>|]+', " ", pbp_title(pbp) or top).split()) or top
+        while f"{name}.pbp" in wanted:
+            name += " (2)"
+        wanted[f"{name}.pbp"] = pbp
+    for link in out.glob("*.pbp"):
+        src = wanted.get(link.name)
+        if src is None or not os.path.samefile(link, src):
+            link.unlink()
+    for name, src in wanted.items():
+        if not (out / name).exists():
+            os.link(src, out / name)
+    return [out / n for n in sorted(wanted)]
 
 
 def roms(folder: Path, extensions: tuple[str, ...]) -> list[Path]:

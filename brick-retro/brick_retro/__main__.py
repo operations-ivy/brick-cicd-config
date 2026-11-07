@@ -35,6 +35,8 @@ SAVE_DIR = Path(env("SAVE_DIR", str(HOME / "games/saves")))
 PLAYLIST_DIR = Path(env("PLAYLIST_DIR", str(HOME / ".config/retroarch/playlists")))
 # Multi-disc games, one .m3u each (games.disc_games).
 M3U_DIR = Path(env("M3U_DIR", str(HOME / "games/m3u")))
+# The PS1 games converted for the PSP, as sync-roms mirrors them (games.link_eboots).
+EBOOT_DIR = Path(env("EBOOT_DIR", str(HOME / "games/eboots")))
 THUMB_DIR = Path(env("THUMB_DIR", str(HOME / ".config/retroarch/thumbnails")))
 # Which thumbnails thumbnails.py has looked for and the server doesn't have.
 THUMB_STATE = Path(env("THUMB_STATE", str(HOME / ".local/state/brick-retro/thumbnail-misses.json")))
@@ -183,6 +185,7 @@ def daemon() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if sys.argv[1:] == ["games"]:
+        games.link_eboots(EBOOT_DIR, ROM_DIR)
         counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR, SYSTEM_DIR)
         rm.write_games(counts)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
