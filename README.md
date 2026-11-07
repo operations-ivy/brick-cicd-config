@@ -101,7 +101,7 @@ script in git that runs from anywhere, not a Jenkins job.
   `bin/hub-image-info` reads a tag's digest and labels from Docker Hub.
 - **Webhooks from the LAN.** Every job can be started with
   `curl -X POST 'https://jenkins.brick.nozdormu.cloud/generic-webhook-trigger/invoke?token=<job>-<secret>'`,
-  parameters in the query string (`&APPLY=true`). The secret is
+  parameters in the query string (`&APPLY=false`). The secret is
   `~/.config/brick-jenkins/secrets/webhook_secret` on brick9000, the same as
   before the move, so existing webhook URLs still work.
 - **Cluster access.** Jobs act on the cluster as the `jenkins`
@@ -119,7 +119,7 @@ script in git that runs from anywhere, not a Jenkins job.
 | Job | Does | Webhook parameters |
 | --- | --- | --- |
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
-| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, both nodes and brick9000 (its Docker over SSH) | `APPLY=true` to delete (dry run otherwise) |
+| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, the nodes and brick9000 (its Docker over SSH) (nightly) | `APPLY=false` for a dry run that only lists what would go |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
 | `deploy-brick9000` | Points brick9000's deploy at a branch and starts it now instead of at its 2-hourly timer, which then keeps following that branch (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | `BRANCH=<branch>` to try a branch; without it, or empty, `main` |
 | `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |

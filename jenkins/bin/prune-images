@@ -1,6 +1,7 @@
 #!/bin/sh
 # Keep the newest two versions of each app image on Docker Hub, on both nodes
-# and on brick9000 (brick-k8s-config's prune_images.py). Dry run unless APPLY=true.
+# and on brick9000 (brick-k8s-config's prune_images.py). Deletes unless
+# APPLY=false (unset or empty, as from a webhook without it, deletes).
 # DEV_ONLY=true deletes only old dev-* tags. Exits 2 when it pruned everything but Docker Hub, for lack of credentials.
 set -eu
 . "$(dirname "$0")/lib.sh"
@@ -17,7 +18,7 @@ export DOCKER_HOST=${DOCKER_HOST:-ssh://zaphod@$BRICK9000}
 if [ "${DEV_ONLY:-false}" = true ]; then
     exec python3 "$script" --apply --dev-only
 fi
-if [ "${APPLY:-false}" = true ]; then
-    exec python3 "$script" --apply
+if [ "${APPLY:-true}" = false ]; then
+    exec python3 "$script"
 fi
-exec python3 "$script"
+exec python3 "$script" --apply

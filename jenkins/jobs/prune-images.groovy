@@ -1,6 +1,8 @@
-// Keep only the newest two versions of each app image on Docker Hub, both nodes
-// and brick9000. A dry run that lists what would go, unless APPLY is set.
-// param APPLY=false Delete for real (otherwise only list what would be deleted)
+// Keep only the newest two versions of each app image on Docker Hub, the nodes
+// and brick9000 (nightly). Deletes; APPLY=false only lists what would go.
+// cron TZ=America/New_York
+// cron H(30-59) 5 * * *
+// param APPLY=true Delete for real (false: only list what would be deleted)
 pipeline {
     agent { label 'built-in' }
     options { disableConcurrentBuilds(); timestamps(); timeout(time: 30, unit: 'MINUTES') }
