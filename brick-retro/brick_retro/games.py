@@ -2,7 +2,6 @@
 old RetroPie saves."""
 
 import json
-import os
 import re
 import shutil
 import struct
@@ -114,10 +113,15 @@ def is_ps1_eboot(path: Path) -> bool:
     """A PBP whose data is a PlayStation disc image (or several)."""
     with path.open("rb") as f:
         head = f.read(40)
-        if head[:4] != b"\0PBP":
+        if len(head) < 40 or head[:4] != b"\0PBP":
             return False
         f.seek(struct.unpack_from("<I", head, 36)[0])  # DATA.PSAR
         return f.read(10).startswith(_PS1_EBOOT)
+
+
+def safe_name(title: str, fallback: str) -> str:
+    """title as a file name: no path or shell-unsafe characters, single spaces."""
+    return " ".join(re.sub(r'[/\\:*?"<>|]+', " ", title).split()) or fallback
 
 
 def link_eboots(eboot_dir: Path, rom_dir: Path) -> list[Path]:
@@ -131,17 +135,19 @@ def link_eboots(eboot_dir: Path, rom_dir: Path) -> list[Path]:
         if not pbp.is_file() or pbp.suffix.lower() != ".pbp" or not is_ps1_eboot(pbp):
             continue
         top = pbp.relative_to(eboot_dir).parts[0]
-        name = " ".join(re.sub(r'[/\\:*?"<>|]+', " ", pbp_title(pbp) or top).split()) or top
+        base = name = safe_name(pbp_title(pbp) or top, top)
+        n = 1
         while f"{name}.pbp" in wanted:
-            name += " (2)"
+            n += 1
+            name = f"{base} ({n})"
         wanted[f"{name}.pbp"] = pbp
     for link in out.glob("*.pbp"):
         src = wanted.get(link.name)
-        if src is None or not os.path.samefile(link, src):
+        if src is None or not link.samefile(src):
             link.unlink()
     for name, src in wanted.items():
         if not (out / name).exists():
-            os.link(src, out / name)
+            (out / name).hardlink_to(src)
     return [out / n for n in sorted(wanted)]
 
 

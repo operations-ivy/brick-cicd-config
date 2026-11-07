@@ -306,21 +306,37 @@ def pbp(path: Path, title: str, data: bytes) -> None:
 
 class EbootTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp())
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
         self.eboots, self.roms = self.root / "eboots", self.root / "roms"
         pbp(self.eboots / "SLUS00330/EBOOT.PBP", "Mortal Kombat Trilogy", b"PSISOIMG0000")
         pbp(self.eboots / "NPUJ00594/EBOOT.PBP", "Final: Fantasy?", b"PSTITLEIMG00")
         pbp(self.eboots / "Homebrew/EBOOT.PBP", "A PSP game", b"\x7fELF")
 
-    def test_title_and_kind_come_from_the_pbp(self):
-        first = self.eboots / "SLUS00330/EBOOT.PBP"
-        self.assertEqual(games.pbp_title(first), "Mortal Kombat Trilogy")
-        self.assertTrue(games.is_ps1_eboot(first))
-        self.assertTrue(games.is_ps1_eboot(self.eboots / "NPUJ00594/EBOOT.PBP"))  # several discs
-        self.assertFalse(games.is_ps1_eboot(self.eboots / "Homebrew/EBOOT.PBP"))
-        junk = self.root / "junk.pbp"
+    def test_title_comes_from_the_pbp(self):
+        self.assertEqual(games.pbp_title(self.eboots / "SLUS00330/EBOOT.PBP"), "Mortal Kombat Trilogy")
+
+    def test_only_playstation_eboots_count(self):
+        for folder, ps1 in (("SLUS00330", True), ("NPUJ00594", True), ("Homebrew", False)):  # one disc, several, a PSP game
+            with self.subTest(folder):
+                self.assertEqual(games.is_ps1_eboot(self.eboots / folder / "EBOOT.PBP"), ps1)
+
+    def test_junk_and_truncated_files_are_not_eboots(self):
+        junk, short = self.root / "junk.pbp", self.root / "short.pbp"
         junk.write_bytes(b"not a pbp")
-        self.assertEqual(games.pbp_title(junk), "")
+        short.write_bytes(b"\0PBP" + b"\0" * 10)  # cut off inside the header
+        for path in (junk, short):
+            with self.subTest(path.name):
+                self.assertEqual(games.pbp_title(path), "")
+                self.assertFalse(games.is_ps1_eboot(path))
+
+    def test_games_with_the_same_title_get_numbered(self):
+        pbp(self.eboots / "SLUS00331/EBOOT.PBP", "Mortal Kombat Trilogy", b"PSISOIMG0000")
+        pbp(self.eboots / "SLUS00332/EBOOT.PBP", "Mortal Kombat Trilogy", b"PSISOIMG0000")
+        names = sorted(p.name for p in games.link_eboots(self.eboots, self.roms))
+        self.assertEqual([n for n in names if n.startswith("Mortal")],
+                         ["Mortal Kombat Trilogy (2).pbp", "Mortal Kombat Trilogy (3).pbp", "Mortal Kombat Trilogy.pbp"])
 
     def test_ps1_eboots_are_linked_into_the_psx_list_under_their_titles(self):
         links = games.link_eboots(self.eboots, self.roms)
@@ -349,7 +365,9 @@ class EbootTests(unittest.TestCase):
 
 class GameGearAndPCEngineTests(unittest.TestCase):
     def test_hucards_and_cd_games_share_the_pc_engine_list(self):
-        root = Path(tempfile.mkdtemp())
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
         roms = root / "roms"
         for rel in ("pcengine/Blazing Lazers (USA).pce", "pcengine/Ys I & II (Track 01).bin",
                     "pcengine/Ys I & II (Track 02).bin", "pcengine/stray.bin",
