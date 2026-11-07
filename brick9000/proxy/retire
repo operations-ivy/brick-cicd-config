@@ -7,6 +7,5 @@
 # boot and would keep renewing a certificate nobody uses. The Porkbun keys in
 # ~/.config/brick-proxy/secrets are no longer needed here.
 set -eu
-here=$(cd "$(dirname "$0")" && pwd)
-docker compose -f "$here/compose.yaml" down --remove-orphans 2>/dev/null || docker rm -f brick-proxy 2>/dev/null || true
+docker rm -f brick-proxy >/dev/null 2>&1 || true
 echo "proxy/retire: brick9000's Caddy is stopped; the front door runs on the cluster"

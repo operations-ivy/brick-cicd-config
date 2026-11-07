@@ -292,9 +292,8 @@ How the names work, and the hand-made parts outside git:
   itself. The Porkbun API keys are in
   `~/.config/brick-proxy/secrets/porkbun_api_key` and `porkbun_secret_key`
   (mode 600, never in git), given to the container as Docker secrets. API
-  access must be on for the domain in Porkbun's settings. `proxy/up` creates
-  them empty if missing, and the proxy runs without them; only the HTTPS names
-  wait for a certificate. Porkbun's keys can change every domain on the
+  access must be on for the domain in Porkbun's settings. Without them the
+  proxy runs and only the HTTPS names wait for a certificate. Porkbun's keys can change every domain on the
   account, so treat them like any other secret.
 
 The old names redirect (`308`, so a webhook's POST stays a POST, with
@@ -699,23 +698,13 @@ after each push to the branch, and once more with `BRANCH` empty (or the
 webhook without it) after merging, to go back to `main`. Deploy logs:
 `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service`.
 
-### Image builds on brick9000
+### Image builds: not on brick9000
 
-brick9000 is an arm64 Pi 4 with Docker, so it can build the cluster's (arm64)
-images natively. `brick9000/build-image` checks out a ref of a repo, builds
-it and pushes the image, and records its progress in
-`~/.local/state/brick-build/status.json` for the lights. Run it detached, so
-an SSH drop doesn't kill the build and its log lands in the journal:
-
-```bash
-systemd-run --user --collect --unit=brick-build ~/brick-cicd-config/brick9000/build-image \
-    https://github.com/operations-ivy/wigle-sync <ref> whitepatrick/wigle-console:<tag> Dockerfile.web
-journalctl _SYSTEMD_USER_UNIT=brick-build.service -f
-```
-
-Pushing needs a one-time `docker login -u whitepatrick` on brick9000 with a
-Docker Hub access token (Read & Write), which Docker keeps in
-`~/.docker/config.json`, outside the repo.
+brick9000 builds no images (brick-cicd-config#30): compiling starved the
+board. App images build in Jenkins' `build-image` job and the Jenkins image in
+`build-branches`, both on brick2000's BuildKit; the front door's
+`brick-proxy` by hand with the `brick2000-arm64` builder (brick-k8s-config
+README). `jenkins/release` is the laptop fallback for the Jenkins image.
 
 Tests (standard library `unittest`, no hardware needed):
 

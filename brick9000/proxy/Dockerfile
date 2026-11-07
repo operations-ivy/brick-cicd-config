@@ -1,6 +1,7 @@
 # Caddy with the Porkbun DNS provider, for the Let's Encrypt DNS challenge
-# behind *.brick.nozdormu.cloud's certificate. Built on brick9000 by proxy/up;
-# change a version here to update.
+# behind *.brick.nozdormu.cloud's certificate: whitepatrick/brick-proxy, the
+# cluster's front door. Built on brick2000's BuildKit (brick-k8s-config README,
+# "Front door on the cluster"); change a version here, build a new tag, pin it.
 ARG CADDY_VERSION=2.11.4
 
 FROM caddy:${CADDY_VERSION}-builder-alpine AS build
