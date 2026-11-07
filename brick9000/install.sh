@@ -58,7 +58,7 @@ grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/
 # (README, "Games").
 sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x libretro-gambatte libretro-mgba \
     libretro-genesisplusgx rsync build-essential git cmake libgl-dev libegl-dev libgles-dev
-# Debian packages no PlayStation, 32X, PSP, Dreamcast or Neo Geo core: build
+# Debian packages no PlayStation, 32X, PSP, Dreamcast, Neo Geo or PC Engine core: build
 # each from a pinned commit into /usr/local/lib/libretro, once per commit, on
 # two cores (brick9000 has no fan: three held it at 77 °C, 2026-10-16)
 # (the commit is kept beside the core). games.py names the paths.
@@ -85,6 +85,8 @@ core() {
     rm -rf "$build" "$build.log"
 }
 cmake_core='cmake -S . -B build -DLIBRETRO=ON -DCMAKE_BUILD_TYPE=Release "$@" && cmake --build build -j2'
+core beetle_pce_fast https://github.com/libretro/beetle-pce-fast-libretro 2de1ce1c3f237b161c126c54ba407990bb86d1e9 \
+    mednafen_pce_fast_libretro.so make -j2
 core pcsx_rearmed https://github.com/libretro/pcsx_rearmed c8816799b50388e61cfe237fe2cdbb7d8175f20a \
     pcsx_rearmed_libretro.so make -f Makefile.libretro platform=rpi4_64 -j3
 core picodrive https://github.com/libretro/picodrive 1890c2932234c9d30f4cd3851d02228baae8f09e \
