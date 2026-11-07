@@ -1,0 +1,7 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Re-associate Wi-Fi when broadcasts stop arriving (wifi-watchdog)
+
+[Service]
+Type=oneshot
+ExecStart=%h/brick-cicd-config/brick9000/wifi-watchdog

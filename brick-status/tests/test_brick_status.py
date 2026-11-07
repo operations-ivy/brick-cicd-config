@@ -1,9 +1,11 @@
 import itertools
+import os
 import re
 import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time as pytime
 import unittest
@@ -1372,7 +1374,7 @@ class JenkinsJobsTest(unittest.TestCase):
 
     def test_job_scripts_parse(self):
         scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("release", "seal-secrets")]
-                   + [BRICK9000 / n for n in ("build-status.sh", "deploy", "install.sh", "proxy/retire")])
+                   + [BRICK9000 / n for n in ("build-status.sh", "deploy", "install.sh", "proxy/retire", "wifi-watchdog")])
         for script in scripts:
             text = script.read_text()
             if text.startswith("#!/usr/bin/env python3"):
@@ -2206,3 +2208,69 @@ class LampTest(unittest.TestCase):
         answers = {"lamp-on", "lamp-off", "lamp-night", "lamp-unreachable"}
         answers |= {f"lamp-scene-{i + 1}" for i in range(len(self.config.scenes))}
         self.assertLessEqual(answers, set(displays))
+
+
+class WifiWatchdogTest(unittest.TestCase):
+    """brick9000/wifi-watchdog, run with stub nmcli, sudo, ping and ip on PATH."""
+
+    def setUp(self):
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.bin, self.calls = self.dir / "bin", self.dir / "calls"
+        self.bin.mkdir()
+        stubs = {
+            "nmcli": 'echo "nmcli $*" >>"$CALLS"; [ "$1" = -g ] && echo "home-wifi"; true',
+            "sudo": '[ "$1" = -n ] && shift; "$@"',
+            "systemctl": 'echo "systemctl $*" >>"$CALLS"',
+            "ping": 'echo "ping $*" >>"$CALLS"; [ -z "$PING_FAILS" ]',
+            "ip": 'echo "default via 192.0.2.1 dev wlan0"',
+            "sleep": "true",
+        }
+        for name, body in stubs.items():
+            (self.bin / name).write_text(f"#!/bin/sh\n{body}\n")
+            (self.bin / name).chmod(0o755)
+        self.stats = self.dir / "multicast"
+        self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", CALLS=str(self.calls),
+                        WIFI_WATCHDOG_STATS=str(self.stats), WIFI_WATCHDOG_STATE=str(self.dir / "state"),
+                        WIFI_WATCHDOG_TEXTFILE=str(self.dir / "wifi.prom"), WIFI_WATCHDOG_SILENT="600")
+
+    def run_at(self, now, multicast, **extra):
+        self.stats.write_text(f"{multicast}\n")
+        env = dict(self.env, WIFI_WATCHDOG_NOW=str(now), **extra)
+        return subprocess.run([str(BRICK9000 / "wifi-watchdog")], env=env, capture_output=True, text=True, check=True)
+
+    def metric(self, name):
+        for line in (self.dir / "wifi.prom").read_text().splitlines():
+            if line.startswith(name):
+                return int(line.split()[-1])
+        self.fail(f"metric {name} not in the textfile")
+
+    def calls_made(self):
+        return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+    def test_broadcasts_arriving_leave_the_wifi_alone(self):
+        for i, now in enumerate(range(1000, 4000, 300)):
+            self.run_at(now, 100 + i)
+        self.assertEqual(self.calls_made(), [])
+        self.assertEqual(self.metric("brick_wifi_watchdog_broadcast_silent_seconds"), 0)
+        self.assertEqual(self.metric("brick_wifi_watchdog_reconnects_total"), 0)
+
+    def test_ten_silent_minutes_reactivate_the_connection(self):
+        self.run_at(1000, 500)
+        self.run_at(1300, 500)  # five minutes: not yet
+        self.assertEqual(self.calls_made(), [])
+        self.assertEqual(self.metric("brick_wifi_watchdog_broadcast_silent_seconds"), 300)
+        out = self.run_at(1600, 500)
+        self.assertIn("re-activating", out.stdout)
+        self.assertIn("nmcli connection up home-wifi", self.calls_made())
+        self.assertFalse(any(c.startswith("systemctl") for c in self.calls_made()))  # the router answered
+        self.assertEqual(self.metric("brick_wifi_watchdog_reconnects_total"), 1)
+        self.assertEqual(self.metric("brick_wifi_watchdog_broadcast_silent_seconds"), 0)
+        self.run_at(1900, 500)  # the silence clock restarted: no second reconnect yet
+        self.assertEqual(self.metric("brick_wifi_watchdog_reconnects_total"), 1)
+
+    def test_no_router_after_reactivating_restarts_networkmanager(self):
+        self.run_at(1000, 7)
+        self.run_at(1700, 7, PING_FAILS="1")
+        self.assertIn("systemctl restart NetworkManager", self.calls_made())
+        self.assertEqual(self.metric("brick_wifi_watchdog_networkmanager_restarts_total"), 1)
+

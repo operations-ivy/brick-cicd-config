@@ -921,6 +921,7 @@ format, and brick-retro imports it from the same checkout.
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
 | Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
 | brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
+| brick9000's Wi-Fi watchdog (`brick9000/wifi-watchdog`, every 5 minutes) | textfile collector | `brick_wifi_watchdog_*`: seconds since `wlan0` last received a broadcast, re-activations (brcmfmac loses the group key: unicast works, broadcasts and so ARP requests don't, 2026-11-07), NetworkManager restarts |
 | brick1982 itself | node-exporter on `:9100` (`brick1982/install.sh`; systemd units too) | `node_*` |
 | Caddy | `brick9000:9180/metrics` | `caddy_*`, per name |
 

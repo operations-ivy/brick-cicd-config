@@ -46,6 +46,7 @@ topic=~/.config/brick-status/ntfy_topic
 cp "$here/brick-status.service" "$here/brick-plasma.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
+    "$here/brick-wifi-watchdog.service" "$here/brick-wifi-watchdog.timer" \
     ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
 # A full-screen game handed straight to the display (direct scanout) makes
@@ -107,7 +108,8 @@ core fbneo_neogeo https://github.com/libretro/FBNeo 68f0d3e47587f700c221392a0d56
 for r in /sys/class/rfkill/rfkill*; do
     [ "$(cat "$r/type")" = bluetooth ] && echo 0 | sudo tee "$r/soft" >/dev/null
 done
-# Wi-Fi power save off (wifi-powersave.conf says why). NetworkManager reads
+# Wi-Fi power save off (wifi-powersave.conf says why; the lost group key it
+# was first blamed for is wifi-watchdog's). NetworkManager reads
 # the file on the next connection; iw turns it off now, without a reconnect.
 nm_conf=/etc/NetworkManager/conf.d/brick-wifi-powersave.conf
 if ! cmp -s "$here/wifi-powersave.conf" "$nm_conf"; then
@@ -163,7 +165,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-plasma brick-status
 systemctl --user restart brick-plasma brick-status
-systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer
+systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer brick-wifi-watchdog.timer
 systemctl --user enable brick-retro
 systemctl --user restart brick-retro
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."

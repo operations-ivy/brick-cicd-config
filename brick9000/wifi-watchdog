@@ -1,0 +1,74 @@
+#!/bin/sh
+# Re-associate brick9000's Wi-Fi when it stops receiving broadcasts.
+#
+# brcmfmac on brick9000 can lose the access point's group key (2026-11-07,
+# after 11.8 days associated): unicast keeps working, so the cluster's scrapes
+# and the lamp button look fine, but no broadcast or multicast frame is
+# received, ARP requests included, so any machine that doesn't already know
+# brick9000's MAC can't reach it ("no route to host"). Re-activating the
+# connection gets a fresh group key. A home LAN always has some broadcast
+# traffic (ARP, mDNS, SSDP), so a long silence means the key is gone.
+#
+# Run every 5 minutes by brick-wifi-watchdog.timer. After SILENT seconds with
+# no multicast frame received, it re-activates wlan0's connection; if the
+# router doesn't answer a minute later, it restarts NetworkManager. Each
+# action is counted in a node-exporter textfile.
+set -eu
+dev=${WIFI_WATCHDOG_DEVICE:-wlan0}
+stats=${WIFI_WATCHDOG_STATS:-/sys/class/net/$dev/statistics/multicast}
+state=${WIFI_WATCHDOG_STATE:-$HOME/.local/state/brick-wifi-watchdog}
+prom=${WIFI_WATCHDOG_TEXTFILE:-/var/lib/node-exporter-textfile/brick_wifi_watchdog.prom}
+silent_limit=${WIFI_WATCHDOG_SILENT:-600}
+settle=${WIFI_WATCHDOG_SETTLE:-60}
+now=${WIFI_WATCHDOG_NOW:-$(date +%s)}
+
+mkdir -p "$state"
+value=$(cat "$stats")
+last_value=$(cat "$state/value" 2>/dev/null || echo "")
+last_change=$(cat "$state/changed" 2>/dev/null || echo "$now")
+reconnects=$(cat "$state/reconnects" 2>/dev/null || echo 0)
+restarts=$(cat "$state/restarts" 2>/dev/null || echo 0)
+
+if [ "$value" != "$last_value" ]; then
+    last_change=$now
+fi
+silent=$((now - last_change))
+
+if [ "$silent" -ge "$silent_limit" ]; then
+    con=$(nmcli -g GENERAL.CONNECTION device show "$dev")
+    echo "wifi-watchdog: no broadcast received on $dev for ${silent}s: re-activating \"$con\""
+    sudo -n nmcli connection up "$con" >/dev/null || echo "wifi-watchdog: nmcli connection up failed" >&2
+    reconnects=$((reconnects + 1))
+    sleep "$settle"
+    gateway=$(ip -4 route show default dev "$dev" | awk '{print $3; exit}')
+    if [ -z "$gateway" ] || ! ping -c3 -W2 "$gateway" >/dev/null 2>&1; then
+        echo "wifi-watchdog: the router (${gateway:-none}) doesn't answer: restarting NetworkManager" >&2
+        sudo -n systemctl restart NetworkManager
+        restarts=$((restarts + 1))
+    fi
+    last_change=$now
+    silent=0
+    value=$(cat "$stats")
+fi
+
+echo "$value" >"$state/value"
+echo "$last_change" >"$state/changed"
+echo "$reconnects" >"$state/reconnects"
+echo "$restarts" >"$state/restarts"
+
+# Written whole, then renamed, so node-exporter never reads half a file.
+cat >"$prom.tmp" <<EOF
+# HELP brick_wifi_watchdog_broadcast_silent_seconds Seconds since $dev last received a multicast or broadcast frame.
+# TYPE brick_wifi_watchdog_broadcast_silent_seconds gauge
+brick_wifi_watchdog_broadcast_silent_seconds{device="$dev"} $silent
+# HELP brick_wifi_watchdog_reconnects_total Times the watchdog re-activated $dev's connection (lost group key).
+# TYPE brick_wifi_watchdog_reconnects_total counter
+brick_wifi_watchdog_reconnects_total{device="$dev"} $reconnects
+# HELP brick_wifi_watchdog_networkmanager_restarts_total Times the router didn't answer after a re-activation.
+# TYPE brick_wifi_watchdog_networkmanager_restarts_total counter
+brick_wifi_watchdog_networkmanager_restarts_total{device="$dev"} $restarts
+# HELP brick_wifi_watchdog_last_run_timestamp_seconds When the watchdog last ran.
+# TYPE brick_wifi_watchdog_last_run_timestamp_seconds gauge
+brick_wifi_watchdog_last_run_timestamp_seconds $now
+EOF
+mv "$prom.tmp" "$prom"
