@@ -783,8 +783,8 @@ class MetricsTest(unittest.TestCase):
 
     def test_button_names(self):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
-        self.assertEqual(button_name(BUTTON_KEYS[0]), "overview")
-        self.assertEqual(button_name(BUTTON_KEYS[5]), "button6")
+        self.assertEqual([button_name(k) for k in BUTTON_KEYS],
+                         ["overview", "builds", "cluster", "volume-down", "volume-up", "mute"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
@@ -2273,4 +2273,81 @@ class WifiWatchdogTest(unittest.TestCase):
         self.run_at(1700, 7, PING_FAILS="1")
         self.assertIn("systemctl restart NetworkManager", self.calls_made())
         self.assertEqual(self.metric("brick_wifi_watchdog_networkmanager_restarts_total"), 1)
+
+
+class VolumeButtonTest(unittest.TestCase):
+    """The bottom row: the speaker a step down or up, or mute toggled."""
+
+    def press(self, action, level=0.5, muted=False):
+        from unittest import mock
+        from brick_status import __main__ as main_mod
+        settings = Settings()
+        with mock.patch.object(main_mod.volume, "get", return_value={"level": level, "muted": muted, "max": 0.5}), \
+                mock.patch.object(main_mod.volume, "set_level") as set_level, \
+                mock.patch.object(main_mod.volume, "set_muted") as set_muted:
+            main_mod.press_volume(settings, action)
+        return set_level, set_muted
+
+    def test_up_and_down_step_a_tenth_of_the_cap(self):
+        up, _ = self.press("volume-up", level=0.5)
+        self.assertAlmostEqual(up.call_args.args[2], 0.6)
+        down, _ = self.press("volume-down", level=0.5)
+        self.assertAlmostEqual(down.call_args.args[2], 0.4)
+
+    def test_mute_toggles(self):
+        _, muted = self.press("mute", muted=False)
+        muted.assert_called_once_with(Settings().wpctl, True)
+        _, muted = self.press("mute", muted=True)
+        muted.assert_called_once_with(Settings().wpctl, False)
+
+    def test_turning_it_up_unmutes(self):
+        _, muted = self.press("volume-up", muted=True)
+        muted.assert_called_once_with(Settings().wpctl, False)
+
+    def test_a_volume_error_is_logged_not_raised(self):
+        from unittest import mock
+        from brick_status import __main__ as main_mod
+        with mock.patch.object(main_mod.volume, "get", side_effect=OSError("no wpctl")), \
+                self.assertLogs("brick-status", level="WARNING"):
+            main_mod.press_volume(Settings(), "mute")
+
+
+class LampReadTest(unittest.TestCase):
+    """lamp.HomeAssistant.read and LampWatch: the lamp's state for the board."""
+
+    def answer(self, body):
+        from unittest import mock
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(body).encode()
+        return mock.patch("urllib.request.urlopen", return_value=response)
+
+    def test_on_with_brightness_and_colour(self):
+        from brick_status import lamp
+        ha = lamp.HomeAssistant("http://ha", "token")
+        with self.answer({"state": "on", "attributes": {"brightness": 128, "color_temp_kelvin": 2700}}):
+            self.assertEqual(ha.read("light.lamp"), {"on": True, "brightness_pct": 50, "kelvin": 2700})
+
+    def test_off_has_no_brightness(self):
+        from brick_status import lamp
+        with self.answer({"state": "off", "attributes": {}}):
+            self.assertEqual(lamp.HomeAssistant("http://ha", "t").read("light.lamp"),
+                             {"on": False, "brightness_pct": None, "kelvin": None})
+
+    def test_unreachable_or_no_token_is_none(self):
+        from unittest import mock
+        from brick_status import lamp
+        self.assertIsNone(lamp.HomeAssistant("http://ha", "").read("light.lamp"))
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertIsNone(lamp.HomeAssistant("http://ha", "t").read("light.lamp"))
+
+    def test_watch_keeps_the_last_read(self):
+        from unittest import mock
+        from brick_status import lamp
+        ha = mock.Mock()
+        ha.read.return_value = {"on": True, "brightness_pct": 5, "kelvin": 2000}
+        watch = lamp.LampWatch(ha, "light.lamp")
+        self.assertIsNone(watch.get())
+        watch.refresh()
+        self.assertEqual(watch.get()["brightness_pct"], 5)
+        ha.read.assert_called_once_with("light.lamp")
 

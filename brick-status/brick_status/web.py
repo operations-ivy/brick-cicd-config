@@ -54,7 +54,7 @@ def crt_playlist(settings) -> dict:
             "activity": entry("activity"), "activity_log": entry("activity-log")}
 
 
-def serve(settings, board, status) -> None:
+def serve(settings, board, status, lamp_watch=None) -> None:
     crt = crt_playlist(settings)
     activity = lights.Activity(settings.plasma_url)
 
@@ -76,6 +76,7 @@ def serve(settings, board, status) -> None:
                     "now": now,
                     "crt": crt,
                     "activity": activity.running(),
+                    "lamp": lamp_watch.get() if lamp_watch else None,
                     **status.get(),
                 }).encode()
                 self._send(200, "application/json", body)

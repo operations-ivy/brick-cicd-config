@@ -11,10 +11,16 @@ from .board import QuietSchedule
 DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
                  "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
-# The board views, in button order (the sixth button is free).
+# The board's screens (the redesign, brick-cicd-config#45): home (everything on
+# one screen), then the pipeline's and the cluster's full lists in the right column.
 # wigle-sync's checks show in the Services view (its group is still collected:
 # its page, the "uploading" lights and the CRT label read it).
-VIEWS = ["overview", "builds", "cluster", "argocd", "services"]
+VIEWS = ["overview", "builds", "cluster"]
+# What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
+# a screen, the bottom row is the speaker (the volume page is the board's most
+# used thing after Prometheus: 128k requests a week, 2026-11-07).
+BUTTON_ACTIONS = ["overview", "builds", "cluster", "volume-down", "volume-up", "mute"]
+VOLUME_STEP = 0.1  # of the volume cap, per press
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the

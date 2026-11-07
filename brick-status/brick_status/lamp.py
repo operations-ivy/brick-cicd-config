@@ -146,6 +146,53 @@ class HomeAssistant:
         return True, next((str(s.get("state", "")) for s in states
                            if isinstance(s, dict) and s.get("entity_id") == entity), "")
 
+    def read(self, entity: str) -> dict | None:
+        """The light's state for the board: on, brightness (%) and colour
+        temperature (K), or None when Home Assistant can't be asked."""
+        if not self.token:
+            return None
+        request = urllib.request.Request(f"{self.url}/api/states/{entity}",
+                                         headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                data = json.loads(response.read() or b"{}")
+        except (OSError, ValueError):
+            return None
+        attrs = data.get("attributes") or {}
+        brightness = attrs.get("brightness")
+        return {"on": data.get("state") == "on",
+                "brightness_pct": round(brightness / 255 * 100) if isinstance(brightness, (int, float)) else None,
+                "kelvin": attrs.get("color_temp_kelvin")}
+
+
+class LampWatch:
+    """The lamp's last known state, read every `every` seconds (and soon after
+    a press), so the board's once-a-second poll never waits on Home Assistant."""
+
+    def __init__(self, ha: HomeAssistant, entity: str, every: float = 15.0,
+                 clock: Callable[[], float] = time.monotonic):
+        self.ha, self.entity, self.every, self.clock = ha, entity, every, clock
+        self._state: dict | None = None
+        self._wake = threading.Event()
+
+    def get(self) -> dict | None:
+        return self._state
+
+    def refresh(self) -> None:
+        self._state = self.ha.read(self.entity)
+
+    def poke(self) -> None:
+        """Read again now (after a press changed it)."""
+        self._wake.set()
+
+    def run(self) -> None:
+        while True:
+            self.refresh()
+            self._wake.wait(self.every)
+            if self._wake.is_set():
+                self._wake.clear()
+                time.sleep(1.0)  # let Home Assistant report the new state first
+
 
 class Lamp:
     """What each gesture does, and the button lights' answer (a board.yaml
