@@ -105,6 +105,14 @@ core fbneo_neogeo https://github.com/libretro/FBNeo 68f0d3e47587f700c221392a0d56
 for r in /sys/class/rfkill/rfkill*; do
     [ "$(cat "$r/type")" = bluetooth ] && echo 0 | sudo tee "$r/soft" >/dev/null
 done
+# Wi-Fi power save off (wifi-powersave.conf says why). NetworkManager reads
+# the file on the next connection; iw turns it off now, without a reconnect.
+nm_conf=/etc/NetworkManager/conf.d/brick-wifi-powersave.conf
+if ! cmp -s "$here/wifi-powersave.conf" "$nm_conf"; then
+    sudo install -D -m 644 "$here/wifi-powersave.conf" "$nm_conf"
+    sudo nmcli general reload conf
+fi
+sudo iw dev wlan0 set power_save off
 # A paired controller reconnects faster.
 if ! grep -q '^FastConnectable *= *true' /etc/bluetooth/main.conf; then
     sudo sed -i 's/^#*FastConnectable *=.*/FastConnectable = true/' /etc/bluetooth/main.conf
