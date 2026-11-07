@@ -1,7 +1,6 @@
 # Tell the plasma API about an image build or deploy on brick9000: rainbow
 # while an image builds, the buttons boiling while brick9000 deploys, then
-# green or red. Sourced by build-image and deploy, which set $image and $ref
-# first; deploy also sets status_name=deploy, so it's a sender of its own.
+# green or red. Sourced by deploy, which sets $image, $ref and status_name=deploy first.
 # Lights are never worth failing a deploy for: every call gives up quickly.
 plasma_url=${BRICK_PLASMA_URL:-http://127.0.0.1:8766}
 plasma_source=brick9000-${status_name:-image}

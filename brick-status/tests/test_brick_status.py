@@ -1372,7 +1372,7 @@ class JenkinsJobsTest(unittest.TestCase):
 
     def test_job_scripts_parse(self):
         scripts = ([p for p in (JENKINS / "bin").iterdir()] + [JENKINS / n for n in ("release", "seal-secrets")]
-                   + [BRICK9000 / n for n in ("build-image", "build-status.sh", "deploy", "install.sh", "proxy/up")])
+                   + [BRICK9000 / n for n in ("build-status.sh", "deploy", "install.sh", "proxy/retire")])
         for script in scripts:
             text = script.read_text()
             if text.startswith("#!/usr/bin/env python3"):

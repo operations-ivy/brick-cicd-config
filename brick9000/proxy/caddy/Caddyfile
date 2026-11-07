@@ -1,6 +1,6 @@
-# brick9000's front door on ports 80 and 443 (LAN only; nothing here is
-# reachable from outside the house). deploy rebuilds and reloads it when
-# brick9000/proxy/ changes (proxy/up).
+# The front door on ports 80 and 443 (LAN only; nothing here is reachable
+# from outside the house). Ran on brick9000 until 2026-10-17; the cluster's
+# copy (brick-k8s-config front-door/) follows it.
 {
 	# The redirects to HTTPS are written out below; the automatic ones would
 	# also catch the old plain-HTTP names.
