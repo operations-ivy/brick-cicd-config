@@ -195,9 +195,9 @@
   footer .hint { color: var(--dim); margin-left: auto; text-align: right; line-height: 1.15; }
   footer .hint b { color: var(--amber); font-weight: 400; }
 
-  /* TV static between screens, like the Presto's (presto device/lib/neon/fx.py). */
-  #static { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 9; pointer-events: none;
-            image-rendering: pixelated; display: none; }
+  /* TV static between screens, like the Presto's (presto device/lib/neon/fx.py), over
+     only the box that changes (the user, 2026-11-07); placed by placeStatic(). */
+  #static { position: fixed; z-index: 9; pointer-events: none; image-rendering: pixelated; display: none; }
 
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
@@ -603,12 +603,19 @@ function render(s) {
 const STATIC_FRAMES = [1.0, 0.8, 0.55, 0.35, 0.18, 0.07];
 const STATIC_COLOURS = ["#00eaff", "#1a2442", "#0a0e19", "#ff2bd6", "#5b7799"];
 const STATIC_FRAME_MS = 55;
+// Over the right-hand box, the only part of the board that changes between screens.
+function placeStatic(canvas) {
+  const r = document.getElementById("main-panel").getBoundingClientRect();
+  Object.assign(canvas.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  return r;
+}
 function drawStatic(canvas, cover) {
-  const w = canvas.width = Math.round(innerWidth / 4), h = canvas.height = Math.round(innerHeight / 4);  // chunky pixels
+  const r = placeStatic(canvas);
+  const w = canvas.width = Math.max(1, Math.round(r.width / 4)), h = canvas.height = Math.max(1, Math.round(r.height / 4));  // chunky pixels
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, w, h);
   if (cover >= 1) { ctx.fillStyle = "#04050a"; ctx.fillRect(0, 0, w, h); }
-  const k = w / 240;  // the Presto's screen is 240 px wide
+  const k = w / 240 * 2;  // the Presto's 240 px screen; the box is about half the board
   for (let i = 0; i < Math.round(160 * cover * k); i++) {
     ctx.fillStyle = STATIC_COLOURS[Math.floor(Math.random() * STATIC_COLOURS.length)];
     ctx.fillRect(Math.round((Math.random() * 250 - 30) * k), Math.floor(Math.random() * h),
@@ -656,11 +663,11 @@ async function poll() {
 
 document.fonts.load('15px "VT323"').finally(() => {
   tick(); poll(); pollVolume();
-  if (!isNaN(HOLD_STATIC)) {
+  if (!isNaN(HOLD_STATIC)) setTimeout(() => {  // after the first render has laid the page out
     const c = document.getElementById("static");
     c.style.display = "block";
     drawStatic(c, HOLD_STATIC);
-  }
+  }, 1500);
   setInterval(tick, 1000);
   setInterval(poll, 1000);
   setInterval(pollVolume, 3000);
