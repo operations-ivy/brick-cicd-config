@@ -2348,9 +2348,9 @@ class RecentBuildsTest(unittest.TestCase):
         self.assertTrue(recent[0]["what"].startswith("failed"), recent[0]["what"])
         self.assertEqual(recent[1]["label"], "overwatch:0.8.7")
 
-    def test_at_most_nine(self):
+    def test_at_most_fifteen(self):  # the page shows as many as fit
         jobs = [{"name": f"job{i}", "builds": [self.build(1, i)]} for i in range(20)]
-        self.assertEqual(len(checks.recent_builds(self.jenkins(jobs), now=self.NOW)), 9)
+        self.assertEqual(len(checks.recent_builds(self.jenkins(jobs), now=self.NOW)), 15)
 
     def test_a_running_build_says_so(self):
         jobs = [{"name": "test-all", "builds": [self.build(7, 3, building=True)]}]

@@ -106,7 +106,16 @@
   .anom.stale { --s: var(--magenta); }
   .anom.stale .age { color: var(--magenta); animation: blink 1.4s steps(2, jump-none) infinite; }
   .pad span.stale { color: var(--red); text-shadow: 0 0 0.3em var(--red); }
-  .pad span.alert { color: var(--amber); text-shadow: 0 0 0.3em var(--amber); }  .list.compact { display: block; columns: 2; column-gap: 1em; }
+  .pad span.alert { color: var(--amber); text-shadow: 0 0 0.3em var(--amber); }  /* Home's pipeline fills its box: the same rows, bigger (the user, 2026-11-07). */
+  .list.fill { height: 100%; grid-auto-rows: 1fr; gap: 0; align-content: stretch; }
+  .list.fill .item .name { font-size: 1.25em; }
+  .list.fill .item .what { font-size: 1.05em; }
+  .list.fill .item .led { width: 0.75em; height: 0.75em; }
+  #main-list { height: 100%; }
+  /* Recent builds: as many whole rows as fit; a row that would be cut is hidden. */
+  .list.recent .item .name { font-size: 1.1em; }
+  .list.recent .item .what { font-size: 0.95em; }
+  .list.compact { display: block; columns: 2; column-gap: 1em; }
   .list.compact .item, .list.compact .heading { break-inside: avoid; }
   .list.compact .item .name { font-size: 0.82em; }
   .list.compact .item .what { font-size: 0.78em; max-width: 7em; overflow: hidden; text-overflow: ellipsis; }
@@ -277,7 +286,7 @@ function pipeline(builds, argo, hidden) {
   const choreState = worst(chores.map(c => c.state));
   const okChores = chores.filter(c => c.state === "ok").length;
   rows.push(item(choreState, "housekeeping", `${okChores}/${chores.length}`));
-  return `<div class="list">${rows.join("")}</div>`;
+  return `<div class="list fill">${rows.join("")}</div>`;
 }
 
 // Everything that isn't fine, from every source, worst first. Empty is the usual case.
@@ -326,12 +335,26 @@ function anomalyPage(list) {
 function recentPage(recent) {
   if (!recent) return `<div class="note">no data from Jenkins</div>`;
   if (!recent.length) return `<div class="note">no builds yet</div>`;
-  return `<div class="list">${recent.map(b => {
+  return `<div class="list recent">${recent.map(b => {
     const label = b.label ? ` <span class="small">${esc(b.label)}</span>` : "";
     const took = b.took ? ` · ${b.took}` : "";
-    return item(b.state, `#${b.number} ${b.job}`, `${b.what}${took}`, label);
+    // The light already says passed; the other results keep their word.
+    return item(b.state, `#${b.number} ${b.job}`, `${b.what.replace(/^passed /, "")}${took}`, label);
   }).join("")}</div>`;
 }
+
+// Hide the rows that don't fit whole in the box, instead of showing one cut in half.
+function fitRows(box) {
+  const bottom = box.getBoundingClientRect().bottom;
+  for (const row of box.querySelectorAll(".item")) {
+    row.style.visibility = "";
+    if (row.getBoundingClientRect().bottom > bottom) row.style.visibility = "hidden";
+  }
+}
+
+addEventListener("resize", () => {  // the box changed size: refit the recent builds
+  if (lastView === "builds") fitRows(document.getElementById("main-list"));
+});
 
 // The cluster screen (button 3): every check of its groups.
 const short = d => String(d).replace(/^(passed|succeeded),? /, "").replace(/ ago$/, "");
@@ -565,6 +588,7 @@ function render(s) {
     setState("main-panel", worst([g.builds?.state || "unknown", g.argocd?.state || "ok"]));
   }
   setHTML("nodes-panel", nodes(s.vitals));
+  if (view === "builds") fitRows(document.getElementById("main-list"));
 
   const crt = document.getElementById("crt");
   const program = crtProgram(s);

@@ -220,7 +220,7 @@ def hidden_jobs(path: str | Path = "") -> set[str]:
     return {str(j) for j in data.get("hidden_jobs") or []}
 
 
-def recent_builds(jenkins: Jenkins, hidden: set[str] = frozenset(), limit: int = 9,
+def recent_builds(jenkins: Jenkins, hidden: set[str] = frozenset(), limit: int = 15,
                   now: float | None = None) -> list[dict] | None:
     """The newest `limit` builds of every job but the hidden ones, newest first:
     job, number, state, what happened and when, how long it took. None when
