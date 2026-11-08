@@ -253,6 +253,55 @@ def solid(colour: Rgb, seconds: float = 0.0) -> list[Frame]:
     return [[colour] * WIDTH]
 
 
+def party(seconds: float = 20.0, seed: int = 2017) -> list[Frame]:
+    """The party button's show (brick-cicd-config#152): every effect the
+    cabinet has, back to back and faster, then a white flash to finish.
+
+    A spinning rainbow, a fast boil, strobing random colours, the nightly
+    comets and fireworks at double speed, and the rainbow again. The parts
+    share out `seconds`, so the show is exactly that long; seeded, so it's the
+    same show every time.
+    """
+    n = int(seconds * FPS)
+    shares = [0.2, 0.2, 0.15, 0.3, 0.15]  # of the show, in order
+    lengths = [int(n * p) for p in shares]
+    lengths[-1] = n - sum(lengths[:-1])
+    spin_in, boiling, strobing, fireworks, spin_out = lengths
+
+    # The nightly show at double speed: twice as long, every other frame.
+    fast_nightly = nightly(seconds=fireworks * 2 / FPS)[::2][:fireworks]
+    frames = (_spin(spin_in, 3) + boil(seconds=boiling / FPS)[:boiling]
+              + _strobe(strobing, random.Random(seed)) + fast_nightly + _spin(spin_out, -4))[:n]
+    # The last tenth of a second: everything white, then the show lets go.
+    flash = min(n, FPS // 10)
+    frames[n - flash:] = [[(255, 255, 255)] * WIDTH for _ in range(flash)]
+    return frames
+
+
+def _hsv(hue: float, value: float = 1.0) -> Rgb:
+    """A fully saturated colour as 0-255 RGB."""
+    return tuple(round(c * 255) for c in colorsys.hsv_to_rgb(hue % 1.0, 1.0, value))
+
+
+def _spin(count: int, turns: float) -> list[Frame]:
+    """The rainbow across the slots, turning `turns` times in `count` frames."""
+    return [_slots([_hsv(s / SLOTS + turns * f / max(count, 1)) for s in range(SLOTS)]) for f in range(count)]
+
+
+STROBE_PERIOD = 6  # frames per flash: on for half, then dark
+STROBE_HUE_STEP = 0.38  # each flash a long way round the colour wheel from the last
+
+
+def _strobe(count: int, rng: random.Random) -> list[Frame]:
+    """Every slot flashing together, a new colour each flash."""
+    out, hue = [], rng.random()
+    for f in range(count):
+        if f % STROBE_PERIOD == 0:
+            hue += STROBE_HUE_STEP
+        out.append(_slots([_hsv(hue, 1.0 if f % STROBE_PERIOD < STROBE_PERIOD // 2 else 0.0)] * SLOTS))
+    return out
+
+
 # What a display can be made of (displays/*.yaml, or a signal's "effect"). A
 # new animation is a function above and a line here; its keyword arguments are
 # then a display's settings.
@@ -269,6 +318,7 @@ EFFECTS = {
     "rainbow": rainbow,
     "boil": boil,
     "nightly": nightly,
+    "party": party,
 }
 
 

@@ -58,7 +58,7 @@ def crt_playlist(settings) -> dict:
             "activity": entry("activity"), "activity_log": entry("activity-log")}
 
 
-def serve(settings, board, status, lamp_watch: "LampWatch | None" = None) -> None:
+def serve(settings, board, status, lamp_watch: "LampWatch | None" = None, show: "Show | None" = None) -> None:
     crt = crt_playlist(settings)
     activity = lights.Activity(settings.plasma_url)
 
@@ -81,6 +81,9 @@ def serve(settings, board, status, lamp_watch: "LampWatch | None" = None) -> Non
                     "crt": crt,
                     "activity": activity.running(),
                     "lamp": lamp_watch.get() if lamp_watch is not None else None,
+                    # Seconds of the party button's show left (party.py); 0 when none.
+                    "party": round(show.remaining(), 2) if show is not None else 0,
+                    "party_name": settings.party_name,
                     **status.get(),
                 }).encode()
                 self._send(200, "application/json", body)

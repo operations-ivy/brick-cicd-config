@@ -17,9 +17,11 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, since, units, web
+from . import (check, checks, host, lamp, lights, notify, party, party_sound, since, units,
+               web)
 from .board import ACTIVE, QUIET, Board
-from .config import BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
+from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY, KEY_RIGHT, KEY_WAKE,
+                     VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -108,13 +110,18 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
         time.sleep(settings.poll_seconds)
 
 
+NAMED_KEYS = {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_PARTY: "party",
+              KEY_LEFT: "left", KEY_RIGHT: "right"}
+
+
 def button_name(code: int) -> str:
     """A cabinet key as a metric label: the view a button picks, or what it does."""
+    if code in NAMED_KEYS:  # before BUTTON_KEYS: the check button is one of the six
+        return NAMED_KEYS[code]
     if code in BUTTON_KEYS:
         i = BUTTON_KEYS.index(code)
         return BUTTON_ACTIONS[i] if i < len(BUTTON_ACTIONS) else f"button{i + 1}"
-    return {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_LEFT: "left",
-            KEY_RIGHT: "right"}.get(code, "other")
+    return "other"
 
 
 def send_test_page(settings: Settings) -> None:
@@ -163,6 +170,19 @@ def main() -> None:
             plasma.answer(answer)
         lamp_watch.poke()  # the board shows the new state within a couple of seconds
 
+    show = party.Show()
+    lamp_party = party.LampParty(home_assistant, lamp_config.entity, show)
+    sound = party_sound.Player(Path(settings.party_sound))
+    threading.Thread(target=sound.prepare, daemon=True).start()
+
+    def start_show() -> None:
+        fresh = show.start()
+        plasma.party()
+        sound.play()
+        log.info("party: %s", "show on" if fresh else "started again")
+        if fresh:
+            threading.Thread(target=lamp_party.run, daemon=True).start()
+
     lamp_button = lamp.LampButton(
         lamp.Lamp(lamp_config, home_assistant),
         lamp.Gestures(lamp_config.double_seconds, lamp_config.long_seconds), lamp_answered)
@@ -179,6 +199,13 @@ def main() -> None:
             # doesn't wake the board: the lamp is for the room, not the screen.
             if not os.path.exists(settings.retro_flag):
                 lamp_button.press()
+            return
+        if code == KEY_PARTY:
+            # Any time, quiet hours too; not while a game is open (1UP is a
+            # game's button then).
+            if not os.path.exists(settings.retro_flag):
+                start_show()
+                wake.set()
             return
         if code == KEY_WAKE:
             if os.path.exists(settings.retro_flag):
@@ -217,7 +244,7 @@ def main() -> None:
                      daemon=True).start()
     threading.Thread(target=lamp_button.run, daemon=True).start()
     threading.Thread(target=lamp_watch.run, daemon=True).start()
-    threading.Thread(target=web.serve, args=(settings, board, status, lamp_watch),
+    threading.Thread(target=web.serve, args=(settings, board, status, lamp_watch, show),
                      daemon=True).start()
     log.info("brick-status up: prometheus=%s board=http://%s:%d",
              settings.prometheus_url, settings.http_host, settings.http_port)
@@ -232,7 +259,10 @@ def main() -> None:
         bm.one_hot(bm.MODE, "mode", mode, ("idle", "active", "quiet"))
         bm.one_hot(bm.VIEW, "view", board.views[board.view(now)], board.views)
         summary = status.get()
-        screen.set(mode != QUIET)
+        showing = show.on()
+        screen.set(mode != QUIET or showing)  # the show lights the screen at night too
+        if showing:
+            continue  # the button lights are the show's (its display outranks the board's)
 
         lights_state = "off" if mode == QUIET else "active" if mode == ACTIVE else "idle"
         bm.one_hot(bm.LIGHTS, "state", lights_state, ("off", "active", "idle"))

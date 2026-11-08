@@ -17,8 +17,8 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
 VIEWS = ["overview", "builds", "cluster", "anomalies"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
 # a screen, and the first of the bottom row the anomalies' own page (the user,
-# 2026-11-07). The other two are free (not the volume: the dial does that); a
-# press there only wakes the board.
+# 2026-11-07). The fifth is free (not the volume: the dial does that); a press
+# there only wakes the board. The sixth is the check button (KEY_CHECK).
 BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest are free
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
@@ -30,9 +30,13 @@ KEY_RIGHT = 106
 # The button on the cabinet's left side (KEY_ESC): sleep and wake
 # (board.Board.side_button). Checked on the hardware.
 KEY_WAKE = 1
-# The cabinet's front-right button (1UP, KEY_O): pressed twice, it starts
-# Jenkins' check-all job (check.py). Checked on the hardware.
-KEY_CHECK = 24
+# The bottom row's right-hand button (button 6, KEY_X): pressed twice, it
+# starts Jenkins' check-all job (check.py). It was 1UP's until 2026-11-08,
+# when 1UP became the party button (the user).
+KEY_CHECK = 45
+# The cabinet's front-right button (1UP, KEY_O): ten seconds of light show on
+# the buttons, the screen and the lamp (party.py, #152). Checked on the hardware.
+KEY_PARTY = 24
 # The cabinet's front-left button (COIN, KEY_I): the Hue lamp beside it, by
 # single, double and long press (lamp.py).
 KEY_LAMP = 23
@@ -70,7 +74,7 @@ class Settings:
     # A side-button sleep ends by this time of day at the latest, so one on a
     # Friday evening doesn't last the weekend (nothing is quiet then).
     sleep_morning: time = time(8, 0)
-    # The front-right button's job, and Jenkins' webhook secret (install.sh's
+    # The check button's job, and Jenkins' webhook secret (install.sh's
     # copy for brick9000's Jenkins jobs; never logged).
     check_job: str = "check-all"
     # The front-left button's lamp, through Home Assistant as its Board user
@@ -104,6 +108,10 @@ class Settings:
     # Where tapping a page goes: the board's mirror, which only opens at home
     # (the name points at a LAN address). Empty for nowhere.
     ntfy_click: str = "https://status.brick.nozdormu.cloud"
+    # The name the party button's show puts on screen and in the footer
+    # (party.py). Set per cabinet in the env file; keep personal names there,
+    # not in this public repo.
+    party_name: str = "PARTY"
     # Open problems, unsent pages, and the incident log the weekly report reads.
     notify_dir: str = os.path.join(
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-status")
@@ -114,6 +122,8 @@ class Settings:
         env = os.environ.get
         s.prometheus_url = env("BRICK_STATUS_PROMETHEUS_URL", s.prometheus_url).rstrip("/")
         s.poll_seconds = float(env("BRICK_STATUS_POLL_SECONDS", s.poll_seconds))
+        name = env("BRICK_STATUS_PARTY_NAME", "").strip() or s.party_name
+        s.party_name = name[:16].upper()
         s.jenkins_url = env("BRICK_STATUS_JENKINS_URL", s.jenkins_url).rstrip("/")
         s.jenkins_user = env("BRICK_STATUS_JENKINS_USER", s.jenkins_user)
         s.jenkins_password = env("BRICK_STATUS_JENKINS_PASSWORD", s.jenkins_password)
@@ -152,6 +162,11 @@ class Settings:
         s.ntfy_click = env("BRICK_STATUS_NTFY_CLICK", s.ntfy_click)
         s.notify_dir = env("BRICK_STATUS_NOTIFY_DIR", s.notify_dir)
         return s
+
+    @property
+    def party_sound(self) -> str:
+        """The party button's sound, made at start (party_sound.py)."""
+        return os.path.join(self.notify_dir, "party.wav")
 
     @property
     def board_state(self) -> str:

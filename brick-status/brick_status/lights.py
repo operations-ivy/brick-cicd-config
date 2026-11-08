@@ -93,6 +93,12 @@ class Plasma:
         stays put underneath; the display's own priority and time limit apply."""
         self._send({"pattern": pattern}, "board-button")
 
+    def party(self) -> None:
+        """The party button's show (party.py), from its own sender so a
+        lamp or check answer can't cut it short. The display sets its
+        length (party.SECONDS); sending it again starts it again."""
+        self._send({"pattern": "party"}, "party")
+
     def off(self) -> None:
         self.show("off")
 
