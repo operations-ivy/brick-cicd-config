@@ -98,16 +98,16 @@
   .bar i.on { background: var(--s); box-shadow: 0 0 0.3em var(--s); }
 
   /* The lamp: the board's most pressed button (69 presses a week). */
-  .lamp { display: grid; grid-template-columns: auto 1fr; gap: 0.15em 0.6em; align-items: center; }
-  .bulb { width: 2.4em; height: 2.4em; image-rendering: pixelated; grid-row: span 3;
-          background: var(--edge); clip-path: polygon(30% 0, 70% 0, 90% 15%, 100% 40%, 85% 65%, 70% 75%, 70% 100%, 30% 100%, 30% 75%, 15% 65%, 0 40%, 10% 15%); }
-  .lamp.on .bulb { background: var(--lampc, var(--amber)); filter: drop-shadow(0 0 0.5em var(--lampc, var(--amber))); }
-  .big { font-size: 1.7em; line-height: 0.9; color: var(--s); }
+  /* Lamp and speaker: one line each (the user, 2026-11-07: half the size). */
+  #lamp-panel, #vol-panel { padding-bottom: 0.3em; }
+  /* No picture: the bar glows in the lamp's own colour (warm amber to cool white). */
+  .lamp { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
+  .big { font-size: 1.1em; line-height: 1; color: var(--s); white-space: nowrap; }
+  #lamp .bar, #vol .bar { height: 0.45em; }
   .small { font-size: 0.78em; color: var(--dim); }
 
   /* The speaker: the volume page is the most used page after Prometheus. */
-  .vol { display: grid; gap: 0.3em; }
-  .vol .row1 { display: flex; justify-content: space-between; align-items: baseline; }
+  .vol { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
   .vol.muted .big { animation: blink 1s steps(2, jump-none) infinite; }
   .keys { display: flex; gap: 0.5em; font-size: 0.78em; color: var(--dim); }
   .keys b { color: var(--cyan); font-weight: 400; border: 1px solid var(--edge); padding: 0 0.25em; }
@@ -285,24 +285,24 @@ function lampColour(k) {
 }
 
 function lampPanel(l) {
-  if (!l) return `<div class="lamp"><div class="bulb"></div><div class="big unknown" style="--s:var(--slate)">OFFLINE</div>
-                  <div class="small">no answer from Home Assistant</div></div>`;
+  if (!l) return `<div class="lamp"><div class="big" style="--s:var(--slate)">OFFLINE</div>
+                  <span class="small">no answer from Home Assistant</span></div>`;
   const pct = l.on ? (l.brightness_pct ?? 100) : 0;
   const kelvin = l.kelvin ? `${l.kelvin} K` : "";
-  return `<div class="lamp ${l.on ? "on" : ""}" style="--lampc:${lampColour(l.kelvin)}">
-    <div class="bulb"></div><div class="big glow" style="--s:${l.on ? "var(--amber)" : "var(--dim)"}">${l.on ? "ON " + pct + "%" : "OFF"}</div>
-    <div class="bar" style="--s:var(--amber)">${segs(10, Math.ceil(pct / 10))}</div>
-    <div class="small">${kelvin}</div></div>`;
+  return `<div class="lamp ${l.on ? "on" : ""}">
+    <div class="big glow" style="--s:${l.on ? "var(--amber)" : "var(--dim)"}">${l.on ? "ON " + pct + "%" : "OFF"}</div>
+    <div class="bar" style="--s:${lampColour(l.kelvin)}">${segs(10, Math.ceil(pct / 10))}</div>
+    <span class="small">${kelvin}</span></div>`;
 }
 
 let vol = null;
 function volPanel() {
   if (!vol) return `<div class="note">no answer from the speaker</div>`;
   const pct = Math.round(vol.level * 100);
-  return `<div class="vol ${vol.muted ? "muted" : ""}"><div class="row1">
+  return `<div class="vol ${vol.muted ? "muted" : ""}">
     <span class="big glow" style="--s:${vol.muted ? "var(--red)" : "var(--cyan)"}">${vol.muted ? "MUTED" : pct + "%"}</span>
-    <span class="keys"><b>4</b>− <b>5</b>+ <b>6</b>mute</span></div>
-    <div class="bar" style="--s:${vol.muted ? "var(--slate)" : "var(--cyan)"}">${segs(10, Math.round(pct / 10))}</div></div>`;
+    <div class="bar" style="--s:${vol.muted ? "var(--slate)" : "var(--cyan)"}">${segs(10, Math.round(pct / 10))}</div>
+    <span class="keys"><b>4</b>− <b>5</b>+ <b>6</b>mute</span></div>`;
 }
 async function pollVolume() {
   try { vol = await (await fetch("/api/volume", { cache: "no-store" })).json(); } catch (e) { vol = null; }
