@@ -409,7 +409,7 @@ function summary(s, found) {
   const apps = (g.argocd?.checks || []).find(c => c.name === "apps");
   const running = (g.builds?.checks || []).find(c => c.state === "active");
   const parts = [
-    `<span class="${s.overall || "unknown"} glow">${{ ok: "ALL NOMINAL", warn: "DEGRADED", fail: "ALERT", unknown: "NO DATA" }[s.overall] || "NO DATA"}</span>`,
+    `<span class="${s.overall || "unknown"} glow">${{ ok: "ALL NOMINAL", active: "BUILDING", warn: "DEGRADED", fail: "ALERT", unknown: "NO DATA" }[s.overall] || "NO DATA"}</span>`,
     found.length ? `<span class="badge${found.some(a => a.stale) ? " stale" : ""}">▲ ${found.length} ${found.length === 1 ? "anomaly" : "anomalies"}${
       found.some(a => a.stale) ? ` · ${found.filter(a => a.stale).length} over 24h` : ""} ▸4</span>`
                  : `<span class="ok">0 anomalies</span>`,
