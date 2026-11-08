@@ -6,9 +6,11 @@ import struct
 import subprocess
 import sys
 import tempfile
+import wave
 import threading
 import time as pytime
 import unittest
+from unittest import mock
 import json
 import urllib.error
 import urllib.request
@@ -17,7 +19,7 @@ from datetime import datetime, time
 from pathlib import Path
 
 from brick_status import (board_metrics, jobs, checks, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
-                          ramona, units, volume, web)
+                          ramona, ramona_sound, units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -899,6 +901,34 @@ class RamonaTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ramona.LampParty(ha, "light.lamp", show, sleep=sleep).run()
         self.assertEqual(ha.calls[-1], ("turn_off", {"transition": 1}))
+
+    def test_the_sound_is_ten_seconds_and_never_clips(self):
+        samples = ramona_sound.synth()
+        self.assertEqual(len(samples), int(ramona_sound.SECONDS * ramona_sound.RATE))
+        self.assertAlmostEqual(max(abs(v) for v in samples), ramona_sound.PEAK)
+        # Every part of the show has sound in it: no silent second.
+        rate = ramona_sound.RATE
+        for second in range(10):
+            chunk = samples[second * rate:(second + 1) * rate]
+            self.assertGreater(max(abs(v) for v in chunk), 0.05, f"second {second}")
+        self.assertEqual(samples, ramona_sound.synth())  # the same every time
+
+    def test_the_sound_plays_and_a_second_press_starts_it_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            player = ramona_sound.Player(Path(d) / "ramona.wav", command="true")
+            player.play()  # not made yet: silent, no error
+            self.assertIsNone(player._playing)
+            player.prepare()
+            with wave.open(str(player.path)) as w:
+                self.assertEqual((w.getnchannels(), w.getframerate()), (1, ramona_sound.RATE))
+            with mock.patch.object(ramona_sound.subprocess, "Popen") as popen:
+                running = popen.return_value
+                running.poll.return_value = None
+                player.play()
+                player.play()
+                self.assertEqual(popen.call_count, 2)
+                running.terminate.assert_called_once()
+                self.assertEqual(popen.call_args.args[0], ["true", str(player.path)])
 
     def test_the_page_draws_the_show_only_while_it_is_on(self):
         page = (Path(web.__file__).parent / "static" / "index.html").read_text()

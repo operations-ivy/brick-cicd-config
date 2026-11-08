@@ -158,6 +158,11 @@ class Settings:
         return s
 
     @property
+    def ramona_sound(self) -> str:
+        """The Ramona button's sound, made at start (ramona_sound.py)."""
+        return os.path.join(self.notify_dir, "ramona.wav")
+
+    @property
     def board_state(self) -> str:
         """The side button's sleep, kept across restarts (board.Board)."""
         return os.path.join(self.notify_dir, "board.json")

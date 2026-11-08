@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, ramona, since, units, web
+from . import check, checks, host, lamp, lights, notify, ramona, ramona_sound, since, units, web
 from .board import ACTIVE, QUIET, Board
 from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RAMONA, KEY_RIGHT, KEY_WAKE,
                      VIEWS, Settings)
@@ -169,10 +169,13 @@ def main() -> None:
 
     show = ramona.Show()
     party = ramona.LampParty(home_assistant, lamp_config.entity, show)
+    sound = ramona_sound.Player(Path(settings.ramona_sound))
+    threading.Thread(target=sound.prepare, daemon=True).start()
 
     def start_show() -> None:
         fresh = show.start()
         plasma.ramona()
+        sound.play()
         log.info("ramona: %s", "show on" if fresh else "ten more seconds")
         if fresh:
             threading.Thread(target=party.run, daemon=True).start()
