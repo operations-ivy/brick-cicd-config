@@ -784,7 +784,7 @@ class MetricsTest(unittest.TestCase):
     def test_button_names(self):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
         self.assertEqual([button_name(k) for k in BUTTON_KEYS],
-                         ["overview", "builds", "cluster", "button4", "button5", "button6"])
+                         ["overview", "builds", "cluster", "anomalies", "button5", "button6"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")

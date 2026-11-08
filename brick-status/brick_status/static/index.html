@@ -94,13 +94,18 @@
   .panel.fail { animation: alarm 1.1s steps(2, jump-none) infinite; }
   @keyframes alarm { 50% { border-color: var(--red); } }
   /* The CRT and the pipeline: twin boxes across the top (the user, 2026-11-07). */
-  #main-panel { grid-row: 1; grid-column: 2; }
+  #main-panel { grid-row: 1 / span 2; grid-column: 2; }
   #ls-panel { grid-row: 2; grid-column: 1; display: grid; gap: 0.15em; align-content: center; padding-bottom: 0.3em; }
-  #anomaly-panel { grid-row: 2; grid-column: 2; }
   /* The detail screens fill the pipeline's box in two columns. */
-  body.detail #main-panel { grid-row: 1 / span 2; }
-  body.detail #anomaly-panel { display: none; }
-  .list.compact { display: block; columns: 2; column-gap: 1em; }
+  /* The anomalies' page: where on one line, the whole detail under it, wrapped. */
+  .anom { display: grid; grid-template-columns: 0.8em minmax(0, 1fr); gap: 0.05em 0.45em; align-items: start;
+          padding: 0.25em 0; border-bottom: 1px solid var(--edge); }
+  .anom .led { width: 0.6em; height: 0.6em; margin-top: 0.3em; background: var(--s); box-shadow: 0 0 0.35em var(--s); }
+  .anom .where { font-size: 1.0em; color: var(--s); }
+  .anom .detail { grid-column: 2; font-size: 0.9em; color: var(--text); overflow-wrap: anywhere; }
+  .anom.fail .led { animation: blink 0.9s steps(2, jump-none) infinite; }
+  .summary .badge { color: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
+  .pad span.alert { color: var(--amber); text-shadow: 0 0 0.3em var(--amber); }  .list.compact { display: block; columns: 2; column-gap: 1em; }
   .list.compact .item, .list.compact .heading { break-inside: avoid; }
   .list.compact .item .name { font-size: 0.82em; }
   .list.compact .item .what { font-size: 0.78em; max-width: 7em; overflow: hidden; text-overflow: ellipsis; }
@@ -209,7 +214,6 @@
   <div class="crt panel" id="crt"><h2>CRT</h2><div class="glass"><div id="term"></div><div id="term-log"></div></div><div class="label" id="crt-label"></div></div>
   <div class="panel" id="main-panel"><h2 id="main-title">PIPELINE</h2><div id="main-list"></div></div>
   <div class="panel" id="ls-panel"><h2>LAMP · SPEAKER</h2><div id="lamp"></div><div id="vol"></div></div>
-  <div class="panel" id="anomaly-panel"><h2>ANOMALIES</h2><div id="anomalies"></div></div>
   <div class="nodes panel" id="nodes-panel"><h2>NODES</h2></div>
 </main>
 <footer>
@@ -229,7 +233,7 @@ const worst = states => SEVERITY.find(s => states.includes(s)) || "ok";
 const WORD = { ok: "OK", warn: "WARN", fail: "FAIL", active: "RUN", unknown: "??" };
 
 // The six front-panel buttons (config.BUTTON_ACTIONS): screens on top; the bottom row is free.
-const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"], null, null, null];
+const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null, null];
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
@@ -271,7 +275,7 @@ function pipeline(builds, argo) {
 }
 
 // Everything that isn't fine, from every source, worst first. Empty is the usual case.
-function anomalies(s) {
+function findAnomalies(s) {
   const out = [];
   for (const [group, g] of Object.entries(s.groups || {}))
     for (const c of g.checks) if (c.state === "fail" || c.state === "warn" || c.state === "unknown")
@@ -283,10 +287,14 @@ function anomalies(s) {
     if (t >= 70) out.push({ state: t >= 80 ? "fail" : "warn", name: `${n.node}/temp`, what: `${Math.round(t)}°C` });
     if (d >= 85) out.push({ state: d >= 95 ? "fail" : "warn", name: `${n.node}/disk`, what: `${Math.round(d)}%` });
   }
-  if (!out.length) return `<div class="clear">&gt; all clear</div>`;
-  const shown = out.sort(bySeverity).slice(0, 3).map(a => item(a.state, a.name, a.what)).join("");
-  const more = out.length > 3 ? `<div class="note">+${out.length - 3} more</div>` : "";
-  return `<div class="list">${shown}${more}</div>`;
+  return out.sort(bySeverity);
+}
+
+// The anomalies' own page (button 4): where it is, then the whole detail.
+function anomalyPage(list) {
+  if (!list.length) return `<div class="clear">&gt; all clear</div>`;
+  return list.map(a => `<div class="anom ${a.state}"><span class="led"></span>
+    <span class="where">${esc(a.name)}</span><span class="detail">${esc(a.what)}</span></div>`).join("");
 }
 
 // The detail screens (buttons 2 and 3): every check of their groups.
@@ -333,21 +341,20 @@ async function pollVolume() {
   setHTML("vol", volPanel());
 }
 
-function summary(s) {
+function summary(s, found) {
   const g = s.groups || {};
   const all = Object.values(g).flatMap(x => x.checks);
   const failing = all.filter(c => c.state === "fail").length;
-  const work = all.find(c => c.group === "cluster" && c.name === "workloads");
   const nodes = (g.cluster?.checks || []).filter(c => /^brick/.test(c.name));
   const ready = nodes.filter(c => c.detail === "Ready").length;
   const apps = (g.argocd?.checks || []).find(c => c.name === "apps");
   const running = (g.builds?.checks || []).find(c => c.state === "active");
   const parts = [
     `<span class="${s.overall || "unknown"} glow">${{ ok: "ALL NOMINAL", warn: "DEGRADED", fail: "ALERT", unknown: "NO DATA" }[s.overall] || "NO DATA"}</span>`,
+    found.length ? `<span class="badge">▲ ${found.length} ${found.length === 1 ? "anomaly" : "anomalies"} ▸4</span>`
+                 : `<span class="ok">0 anomalies</span>`,
     `<span class="${worst(nodes.map(n => n.state))}">nodes ${ready}/${nodes.filter(n => !/maintenance/.test(n.detail)).length}</span>`,
-    work && work.state !== "ok" ? `<span class="${work.state}">pods ${esc(work.detail)}</span>` : "",
     apps ? `<span class="${apps.state}">argo ${esc(apps.detail.split(" ")[0])}</span>` : "",
-    `<span class="${failing ? "fail" : "ok"}">${failing} failing</span>`,
     running ? `<span class="active">▶ ${esc(running.name)}</span>` : "",
   ];
   return parts.join("");
@@ -493,14 +500,17 @@ function setState(id, state) {
 function render(s) {
   const g = s.groups || {};
   document.body.classList.toggle("alarm", s.overall === "fail");
-  setHTML("summary", summary(s));
+  const found = findAnomalies(s);
+  setHTML("summary", summary(s, found));
   setHTML("lamp", lampPanel(s.lamp));
   setState("ls-panel", s.lamp ? (s.lamp.on ? "warn" : "ok") : "unknown");
 
   const view = s.view || "overview";
-  document.body.classList.toggle("detail", view !== "overview");
-  setHTML("anomalies", anomalies(s));
-  if (view === "builds") {
+  if (view === "anomalies") {
+    document.getElementById("main-title").textContent = `ANOMALIES // ${found.length}`;
+    setHTML("main-list", anomalyPage(found));
+    setState("main-panel", found.length ? worst(found.map(a => a.state)) : "ok");
+  } else if (view === "builds") {
     document.getElementById("main-title").textContent = "PIPELINE // ALL JOBS";
     setHTML("main-list", detail(s, [["JENKINS", "builds"]]));
     setState("main-panel", g.builds?.state || "unknown");
@@ -543,7 +553,7 @@ function render(s) {
   fresh.classList.toggle("stale", age === null || age > 60);
 
   setHTML("pad", PAD.map((b, i) => b
-    ? `<span data-n="${i + 1}" class="${b[0] === view ? "on" : ""}">${b[1]}</span>`
+    ? `<span data-n="${i + 1}" class="${b[0] === view ? "on" : b[0] === "anomalies" && found.length ? "alert" : ""}">${b[1]}${b[0] === "anomalies" && found.length ? " " + found.length : ""}</span>`
     : `<span data-n="${i + 1}" class="free">free</span>`).join(""));
 }
 

@@ -15,11 +15,12 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
 # one screen), then the pipeline's and the cluster's full lists in the right column.
 # wigle-sync's checks show in the Services view (its group is still collected:
 # its page, the "uploading" lights and the CRT label read it).
-VIEWS = ["overview", "builds", "cluster"]
+VIEWS = ["overview", "builds", "cluster", "anomalies"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
-# a screen. The bottom row is free (not the volume: the dial does that, the
-# user, 2026-11-07); a press there only wakes the board.
-BUTTON_ACTIONS = ["overview", "builds", "cluster"]
+# a screen, and the first of the bottom row the anomalies' own page (the user,
+# 2026-11-07). The other two are free (not the volume: the dial does that); a
+# press there only wakes the board.
+BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the
