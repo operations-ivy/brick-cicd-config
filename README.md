@@ -374,10 +374,11 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   memory turn yellow at 85% and red at 95%, temperature at 158°F and 176°F,
   disk at 85% and 95%), and its CPU temperature in °F beside the bar. The header shows a red
   "SSHD Down" if sshd stops on brick9000, and nothing while it's up.
-- The CRT window plays real terminal programs in turn, 6 hours each by the
-  clock (`BRICK_STATUS_CRT_PROGRAMS`, `BRICK_STATUS_CRT_MINUTES`): cmatrix and
-  a gallery of public-domain paintings drawn with chafa
-  (`brick-status/art/paintings/`, credits in its `CREDITS.md`). While something
+- The CRT window plays cmatrix (since 2026-11-08, the only program by
+  default). `BRICK_STATUS_CRT_PROGRAMS` can name more to play in turn, 6 hours
+  each by the clock (`BRICK_STATUS_CRT_MINUTES`): `gallery` is a gallery of
+  public-domain paintings drawn with chafa (`brick-status/art/paintings/`,
+  credits in its `CREDITS.md`). While something
   is building or deploying it shows that instead (`crt_activity.py`), and the
   bezel says which. The window splits while it does: the title and details at
   font 15 on top, and below, in a terminal of its own at font 9, the newest
