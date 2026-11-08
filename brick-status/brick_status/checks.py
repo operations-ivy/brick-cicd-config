@@ -11,6 +11,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ SEVERITY = [FAIL, WARN, UNKNOWN, ACTIVE, OK]
 
 
 log = logging.getLogger(__name__)
+
 # A finished Jenkins build's result, as the board shows it.
 JENKINS_RESULTS = {"SUCCESS": (OK, "passed"), "UNSTABLE": (WARN, "unstable"),
                    "FAILURE": (FAIL, "failed"), "ABORTED": (WARN, "aborted"),
@@ -169,15 +171,15 @@ class Jenkins:
     user) rather than Prometheus, which only has build results by the minute."""
 
     TREE = "jobs[name,lastBuild[number,displayName,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
+    # Each job's last ten builds, for the board's recent-builds screen.
+    RECENT_TREE = ("jobs[name,builds[number,result,timestamp,duration,building,"
+                   "displayName,description]{0,10}]")
 
     def __init__(self, url: str, user: str, password: str, timeout: float = 5.0):
         self.url = url
         self.timeout = timeout
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         self.headers = {"Authorization": f"Basic {token}"}
-
-    # Each job's last ten builds, for the board's recent-builds screen.
-    RECENT_TREE = "jobs[name,builds[number,result,timestamp,duration,building,displayName,description]{0,10}]"
 
     def jobs(self, tree: str = TREE) -> list[dict]:
         qs = urllib.parse.urlencode({"tree": tree})
@@ -210,17 +212,17 @@ POLLERS = {"build-branches"}
 BOARD_FILE = Path(__file__).resolve().parent.parent / "board.yaml"
 
 
-def hidden_jobs(path: str | Path = "") -> set[str]:
+def hidden_jobs(path: str | Path | None = None) -> set[str]:
     """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
     try:
-        data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}
+        data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}  # "" (unset) is the default too
     except (OSError, yaml.YAMLError) as e:
         log.warning("board file: %s", e)
         return set()
     return {str(j) for j in data.get("hidden_jobs") or []}
 
 
-def recent_builds(jenkins: Jenkins, hidden: set[str] = frozenset(), limit: int = 15,
+def recent_builds(jenkins: Jenkins, hidden: Collection[str] = frozenset(), limit: int = 15,
                   now: float | None = None) -> list[dict] | None:
     """The newest `limit` builds of every job but the hidden ones, newest first:
     job, number, state, what happened and when, how long it took. None when
@@ -228,7 +230,8 @@ def recent_builds(jenkins: Jenkins, hidden: set[str] = frozenset(), limit: int =
     now = time.time() if now is None else now
     try:
         jobs = jenkins.jobs(Jenkins.RECENT_TREE)
-    except Exception:
+    except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
+        log.warning("recent builds: %s", e)
         return None
     builds = [(job["name"], b) for job in jobs if job["name"] not in hidden for b in job.get("builds") or []]
     builds.sort(key=lambda jb: jb[1].get("timestamp", 0), reverse=True)

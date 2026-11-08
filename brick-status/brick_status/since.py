@@ -11,7 +11,6 @@ doesn't reset the clock; an anomaly that clears is forgotten.
 
 import json
 import logging
-import os
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -44,7 +43,7 @@ class Since:
         self.path = Path(path)
         try:
             self.first = {str(k): float(v) for k, v in json.loads(self.path.read_text()).items()}
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError):  # missing, corrupt, or not a dict: start over
             self.first = {}
 
     def observe(self, keys: set[str], now: float) -> dict[str, float]:
@@ -60,6 +59,6 @@ class Since:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self.first))
-            os.replace(tmp, self.path)
+            tmp.replace(self.path)
         except OSError as e:
             log.warning("anomaly times: %s", e)

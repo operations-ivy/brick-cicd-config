@@ -12,15 +12,14 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
                  "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
 # The board's screens (the redesign, brick-cicd-config#45): home (everything on
-# one screen), then the pipeline's and the cluster's full lists in the right column.
-# wigle-sync's checks show in the Services view (its group is still collected:
-# its page, the "uploading" lights and the CRT label read it).
+# one screen), the recent builds, the cluster's lists (wigle-sync's checks among
+# them), and the anomalies.
 VIEWS = ["overview", "builds", "cluster", "anomalies"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
 # a screen, and the first of the bottom row the anomalies' own page (the user,
 # 2026-11-07). The other two are free (not the volume: the dial does that); a
 # press there only wakes the board.
-BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]
+BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest are free
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the

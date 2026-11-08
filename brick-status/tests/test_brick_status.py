@@ -2360,11 +2360,9 @@ class RecentBuildsTest(unittest.TestCase):
         self.assertEqual(r["took"], "")
 
     def test_hidden_jobs_come_from_board_yaml(self):
-        import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
-            f.write("hidden_jobs:\n  - build-branches\n  - maintenance-refresh\n")
-            f.flush()
-            self.assertEqual(checks.hidden_jobs(f.name), {"build-branches", "maintenance-refresh"})
+        board = Path(self.enterContext(tempfile.TemporaryDirectory())) / "board.yaml"
+        board.write_text("hidden_jobs:\n  - build-branches\n  - maintenance-refresh\n")
+        self.assertEqual(checks.hidden_jobs(board), {"build-branches", "maintenance-refresh"})
         self.assertEqual(checks.hidden_jobs("/nonexistent/board.yaml"), set())
         # The checked-in file hides the two pollers.
         self.assertTrue({"build-branches", "maintenance-refresh"} <= checks.hidden_jobs())
@@ -2406,6 +2404,8 @@ class SinceTest(unittest.TestCase):
 
     def test_a_bad_file_starts_over(self):
         from brick_status import since
-        self.file.write_text("not json")
-        self.assertEqual(since.Since(self.file).observe({"x"}, 5.0), {"x": 5.0})
+        for junk in ("not json", "[1, 2]"):  # corrupt, and JSON that isn't a dict
+            with self.subTest(junk):
+                self.file.write_text(junk)
+                self.assertEqual(since.Since(self.file).observe({"x"}, 5.0), {"x": 5.0})
 

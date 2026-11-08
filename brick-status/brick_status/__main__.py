@@ -58,7 +58,8 @@ def ntfy_from(settings: Settings) -> notify.Ntfy | None:
 def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     prom = checks.Prometheus(settings.prometheus_url)
     jenkins = checks.Jenkins(settings.jenkins_url, settings.jenkins_user, settings.jenkins_password)
-    local = host.LocalVitals(socket.gethostname())
+    hostname = socket.gethostname()
+    local = host.LocalVitals(hostname)
     state = Path(settings.notify_dir)
     pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
     ntfy = ntfy_from(settings)
@@ -74,14 +75,14 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             vitals.append(local.read())
             internet = host.internet_up()
             summary = checks.summarize(checks.collect(prom, jenkins, internet)
-                                       + units.board_checks(prom, socket.gethostname()))
+                                       + units.board_checks(prom, hostname))
             hidden = checks.hidden_jobs(settings.board_file)
             summary["recent"] = checks.recent_builds(jenkins, hidden)
             summary["hidden_jobs"] = sorted(hidden)
             sshd = host.sshd_running()
             host_state = {"sshd": sshd, "internet": internet}
             summary["since"] = clock.observe(
-                since.anomaly_keys(summary, vitals, host_state, socket.gethostname()), time.time())
+                since.anomaly_keys(summary, vitals, host_state, hostname), time.time())
             status.set(summary, host_state, vitals)
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
@@ -150,6 +151,10 @@ def main() -> None:
         started = check.start_job(settings.jenkins_url, settings.check_job, settings.webhook_secret_file)
         plasma.answer("check-started" if started else "check-unreachable")
 
+    lamp_config = lamp.LampConfig.load(settings.lamp_file or lamp.DEFAULT_FILE)
+    home_assistant = lamp.HomeAssistant(settings.ha_url, settings.ha_token)
+    lamp_watch = lamp.LampWatch(home_assistant, lamp_config.entity)
+
     def lamp_answered(gesture: str, answer: str) -> None:
         bm.LAMP.inc(gesture=gesture, result="unreachable" if answer == lamp.UNREACHABLE else "ok")
         # The lamp works in quiet hours too (that's when the night light is
@@ -158,9 +163,6 @@ def main() -> None:
             plasma.answer(answer)
         lamp_watch.poke()  # the board shows the new state within a couple of seconds
 
-    lamp_config = lamp.LampConfig.load(settings.lamp_file or lamp.DEFAULT_FILE)
-    home_assistant = lamp.HomeAssistant(settings.ha_url, settings.ha_token)
-    lamp_watch = lamp.LampWatch(home_assistant, lamp_config.entity)
     lamp_button = lamp.LampButton(
         lamp.Lamp(lamp_config, home_assistant),
         lamp.Gestures(lamp_config.double_seconds, lamp_config.long_seconds), lamp_answered)

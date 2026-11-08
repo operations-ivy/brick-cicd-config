@@ -156,7 +156,8 @@ class HomeAssistant:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read() or b"{}")
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
+            log.warning("lamp: couldn't read %s (%s)", entity, e)
             return None
         attrs = data.get("attributes") or {}
         brightness = attrs.get("brightness")
@@ -166,12 +167,14 @@ class HomeAssistant:
 
 
 class LampWatch:
-    """The lamp's last known state, read every `every` seconds (and soon after
-    a press), so the board's once-a-second poll never waits on Home Assistant."""
+    """The lamp's last known state, read every `every` seconds (and `settle`
+    seconds after a press), so the board's once-a-second poll never waits on
+    Home Assistant. run() loops for ever: start it as a daemon thread."""
 
-    def __init__(self, ha: HomeAssistant, entity: str, every: float = 15.0,
-                 clock: Callable[[], float] = time.monotonic):
-        self.ha, self.entity, self.every, self.clock = ha, entity, every, clock
+    def __init__(self, ha: HomeAssistant, entity: str, every: float = 15.0, settle: float = 1.0):
+        self.ha, self.entity, self.every, self.settle = ha, entity, every, settle
+        # Read by the web thread, written by run(): one reference assignment,
+        # atomic in CPython, so no lock.
         self._state: dict | None = None
         self._wake = threading.Event()
 
@@ -191,7 +194,7 @@ class LampWatch:
             self._wake.wait(self.every)
             if self._wake.is_set():
                 self._wake.clear()
-                time.sleep(1.0)  # let Home Assistant report the new state first
+                time.sleep(self.settle)  # let Home Assistant report the new state first
 
 
 class Lamp:
