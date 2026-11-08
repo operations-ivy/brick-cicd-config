@@ -117,7 +117,7 @@ def write_wav(path: Path, samples: list[float], rate: int = RATE) -> None:
 class Player:
     """Makes the sound once (in the background, at start) and plays it on
     each show. A press during a show starts the sound again, as it does the
-    show's ten seconds."""
+    show."""
 
     def __init__(self, path: Path, command: str = "pw-play"):
         self.path, self.command = path, command
@@ -140,6 +140,10 @@ class Player:
         with self._lock:
             if self._playing is not None and self._playing.poll() is None:
                 self._playing.terminate()
+                try:
+                    self._playing.wait(timeout=1)  # reap it, no zombie
+                except subprocess.TimeoutExpired:
+                    self._playing.kill()
             try:
                 self._playing = subprocess.Popen([self.command, str(self.path)],
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -122,7 +122,8 @@ class Settings:
         env = os.environ.get
         s.prometheus_url = env("BRICK_STATUS_PROMETHEUS_URL", s.prometheus_url).rstrip("/")
         s.poll_seconds = float(env("BRICK_STATUS_POLL_SECONDS", s.poll_seconds))
-        s.party_name = (env("BRICK_STATUS_PARTY_NAME", s.party_name).strip() or "PARTY")[:16].upper()
+        name = env("BRICK_STATUS_PARTY_NAME", "").strip() or s.party_name
+        s.party_name = name[:16].upper()
         s.jenkins_url = env("BRICK_STATUS_JENKINS_URL", s.jenkins_url).rstrip("/")
         s.jenkins_user = env("BRICK_STATUS_JENKINS_USER", s.jenkins_user)
         s.jenkins_password = env("BRICK_STATUS_JENKINS_PASSWORD", s.jenkins_password)

@@ -163,8 +163,10 @@ class ShippedDisplaysTest(unittest.TestCase):
         self.assertGreaterEqual(show.priority, self.named["off"].priority)  # over quiet hours too
         # As long as brick-status's show (party.SECONDS).
         root = Path(__file__).resolve().parents[2]
-        seconds = float(re.search(r"^SECONDS = ([\d.]+)", (root / "brick-status" / "brick_status" / "party.py")
-                                  .read_text(), re.M).group(1))
+        found = re.search(r"^SECONDS = ([\d.]+)", (root / "brick-status" / "brick_status" / "party.py").read_text(),
+                          re.M)
+        self.assertIsNotNone(found, "party.py has no 'SECONDS = <number>' line")
+        seconds = float(found.group(1))
         self.assertEqual(show.ttl, seconds)
         frames = patterns.make("party", seconds=seconds)
         self.assertEqual(len(frames), int(seconds * patterns.FPS))

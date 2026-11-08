@@ -6,17 +6,17 @@ import struct
 import subprocess
 import sys
 import tempfile
-import wave
 import threading
 import time as pytime
 import unittest
-from unittest import mock
+import wave
 import json
 import urllib.error
 import urllib.request
 import zlib
 from datetime import datetime, time
 from pathlib import Path
+from unittest import mock
 
 from brick_status import (board_metrics, jobs, checks, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
                           party, party_sound, units, volume, web)
@@ -804,6 +804,10 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(KEY_PARTY, 24)  # 1UP, KEY_O
         self.assertEqual(len({KEY_CHECK, KEY_LAMP, KEY_PARTY, KEY_WAKE}), 4)
 
+    def test_http_paths_are_bounded(self):
+        self.assertEqual(board_metrics.http_path("/static/vendor/xterm.js"), "/static/")
+        self.assertEqual(board_metrics.http_path("/wp-login.php"), "other")
+        self.assertEqual(board_metrics.http_path("/metrics"), "/metrics")
 
 class FakeHA:
     """Home Assistant's light calls, recorded; state() answers with `state`."""
@@ -832,7 +836,7 @@ class PartyTest(unittest.TestCase):
         self.assertFalse(show.on())
         self.assertEqual(show.remaining(), 0.0)
 
-    def test_a_press_during_a_show_starts_the_ten_seconds_again(self):
+    def test_a_press_during_a_show_starts_it_again(self):
         clock = FakeClock()
         show = party.Show(clock=clock)
         self.assertTrue(show.start())
@@ -878,7 +882,7 @@ class PartyTest(unittest.TestCase):
         party.LampParty(ha, "light.lamp", show, sleep=sleep).run()
         services = [s for s, _ in ha.calls]
         steps = int(party.SECONDS / party.STEP) + 1
-        self.assertEqual(services, ["turn_on"] * steps + ["turn_on"])
+        self.assertEqual(services, ["turn_on"] * (steps + 1))  # the last one puts the lamp back
         self.assertIn("rgb_color", ha.calls[0][1])
         self.assertEqual(ha.calls[-1], ("turn_on", {"transition": 1, "brightness": 140, "color_temp_kelvin": 2700}))
 
@@ -903,7 +907,7 @@ class PartyTest(unittest.TestCase):
             party.LampParty(ha, "light.lamp", show, sleep=sleep).run()
         self.assertEqual(ha.calls[-1], ("turn_off", {"transition": 1}))
 
-    def test_the_sound_is_ten_seconds_and_never_clips(self):
+    def test_the_sound_fills_the_show_and_never_clips(self):
         samples = party_sound.synth()
         self.assertEqual(len(samples), int(party_sound.SECONDS * party_sound.RATE))
         self.assertAlmostEqual(max(abs(v) for v in samples), party_sound.PEAK)
@@ -939,6 +943,19 @@ class PartyTest(unittest.TestCase):
         self.assertIn('<b>1UP</b> <span id="party-name">PARTY</span>', page)
         self.assertIn("ctx.fillText(partyName", page)
 
+    def test_main_never_rebinds_a_module_name(self):
+        # A local named like a module (party = party.LampParty(...)) makes that
+        # module unreachable in main(): brick-status would die at start, and
+        # nothing else here runs main().
+        import ast
+        import brick_status.__main__ as entry
+        tree = ast.parse(Path(entry.__file__).read_text())
+        modules = {a.asname or a.name for n in tree.body if isinstance(n, ast.ImportFrom) for a in n.names}
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        assigned = {t.id for n in ast.walk(main) if isinstance(n, ast.Assign)
+                    for t in n.targets if isinstance(t, ast.Name)}
+        self.assertEqual(assigned & modules, set())
+
     def test_the_party_name_is_set_per_cabinet(self):
         self.assertEqual(Settings().party_name, "PARTY")
         with mock.patch.dict(os.environ, {"BRICK_STATUS_PARTY_NAME": "  Zoe  "}):
@@ -946,10 +963,6 @@ class PartyTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"BRICK_STATUS_PARTY_NAME": " "}):
             self.assertEqual(Settings.from_env().party_name, "PARTY")
 
-    def test_http_paths_are_bounded(self):
-        self.assertEqual(board_metrics.http_path("/static/vendor/xterm.js"), "/static/")
-        self.assertEqual(board_metrics.http_path("/wp-login.php"), "other")
-        self.assertEqual(board_metrics.http_path("/metrics"), "/metrics")
 
 
 class JobsTest(unittest.TestCase):

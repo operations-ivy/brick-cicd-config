@@ -58,7 +58,7 @@ def crt_playlist(settings) -> dict:
             "activity": entry("activity"), "activity_log": entry("activity-log")}
 
 
-def serve(settings, board, status, lamp_watch: "LampWatch | None" = None, show=None) -> None:
+def serve(settings, board, status, lamp_watch: "LampWatch | None" = None, show: "Show | None" = None) -> None:
     crt = crt_playlist(settings)
     activity = lights.Activity(settings.plasma_url)
 

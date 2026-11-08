@@ -26,6 +26,9 @@ COLOURS = [[255, 0, 0], [255, 140, 0], [255, 255, 0], [0, 255, 0], [0, 200, 255]
            [40, 90, 255], [170, 60, 255], [255, 0, 180], [255, 255, 255]]
 STEP = 0.7
 COLOUR_MODES = {"hs", "xy", "rgb", "rgbw", "rgbww"}
+# A colour mode, and the attribute that holds the lamp's colour in it.
+COLOUR_KEYS = {"color_temp": "color_temp_kelvin", "hs": "hs_color", "xy": "xy_color",
+               "rgb": "rgb_color", "rgbw": "rgbw_color", "rgbww": "rgbww_color"}
 
 
 class Show:
@@ -62,12 +65,9 @@ def restore_call(state: dict) -> tuple[str, dict]:
     data: dict = {"transition": 1}
     if isinstance(attrs.get("brightness"), (int, float)):
         data["brightness"] = round(attrs["brightness"])
-    mode = attrs.get("color_mode")
-    for wanted, key in (("color_temp", "color_temp_kelvin"), ("hs", "hs_color"), ("xy", "xy_color"),
-                        ("rgb", "rgb_color"), ("rgbw", "rgbw_color"), ("rgbww", "rgbww_color")):
-        if mode == wanted and attrs.get(key) is not None:
-            data[key] = attrs[key]
-            break
+    key = COLOUR_KEYS.get(attrs.get("color_mode"))
+    if key and attrs.get(key) is not None:
+        data[key] = attrs[key]
     return "turn_on", data
 
 
