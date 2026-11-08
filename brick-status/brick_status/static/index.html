@@ -166,6 +166,7 @@
   .pad span::before { content: attr(data-n) " "; color: var(--edge); }
   .pad span.on { color: var(--cyan); text-shadow: 0 0 0.3em var(--cyan); }
   .pad span.on::before { color: var(--magenta); }
+  .pad span.free { color: var(--edge); }
   footer .hint { color: var(--dim); margin-left: auto; text-align: right; line-height: 1.15; }
   footer .hint b { color: var(--amber); font-weight: 400; }
 
@@ -213,9 +214,8 @@ const bySeverity = (a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.stat
 const worst = states => SEVERITY.find(s => states.includes(s)) || "ok";
 const WORD = { ok: "OK", warn: "WARN", fail: "FAIL", active: "RUN", unknown: "??" };
 
-// The six front-panel buttons (config.BUTTON_ACTIONS): screens on top, the speaker below.
-const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"],
-             ["volume-down", "VOL −"], ["volume-up", "VOL +"], ["mute", "MUTE"]];
+// The six front-panel buttons (config.BUTTON_ACTIONS): screens on top; the bottom row is free.
+const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"], null, null, null];
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
@@ -302,7 +302,7 @@ function volPanel() {
   return `<div class="vol ${vol.muted ? "muted" : ""}">
     <span class="big glow" style="--s:${vol.muted ? "var(--red)" : "var(--cyan)"}">${vol.muted ? "MUTED" : pct + "%"}</span>
     <div class="bar" style="--s:${vol.muted ? "var(--slate)" : "var(--cyan)"}">${segs(10, Math.round(pct / 10))}</div>
-    <span class="keys"><b>4</b>− <b>5</b>+ <b>6</b>mute</span></div>`;
+    <span class="keys">dial</span></div>`;
 }
 async function pollVolume() {
   try { vol = await (await fetch("/api/volume", { cache: "no-store" })).json(); } catch (e) { vol = null; }
@@ -532,8 +532,9 @@ function render(s) {
   fresh.textContent = age === null ? "waiting" : `t-${age}s`;
   fresh.classList.toggle("stale", age === null || age > 60);
 
-  setHTML("pad", PAD.map(([v, label], i) =>
-    `<span data-n="${i + 1}" class="${v === view ? "on" : ""}">${label}</span>`).join(""));
+  setHTML("pad", PAD.map((b, i) => b
+    ? `<span data-n="${i + 1}" class="${b[0] === view ? "on" : ""}">${b[1]}</span>`
+    : `<span data-n="${i + 1}" class="free">free</span>`).join(""));
 }
 
 function tick() {

@@ -17,10 +17,9 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
 # its page, the "uploading" lights and the CRT label read it).
 VIEWS = ["overview", "builds", "cluster"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
-# a screen, the bottom row is the speaker (the volume page is the board's most
-# used thing after Prometheus: 128k requests a week, 2026-11-07).
-BUTTON_ACTIONS = ["overview", "builds", "cluster", "volume-down", "volume-up", "mute"]
-VOLUME_STEP = 0.1  # of the volume cap, per press
+# a screen. The bottom row is free (not the volume: the dial does that, the
+# user, 2026-11-07); a press there only wakes the board.
+BUTTON_ACTIONS = ["overview", "builds", "cluster"]
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the

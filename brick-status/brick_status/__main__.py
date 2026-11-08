@@ -12,16 +12,14 @@ import argparse
 import logging
 import os
 import socket
-import subprocess
 import threading
 import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, units, volume, web
+from . import check, checks, host, lamp, lights, notify, units, web
 from .board import ACTIVE, QUIET, Board
-from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE,
-                     VIEWS, VOLUME_STEP, Settings)
+from .config import BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -111,21 +109,6 @@ def button_name(code: int) -> str:
             KEY_RIGHT: "right"}.get(code, "other")
 
 
-def press_volume(settings: Settings, action: str) -> None:
-    """A bottom-row button: the speaker a step down or up, or mute toggled."""
-    try:
-        now = volume.get(settings.wpctl, settings.max_volume)
-        if action == "mute":
-            volume.set_muted(settings.wpctl, not now["muted"])
-        else:
-            step = VOLUME_STEP if action == "volume-up" else -VOLUME_STEP
-            volume.set_level(settings.wpctl, settings.max_volume, now["level"] + step)
-            if now["muted"] and step > 0:
-                volume.set_muted(settings.wpctl, False)  # turning it up means wanting to hear it
-    except (OSError, ValueError, subprocess.SubprocessError) as e:
-        log.warning("volume button: %s", e)
-
-
 def send_test_page(settings: Settings) -> None:
     ntfy = ntfy_from(settings)
     if ntfy is None:
@@ -208,12 +191,11 @@ def main() -> None:
                 else:
                     plasma.answer("check-armed")
         elif code in BUTTON_KEYS:
-            action = BUTTON_ACTIONS[BUTTON_KEYS.index(code)]
-            if action in VIEWS:
-                board.press_view(VIEWS.index(action), now)
-            else:
+            i = BUTTON_KEYS.index(code)
+            if i < len(BUTTON_ACTIONS):
+                board.press_view(VIEWS.index(BUTTON_ACTIONS[i]), now)
+            else:  # a free button: input, nothing more
                 board.wake(now)
-                threading.Thread(target=press_volume, args=(settings, action), daemon=True).start()
         elif code in (KEY_LEFT, KEY_RIGHT):
             board.step_view(1 if code == KEY_RIGHT else -1, now)
         else:  # any other cabinet key counts as input (ignored while it's off)
