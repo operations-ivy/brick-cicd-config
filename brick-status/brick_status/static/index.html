@@ -195,10 +195,15 @@
   footer .hint { color: var(--dim); margin-left: auto; text-align: right; line-height: 1.15; }
   footer .hint b { color: var(--amber); font-weight: 400; }
 
+  /* TV static between screens, like the Presto's (presto device/lib/neon/fx.py). */
+  #static { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 9; pointer-events: none;
+            image-rendering: pixelated; display: none; }
+
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
 </head>
 <body>
+<canvas id="static"></canvas>
 <header>
   <span class="logo">BRICK<b>//</b>NET</span>
   <span class="summary" id="summary"></span>
@@ -537,6 +542,8 @@ function render(s) {
   setState("ls-panel", s.lamp ? (s.lamp.on ? "warn" : "ok") : "unknown");
 
   const view = s.view || "overview";
+  if (lastView !== null && view !== lastView) tuneIn();
+  lastView = view;
   if (view === "anomalies") {
     document.getElementById("main-title").textContent = `ANOMALIES // ${found.length}`;
     setHTML("main-list", anomalyPage(found));
@@ -590,6 +597,45 @@ function render(s) {
     : `<span data-n="${i + 1}" class="free">free</span>`).join(""));
 }
 
+// A screen change (the buttons or the stick): the old screen dissolves into
+// static and the new one tunes in, the Presto's switch ported (fx.static_frames,
+// fx.draw_static): six frames, from all noise to a last few bars.
+const STATIC_FRAMES = [1.0, 0.8, 0.55, 0.35, 0.18, 0.07];
+const STATIC_COLOURS = ["#00eaff", "#1a2442", "#0a0e19", "#ff2bd6", "#5b7799"];
+const STATIC_FRAME_MS = 55;
+function drawStatic(canvas, cover) {
+  const w = canvas.width = Math.round(innerWidth / 4), h = canvas.height = Math.round(innerHeight / 4);  // chunky pixels
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  if (cover >= 1) { ctx.fillStyle = "#04050a"; ctx.fillRect(0, 0, w, h); }
+  const k = w / 240;  // the Presto's screen is 240 px wide
+  for (let i = 0; i < Math.round(160 * cover * k); i++) {
+    ctx.fillStyle = STATIC_COLOURS[Math.floor(Math.random() * STATIC_COLOURS.length)];
+    ctx.fillRect(Math.round((Math.random() * 250 - 30) * k), Math.floor(Math.random() * h),
+                 Math.round((15 + Math.random() * 125) * k), 1 + Math.floor(Math.random() * 2));
+  }
+  for (let i = Math.floor(Math.random() * 3); i > 0; i--) {  // a tear: the picture losing its hold
+    ctx.fillStyle = Math.random() < 0.5 ? "#c9f3ff" : "#5b7799";
+    ctx.fillRect(0, Math.floor(Math.random() * h), w, 1);
+  }
+}
+let tuning = false;
+function tuneIn() {
+  const canvas = document.getElementById("static");
+  if (tuning || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  tuning = true;
+  canvas.style.display = "block";
+  let frame = 0;
+  const step = () => {
+    if (frame < STATIC_FRAMES.length) { drawStatic(canvas, STATIC_FRAMES[frame++]); setTimeout(step, STATIC_FRAME_MS); }
+    else { canvas.style.display = "none"; tuning = false; }
+  };
+  step();
+}
+// For a screenshot of the effect: ?static=0.55 holds one frame at that cover.
+const HOLD_STATIC = parseFloat(new URLSearchParams(location.search).get("static"));
+let lastView = null;
+
 function tick() {
   document.getElementById("clock").textContent =
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -610,6 +656,11 @@ async function poll() {
 
 document.fonts.load('15px "VT323"').finally(() => {
   tick(); poll(); pollVolume();
+  if (!isNaN(HOLD_STATIC)) {
+    const c = document.getElementById("static");
+    c.style.display = "block";
+    drawStatic(c, HOLD_STATIC);
+  }
   setInterval(tick, 1000);
   setInterval(poll, 1000);
   setInterval(pollVolume, 3000);
