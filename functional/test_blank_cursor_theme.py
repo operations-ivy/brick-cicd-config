@@ -23,25 +23,25 @@ def images(data: bytes) -> list[tuple[int, int, bytes]]:
         chunk_type, _size, position = struct.unpack_from("<3I", data, header + 12 * i)
         if chunk_type == 0xFFFD0002:
             _hdr, _t, _s, _v, width, height, *_ = struct.unpack_from("<9I", data, position)
-            found.append((width, height, data[position + 36:position + 36 + 4 * width * height]))
+            start = position + 36
+            assert len(data) >= start + 4 * width * height, "truncated image"
+            found.append((width, height, data[start:start + 4 * width * height]))
     return found
 
 
 class BlankCursorTheme(unittest.TestCase):
     def setUp(self):
-        self.icons = Path(tempfile.mkdtemp())
+        self.icons = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run([sys.executable, str(SCRIPT), str(self.icons)], check=True, capture_output=True)
         self.theme = self.icons / "brick-blank"
 
     def test_every_cursor_is_invisible(self):
         cursors = sorted((self.theme / "cursors").iterdir())
-        self.assertIn("default", [c.name for c in cursors])
-        self.assertIn("left_ptr", [c.name for c in cursors])
+        self.assertLessEqual({"default", "left_ptr"}, {c.name for c in cursors})
         for cursor in cursors:
             found = images(cursor.read_bytes())
             self.assertTrue(found, cursor.name)
-            for width, height, pixels in found:
-                self.assertEqual(len(pixels), 4 * width * height, cursor.name)
+            for _width, _height, pixels in found:
                 alphas = pixels[3::4]
                 self.assertFalse(any(alphas), f"{cursor.name} has a visible pixel")
 
