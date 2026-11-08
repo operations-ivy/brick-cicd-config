@@ -54,6 +54,15 @@ cp "$here/labwc-autostart" ~/.config/labwc/autostart
 # HDMI badge. Always composite instead (labwc reads this at login).
 grep -q '^WLR_SCENE_DISABLE_DIRECT_SCANOUT=' ~/.config/labwc/environment 2>/dev/null ||
     echo 'WLR_SCENE_DISABLE_DIRECT_SCANOUT=1' >>~/.config/labwc/environment
+# No visible mouse pointer: labwc draws its own arrow where the pointer rests,
+# which the board's `cursor: none` can't hide. Every cursor in this theme is
+# one transparent pixel (labwc reads the setting at login).
+python3 "$here/blank-cursor-theme"
+if grep -q '^XCURSOR_THEME=' ~/.config/labwc/environment; then
+    sed -i 's/^XCURSOR_THEME=.*/XCURSOR_THEME=brick-blank/' ~/.config/labwc/environment
+else
+    echo 'XCURSOR_THEME=brick-blank' >>~/.config/labwc/environment
+fi
 
 # brick-retro: retro games over the board with a Bluetooth controller
 # (README, "Games").
