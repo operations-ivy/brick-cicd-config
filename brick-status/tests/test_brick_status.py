@@ -1209,6 +1209,15 @@ class JenkinsImageTagTest(unittest.TestCase):
         copied = set(re.findall(r"^COPY (?:--\S+ )*(\S+) ", dockerfile, re.M))
         self.assertEqual(copied | {"Dockerfile"}, set(self.it.INPUTS))
 
+    def test_the_changes_listener_is_an_init_script(self):
+        # Jenkins runs init.groovy.d scripts at start; .override replaces an old image's copy.
+        dockerfile = (JENKINS / "Dockerfile").read_text()
+        self.assertIn("changes-listener.groovy /usr/share/jenkins/ref/init.groovy.d/changes-listener.groovy.override",
+                      dockerfile)
+        listener = (JENKINS / "changes-listener.groovy").read_text()
+        self.assertIn("loki.monitoring.svc.cluster.local:3100/loki/api/v1/push", listener)
+        self.assertIn("source: 'jenkins', kind: 'change'", listener)
+
     def copy(self, d):
         import shutil as sh
         for name in self.it.INPUTS + ["values.yaml"]:
