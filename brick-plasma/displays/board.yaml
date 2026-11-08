@@ -46,13 +46,23 @@ displays:
     seconds: 8.0
     priority: 60
 
+  # The Ramona button (1UP, brick_status/ramona.py, #152): ten seconds of
+  # everything, from its own "ramona" sender. Over quiet hours too (the user,
+  # 2026-11-08: the full show any time): level with "off", it wins as the
+  # newer signal, and brick-status leaves its own signal alone during a show.
+  ramona:
+    effect: ramona
+    seconds: 10.0
+    priority: 100
+    ttl: 10
+
   # Quiet hours: nothing else gets through.
   "off":
     effect: solid
     color: "#000000"
     priority: 100
 
-  # Answers to the front-right button (brick_status/check.py), from the
+  # Answers to the check button (button 6, brick_status/check.py), from the
   # "board-button" sender: over everything but quiet hours, for a moment.
   check-armed:
     effect: flash

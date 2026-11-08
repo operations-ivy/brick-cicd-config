@@ -17,7 +17,7 @@ from datetime import datetime, time
 from pathlib import Path
 
 from brick_status import (board_metrics, jobs, checks, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
-                          units, volume, web)
+                          ramona, units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -783,15 +783,128 @@ class MetricsTest(unittest.TestCase):
 
     def test_button_names(self):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
+        # The sixth is the check button (since 2026-11-08), named for that.
         self.assertEqual([button_name(k) for k in BUTTON_KEYS],
-                         ["overview", "builds", "cluster", "anomalies", "button5", "button6"])
+                         ["overview", "builds", "cluster", "anomalies", "button5", "check"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
         self.assertEqual(button_name(KEY_LEFT), "left")
         from brick_status.config import KEY_LAMP
         self.assertEqual(button_name(KEY_LAMP), "lamp")
+        from brick_status.config import KEY_RAMONA
+        self.assertEqual(button_name(KEY_RAMONA), "ramona")
         self.assertEqual(button_name(999), "other")
+
+    def test_the_check_and_ramona_buttons(self):
+        from brick_status.config import BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_RAMONA, KEY_WAKE
+        self.assertEqual(KEY_CHECK, BUTTON_KEYS[5])  # the bottom row's right-hand button
+        self.assertEqual(KEY_RAMONA, 24)  # 1UP, KEY_O
+        self.assertEqual(len({KEY_CHECK, KEY_LAMP, KEY_RAMONA, KEY_WAKE}), 4)
+
+
+class FakeHA:
+    """Home Assistant's light calls, recorded; state() answers with `state`."""
+
+    def __init__(self, state):
+        self._state, self.calls = state, []
+
+    def state(self, entity):
+        return self._state
+
+    def call(self, service, entity, **data):
+        self.calls.append((service, data))
+        return True, "on"
+
+
+class RamonaTest(unittest.TestCase):
+    def test_ten_seconds_then_done(self):
+        clock = FakeClock()
+        show = ramona.Show(clock=clock)
+        self.assertFalse(show.on())
+        self.assertTrue(show.start())
+        clock.now += 9.9
+        self.assertTrue(show.on())
+        clock.now += 0.2
+        self.assertFalse(show.on())
+        self.assertEqual(show.remaining(), 0.0)
+
+    def test_a_press_during_a_show_starts_the_ten_seconds_again(self):
+        clock = FakeClock()
+        show = ramona.Show(clock=clock)
+        self.assertTrue(show.start())
+        clock.now += 6
+        self.assertFalse(show.start())  # not a new show: no second lamp party
+        self.assertAlmostEqual(show.remaining(), 10.0)
+        clock.now += 10.1
+        self.assertFalse(show.on())
+
+    def test_the_lamp_goes_back_as_it_was(self):
+        cases = [
+            ({"state": "off", "attributes": {}}, ("turn_off", {"transition": 1})),
+            ({"state": "on", "attributes": {"brightness": 140, "color_mode": "color_temp", "color_temp_kelvin": 2700}},
+             ("turn_on", {"transition": 1, "brightness": 140, "color_temp_kelvin": 2700})),
+            ({"state": "on", "attributes": {"brightness": 178, "color_mode": "xy", "xy_color": [0.17, 0.7]}},
+             ("turn_on", {"transition": 1, "brightness": 178, "xy_color": [0.17, 0.7]})),
+            ({"state": "on", "attributes": {"brightness": 13, "color_mode": "hs", "hs_color": [30, 80]}},
+             ("turn_on", {"transition": 1, "brightness": 13, "hs_color": [30, 80]})),
+            ({"state": "unavailable", "attributes": {}}, ("turn_off", {"transition": 1})),
+        ]
+        for state, wanted in cases:
+            self.assertEqual(ramona.restore_call(state), wanted, state)
+
+    def test_colours_for_a_colour_lamp_a_flicker_for_a_white_one(self):
+        colour = {"attributes": {"supported_color_modes": ["color_temp", "xy"]}}
+        white = {"attributes": {"supported_color_modes": ["color_temp"]}}
+        self.assertEqual(ramona.party_call(colour, 0)["rgb_color"], ramona.COLOURS[0])
+        self.assertEqual(ramona.party_call(colour, len(ramona.COLOURS))["rgb_color"], ramona.COLOURS[0])
+        self.assertNotIn("rgb_color", ramona.party_call(white, 0))
+        self.assertEqual([ramona.party_call(white, i)["brightness_pct"] for i in range(3)], [100, 15, 100])
+
+    def test_the_party_runs_while_the_show_is_on_then_restores(self):
+        clock = FakeClock()
+        show = ramona.Show(clock=clock)
+        before = {"state": "on", "attributes": {"brightness": 140, "color_mode": "color_temp",
+                                                "color_temp_kelvin": 2700, "supported_color_modes": ["xy", "color_temp"]}}
+        ha = FakeHA(before)
+
+        def sleep(seconds):
+            clock.now += seconds
+
+        show.start()
+        ramona.LampParty(ha, "light.lamp", show, sleep=sleep).run()
+        services = [s for s, _ in ha.calls]
+        steps = int(ramona.SECONDS / ramona.STEP) + 1
+        self.assertEqual(services, ["turn_on"] * steps + ["turn_on"])
+        self.assertIn("rgb_color", ha.calls[0][1])
+        self.assertEqual(ha.calls[-1], ("turn_on", {"transition": 1, "brightness": 140, "color_temp_kelvin": 2700}))
+
+    def test_an_unreadable_lamp_stays_out_of_the_show(self):
+        clock = FakeClock()
+        show = ramona.Show(clock=clock)
+        show.start()
+        ha = FakeHA(None)
+        ramona.LampParty(ha, "light.lamp", show, sleep=lambda s: None).run()
+        self.assertEqual(ha.calls, [])  # nothing changed, so nothing to put back
+
+    def test_the_lamp_is_put_back_even_if_the_show_breaks(self):
+        clock = FakeClock()
+        show = ramona.Show(clock=clock)
+        show.start()
+        ha = FakeHA({"state": "off", "attributes": {"supported_color_modes": ["xy"]}})
+
+        def sleep(seconds):
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            ramona.LampParty(ha, "light.lamp", show, sleep=sleep).run()
+        self.assertEqual(ha.calls[-1], ("turn_off", {"transition": 1}))
+
+    def test_the_page_draws_the_show_only_while_it_is_on(self):
+        page = (Path(web.__file__).parent / "static" / "index.html").read_text()
+        self.assertIn("if (s.ramona > 0) ramonaShow(s.ramona);", page)
+        self.assertIn("if (now >= ramonaEnd)", page)
+        self.assertIn("<b>1UP</b> RAMONA", page)
 
     def test_http_paths_are_bounded(self):
         self.assertEqual(board_metrics.http_path("/static/vendor/xterm.js"), "/static/")

@@ -17,8 +17,8 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
 VIEWS = ["overview", "builds", "cluster", "anomalies"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
 # a screen, and the first of the bottom row the anomalies' own page (the user,
-# 2026-11-07). The other two are free (not the volume: the dial does that); a
-# press there only wakes the board.
+# 2026-11-07). The fifth is free (not the volume: the dial does that); a press
+# there only wakes the board. The sixth is the check button (KEY_CHECK).
 BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest are free
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
@@ -30,9 +30,13 @@ KEY_RIGHT = 106
 # The button on the cabinet's left side (KEY_ESC): sleep and wake
 # (board.Board.side_button). Checked on the hardware.
 KEY_WAKE = 1
-# The cabinet's front-right button (1UP, KEY_O): pressed twice, it starts
-# Jenkins' check-all job (check.py). Checked on the hardware.
-KEY_CHECK = 24
+# The bottom row's right-hand button (button 6, KEY_X): pressed twice, it
+# starts Jenkins' check-all job (check.py). It was 1UP's until 2026-11-08,
+# when 1UP became the Ramona button (the user).
+KEY_CHECK = 45
+# The cabinet's front-right button (1UP, KEY_O): ten seconds of light show on
+# the buttons, the screen and the lamp (ramona.py, #152). Checked on the hardware.
+KEY_RAMONA = 24
 # The cabinet's front-left button (COIN, KEY_I): the Hue lamp beside it, by
 # single, double and long press (lamp.py).
 KEY_LAMP = 23
@@ -70,7 +74,7 @@ class Settings:
     # A side-button sleep ends by this time of day at the latest, so one on a
     # Friday evening doesn't last the weekend (nothing is quiet then).
     sleep_morning: time = time(8, 0)
-    # The front-right button's job, and Jenkins' webhook secret (install.sh's
+    # The check button's job, and Jenkins' webhook secret (install.sh's
     # copy for brick9000's Jenkins jobs; never logged).
     check_job: str = "check-all"
     # The front-left button's lamp, through Home Assistant as its Board user

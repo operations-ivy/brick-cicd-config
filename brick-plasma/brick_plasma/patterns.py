@@ -253,6 +253,50 @@ def solid(colour: Rgb, seconds: float = 0.0) -> list[Frame]:
     return [[colour] * WIDTH]
 
 
+def ramona(seconds: float = 10.0, seed: int = 2017) -> list[Frame]:
+    """The Ramona button's show (brick-cicd-config#152): every effect the
+    cabinet has, back to back and faster, then a white flash to finish.
+
+    A spinning rainbow, a fast boil, strobing random colours, the nightly
+    comets and fireworks at double speed, and the rainbow again. The parts
+    share out `seconds`, so the show is exactly that long; seeded, so it's the
+    same show every time.
+    """
+    n = int(seconds * FPS)
+    rng = random.Random(seed)
+    shares = [0.2, 0.2, 0.15, 0.3, 0.15]  # of the show, in order
+    lengths = [int(n * p) for p in shares]
+    lengths[-1] = n - sum(lengths[:-1])
+
+    def spin(count: int, turns: float) -> list[Frame]:
+        out = []
+        for f in range(count):
+            row = []
+            for s in range(SLOTS):
+                r, g, b = colorsys.hsv_to_rgb((s / SLOTS + turns * f / max(count, 1)) % 1.0, 1.0, 1.0)
+                row.append((round(r * 255), round(g * 255), round(b * 255)))
+            out.append(_slots(row))
+        return out
+
+    def strobe(count: int) -> list[Frame]:
+        out, hue = [], rng.random()
+        for f in range(count):
+            if f % 6 == 0:
+                hue = (hue + 0.38) % 1.0
+            r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0 if f % 6 < 3 else 0.0)
+            out.append(_slots([(round(r * 255), round(g * 255), round(b * 255))] * SLOTS))
+        return out
+
+    # The nightly show at double speed: twice as long, every other frame.
+    fast_nightly = nightly(seconds=lengths[3] * 2 / FPS)[::2][:lengths[3]]
+    frames = (spin(lengths[0], 3) + boil(seconds=lengths[1] / FPS)[:lengths[1]]
+              + strobe(lengths[2]) + fast_nightly + spin(lengths[4], -4))
+    # The last tenth of a second: everything white, then the show lets go.
+    for f in range(max(0, n - FPS // 10), n):
+        frames[f] = [(255, 255, 255)] * WIDTH
+    return frames[:n]
+
+
 # What a display can be made of (displays/*.yaml, or a signal's "effect"). A
 # new animation is a function above and a line here; its keyword arguments are
 # then a display's settings.
@@ -269,6 +313,7 @@ EFFECTS = {
     "rainbow": rainbow,
     "boil": boil,
     "nightly": nightly,
+    "ramona": ramona,
 }
 
 

@@ -204,6 +204,12 @@
   #static { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none;
             image-rendering: pixelated; display: none; }
 
+  /* The Ramona button's show (brick_status/ramona.py): a chunky-pixel canvas over
+     everything, and the CRT cycling every hue. Only for the show's ten seconds. */
+  #ramona { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none;
+            image-rendering: pixelated; mix-blend-mode: screen; }
+  body.ramona .crt .glass { animation: ramona-hue 1.2s linear infinite; }
+  @keyframes ramona-hue { from { filter: hue-rotate(0deg) saturate(3); } to { filter: hue-rotate(360deg) saturate(3); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
 </head>
@@ -225,9 +231,10 @@
   <div class="panel" id="ls-panel"><h2>LAMP · SPEAKER</h2><div id="lamp"></div><div id="vol"></div></div>
   <div class="nodes panel" id="nodes-panel"><h2>NODES</h2></div>
 </main>
+<canvas id="ramona" hidden></canvas>
 <footer>
   <div class="pad" id="pad"></div>
-  <div class="hint"><b>LAMP</b> tap · 2×: scene · hold: night &nbsp; <b>1UP</b> 2×: check all<br>
+  <div class="hint"><b>LAMP</b> tap · 2×: scene · hold: night &nbsp; <b>1UP</b> RAMONA<br>
     <b>SIDE</b> sleep / wake &nbsp; <b>STICK</b> ← → screens</div>
 </footer>
 
@@ -241,8 +248,10 @@ const bySeverity = (a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.stat
 const worst = states => SEVERITY.find(s => states.includes(s)) || "ok";
 const WORD = { ok: "OK", warn: "WARN", fail: "FAIL", active: "RUN", unknown: "??" };
 
-// The six front-panel buttons (config.BUTTON_ACTIONS): screens on top; the bottom row is free.
-const PAD = [["overview", "HOME"], ["builds", "RECENT"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null, null];
+// The six front-panel buttons (config.BUTTON_ACTIONS): screens on top, the anomalies,
+// a free one, and the check button (config.KEY_CHECK, pressed twice).
+const PAD = [["overview", "HOME"], ["builds", "RECENT"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null,
+             ["check", "2× CHECK"]];
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
@@ -552,6 +561,7 @@ function setState(id, state) {
 }
 
 function render(s) {
+  if (s.ramona > 0) ramonaShow(s.ramona);
   const g = s.groups || {};
   document.body.classList.toggle("alarm", s.overall === "fail");
   const found = findAnomalies(s);
@@ -685,6 +695,64 @@ document.fonts.load('15px "VT323"').finally(() => {
   setInterval(poll, 1000);
   setInterval(pollVolume, 3000);
 });
+
+// The Ramona button's show: colour floods sweeping the screen, pixel fireworks
+// bursting over it, and RAMONA in the middle. Drawn at an eighth of the
+// screen's size and scaled up, and only while a show is on: the page asks
+// /api/state every second, and each answer with "ramona" > 0 sets the end.
+let ramonaEnd = 0, ramonaRunning = false;
+function ramonaShow(secondsLeft) {
+  ramonaEnd = performance.now() + secondsLeft * 1000;
+  document.body.classList.add("ramona");
+  if (ramonaRunning) return;
+  const canvas = document.getElementById("ramona");
+  canvas.hidden = false;
+  const w = canvas.width = Math.max(1, Math.round(innerWidth / 8));
+  const h = canvas.height = Math.max(1, Math.round(innerHeight / 8));
+  const ctx = canvas.getContext("2d");
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const sparks = [];
+  ramonaRunning = true;
+  const start = performance.now();
+  function frame(now) {
+    if (now >= ramonaEnd) {
+      ramonaRunning = false;
+      canvas.hidden = true;
+      document.body.classList.remove("ramona");
+      return;
+    }
+    const t = (now - start) / 1000;
+    // Colour floods: diagonal bands of the whole spectrum, sweeping.
+    for (let x = 0; x < w; x += 2) {
+      const hue = (x * 3 + t * (calm ? 30 : 240)) % 360;
+      ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.35)`;
+      ctx.fillRect(x, 0, 2, h);
+    }
+    // Fireworks: a new burst every few frames, sparks flying out and fading.
+    if (!calm && Math.random() < 0.25) {
+      const cx = Math.random() * w, cy = Math.random() * h * 0.7, hue = Math.random() * 360;
+      for (let i = 0; i < 28; i++) {
+        const a = (i / 28) * Math.PI * 2, v = 0.6 + Math.random() * 1.2;
+        sparks.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, hue });
+      }
+    }
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const p = sparks[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= 0.02;
+      if (p.life <= 0) { sparks.splice(i, 1); continue; }
+      ctx.fillStyle = `hsla(${p.hue}, 100%, ${50 + 50 * p.life}%, ${p.life})`;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    }
+    // Her name, big, changing colour.
+    ctx.font = `bold ${Math.round(h / 4)}px "VT323", monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = `hsl(${(t * 300) % 360}, 100%, 60%)`;
+    ctx.fillText("RAMONA", w / 2, h / 2);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
 </script>
 </body>
 </html>

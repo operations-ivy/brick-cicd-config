@@ -146,9 +146,9 @@ class HomeAssistant:
         return True, next((str(s.get("state", "")) for s in states
                            if isinstance(s, dict) and s.get("entity_id") == entity), "")
 
-    def read(self, entity: str) -> dict | None:
-        """The light's state for the board: on, brightness (%) and colour
-        temperature (K), or None when Home Assistant can't be asked."""
+    def state(self, entity: str) -> dict | None:
+        """The entity's whole state as Home Assistant has it ("state" and
+        "attributes"), or None when it can't be asked."""
         if not self.token:
             return None
         request = urllib.request.Request(f"{self.url}/api/states/{entity}",
@@ -158,6 +158,13 @@ class HomeAssistant:
                 data = json.loads(response.read() or b"{}")
         except (OSError, ValueError) as e:
             log.warning("lamp: couldn't read %s (%s)", entity, e)
+            return None
+        return data if isinstance(data, dict) else None
+
+    def read(self, entity: str) -> dict | None:
+        """The light's state for the board: on, brightness (%) and colour
+        temperature (K), or None when Home Assistant can't be asked."""
+        if (data := self.state(entity)) is None:
             return None
         attrs = data.get("attributes") or {}
         brightness = attrs.get("brightness")

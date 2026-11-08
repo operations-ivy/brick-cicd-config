@@ -93,6 +93,12 @@ class Plasma:
         stays put underneath; the display's own priority and time limit apply."""
         self._send({"pattern": pattern}, "board-button")
 
+    def ramona(self) -> None:
+        """The Ramona button's show (ramona.py), from its own sender so a
+        lamp or check answer can't cut it short. The display sets its ten
+        seconds; sending it again starts them again."""
+        self._send({"pattern": "ramona"}, "ramona")
+
     def off(self) -> None:
         self.show("off")
 

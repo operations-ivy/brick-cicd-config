@@ -157,6 +157,17 @@ class ShippedDisplaysTest(unittest.TestCase):
         self.assertEqual(self.errors, [])
         self.assertGreaterEqual(len({d.file for d in self.named.values()}), 3)
 
+    def test_the_ramona_show(self):
+        show = self.named["ramona"]
+        self.assertEqual(show.file, "board.yaml")
+        self.assertGreaterEqual(show.priority, self.named["off"].priority)  # over quiet hours too
+        self.assertEqual(show.ttl, 10)
+        frames = patterns.make("ramona", seconds=10.0)
+        self.assertEqual(len(frames), 10 * patterns.FPS)
+        self.assertTrue(all(len(f) == patterns.WIDTH for f in frames))
+        self.assertEqual(frames[-1], [(255, 255, 255)] * patterns.WIDTH)  # the white finish
+        self.assertGreater(len({f[0] for f in frames}), 50)  # it really is crazy
+
     def test_every_jenkins_kind_has_its_display(self):
         text = (JENKINS / "lib" / "plasma.groovy").read_text()
         kinds = re.findall(r"'(\w+)'", re.search(r"def kinds = \[(.*?)\]", text).group(1))
