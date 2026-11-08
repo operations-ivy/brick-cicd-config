@@ -958,8 +958,8 @@ class PartyTest(unittest.TestCase):
 
     def test_the_party_name_is_set_per_cabinet(self):
         self.assertEqual(Settings().party_name, "PARTY")
-        with mock.patch.dict(os.environ, {"BRICK_STATUS_PARTY_NAME": "  Zoe  "}):
-            self.assertEqual(Settings.from_env().party_name, "ZOE")
+        with mock.patch.dict(os.environ, {"BRICK_STATUS_PARTY_NAME": "  Disco  "}):
+            self.assertEqual(Settings.from_env().party_name, "DISCO")
         with mock.patch.dict(os.environ, {"BRICK_STATUS_PARTY_NAME": " "}):
             self.assertEqual(Settings.from_env().party_name, "PARTY")
 
