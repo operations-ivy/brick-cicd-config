@@ -783,8 +783,8 @@ class MetricsTest(unittest.TestCase):
 
     def test_button_names(self):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
-        self.assertEqual(button_name(BUTTON_KEYS[0]), "overview")
-        self.assertEqual(button_name(BUTTON_KEYS[5]), "button6")
+        self.assertEqual([button_name(k) for k in BUTTON_KEYS],
+                         ["overview", "builds", "cluster", "anomalies", "button5", "button6"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
@@ -2273,4 +2273,139 @@ class WifiWatchdogTest(unittest.TestCase):
         self.run_at(1700, 7, PING_FAILS="1")
         self.assertIn("systemctl restart NetworkManager", self.calls_made())
         self.assertEqual(self.metric("brick_wifi_watchdog_networkmanager_restarts_total"), 1)
+
+
+class LampReadTest(unittest.TestCase):
+    """lamp.HomeAssistant.read and LampWatch: the lamp's state for the board."""
+
+    def answer(self, body):
+        from unittest import mock
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(body).encode()
+        return mock.patch("urllib.request.urlopen", return_value=response)
+
+    def test_on_with_brightness_and_colour(self):
+        from brick_status import lamp
+        ha = lamp.HomeAssistant("http://ha", "token")
+        with self.answer({"state": "on", "attributes": {"brightness": 128, "color_temp_kelvin": 2700}}):
+            self.assertEqual(ha.read("light.lamp"), {"on": True, "brightness_pct": 50, "kelvin": 2700})
+
+    def test_off_has_no_brightness(self):
+        from brick_status import lamp
+        with self.answer({"state": "off", "attributes": {}}):
+            self.assertEqual(lamp.HomeAssistant("http://ha", "t").read("light.lamp"),
+                             {"on": False, "brightness_pct": None, "kelvin": None})
+
+    def test_unreachable_or_no_token_is_none(self):
+        from unittest import mock
+        from brick_status import lamp
+        self.assertIsNone(lamp.HomeAssistant("http://ha", "").read("light.lamp"))
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertIsNone(lamp.HomeAssistant("http://ha", "t").read("light.lamp"))
+
+    def test_watch_keeps_the_last_read(self):
+        from unittest import mock
+        from brick_status import lamp
+        ha = mock.Mock()
+        ha.read.return_value = {"on": True, "brightness_pct": 5, "kelvin": 2000}
+        watch = lamp.LampWatch(ha, "light.lamp")
+        self.assertIsNone(watch.get())
+        watch.refresh()
+        self.assertEqual(watch.get()["brightness_pct"], 5)
+        ha.read.assert_called_once_with("light.lamp")
+
+
+class RecentBuildsTest(unittest.TestCase):
+    """checks.recent_builds: the board's recent-builds screen (button 2)."""
+
+    NOW = 1_800_000_000.0
+
+    def jenkins(self, jobs=None, fails=False):
+        from unittest import mock
+        j = mock.Mock()
+        if fails:
+            j.jobs.side_effect = OSError("down")
+        else:
+            j.jobs.return_value = jobs
+        return j
+
+    def build(self, number, minutes_ago, result="SUCCESS", seconds=60, building=False, name=None):
+        return {"number": number, "result": None if building else result, "building": building,
+                "timestamp": (self.NOW - minutes_ago * 60) * 1000, "duration": seconds * 1000,
+                "displayName": name or f"#{number}", "description": None}
+
+    def test_newest_first_without_the_pollers(self):
+        jobs = [
+            {"name": "build-branches", "builds": [self.build(n, n) for n in range(1, 30)]},
+            {"name": "maintenance-refresh", "builds": [self.build(1, 2)]},
+            {"name": "build-image", "builds": [self.build(91, 300, name="#91 overwatch:0.8.7"), self.build(90, 900)]},
+            {"name": "check-all", "builds": [self.build(12, 60, result="FAILURE", seconds=362)]},
+        ]
+        recent = checks.recent_builds(self.jenkins(jobs), {"build-branches", "maintenance-refresh"}, now=self.NOW)
+        self.assertEqual([(r["job"], r["number"]) for r in recent],
+                         [("check-all", 12), ("build-image", 91), ("build-image", 90)])
+        self.assertEqual(recent[0]["state"], checks.FAIL)
+        self.assertTrue(recent[0]["what"].startswith("failed"), recent[0]["what"])
+        self.assertEqual(recent[1]["label"], "overwatch:0.8.7")
+
+    def test_at_most_fifteen(self):  # the page shows as many as fit
+        jobs = [{"name": f"job{i}", "builds": [self.build(1, i)]} for i in range(20)]
+        self.assertEqual(len(checks.recent_builds(self.jenkins(jobs), now=self.NOW)), 15)
+
+    def test_a_running_build_says_so(self):
+        jobs = [{"name": "test-all", "builds": [self.build(7, 3, building=True)]}]
+        r = checks.recent_builds(self.jenkins(jobs), now=self.NOW)[0]
+        self.assertEqual(r["state"], checks.ACTIVE)
+        self.assertIn("running", r["what"])
+        self.assertEqual(r["took"], "")
+
+    def test_hidden_jobs_come_from_board_yaml(self):
+        board = Path(self.enterContext(tempfile.TemporaryDirectory())) / "board.yaml"
+        board.write_text("hidden_jobs:\n  - build-branches\n  - maintenance-refresh\n")
+        self.assertEqual(checks.hidden_jobs(board), {"build-branches", "maintenance-refresh"})
+        self.assertEqual(checks.hidden_jobs("/nonexistent/board.yaml"), set())
+        # The checked-in file hides the two pollers.
+        self.assertTrue({"build-branches", "maintenance-refresh"} <= checks.hidden_jobs())
+
+    def test_jenkins_down_is_none(self):
+        self.assertIsNone(checks.recent_builds(self.jenkins(fails=True), now=self.NOW))
+
+
+class SinceTest(unittest.TestCase):
+    """since.py: how long each anomaly has been there, kept across restarts."""
+
+    def setUp(self):
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.file = self.dir / "anomalies-since.json"
+
+    def test_keys_match_the_anomalies_page(self):
+        from brick_status import since
+        summary = {"groups": {"cluster": {"checks": [{"name": "workloads", "state": "warn"},
+                                                       {"name": "brick420", "state": "ok"}]},
+                              "builds": {"checks": [{"name": "build-branches", "state": "fail"}]}}}
+        vitals = [{"node": "brick9000", "temp": 71.0, "disk": 65.0}, {"node": "brick2000", "temp": 50, "disk": 90}]
+        keys = since.anomaly_keys(summary, vitals, {"internet": False, "sshd": True}, "brick9000")
+        self.assertEqual(keys, {"cluster/workloads", "builds/build-branches", "brick9000/temp",
+                                "brick2000/disk", "internet"})
+
+    def test_first_seen_is_kept_and_cleared(self):
+        from brick_status import since
+        clock = since.Since(self.file)
+        self.assertEqual(clock.observe({"a"}, 100.0), {"a": 100.0})
+        self.assertEqual(clock.observe({"a", "b"}, 200.0), {"a": 100.0, "b": 200.0})
+        self.assertEqual(clock.observe({"b"}, 300.0), {"b": 200.0})  # a cleared: forgotten
+        self.assertEqual(clock.observe({"a", "b"}, 400.0), {"a": 400.0, "b": 200.0})  # a again: a new clock
+
+    def test_a_restart_keeps_the_clock(self):
+        from brick_status import since
+        since.Since(self.file).observe({"cluster/workloads"}, 1000.0)
+        self.assertEqual(since.Since(self.file).observe({"cluster/workloads"}, 90000.0),
+                         {"cluster/workloads": 1000.0})
+
+    def test_a_bad_file_starts_over(self):
+        from brick_status import since
+        for junk in ("not json", "[1, 2]"):  # corrupt, and JSON that isn't a dict
+            with self.subTest(junk):
+                self.file.write_text(junk)
+                self.assertEqual(since.Since(self.file).observe({"x"}, 5.0), {"x": 5.0})
 

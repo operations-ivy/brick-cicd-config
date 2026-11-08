@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, units, web
+from . import check, checks, host, lamp, lights, notify, since, units, web
 from .board import ACTIVE, QUIET, Board
-from .config import BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
+from .config import BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")
@@ -58,10 +58,12 @@ def ntfy_from(settings: Settings) -> notify.Ntfy | None:
 def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     prom = checks.Prometheus(settings.prometheus_url)
     jenkins = checks.Jenkins(settings.jenkins_url, settings.jenkins_user, settings.jenkins_password)
-    local = host.LocalVitals(socket.gethostname())
+    hostname = socket.gethostname()
+    local = host.LocalVitals(hostname)
     state = Path(settings.notify_dir)
     pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
     ntfy = ntfy_from(settings)
+    clock = since.Since(state / "anomalies-since.json")
     while True:
         started = time.monotonic()
         try:
@@ -73,9 +75,15 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             vitals.append(local.read())
             internet = host.internet_up()
             summary = checks.summarize(checks.collect(prom, jenkins, internet)
-                                       + units.board_checks(prom, socket.gethostname()))
+                                       + units.board_checks(prom, hostname))
+            hidden = checks.hidden_jobs(settings.board_file)
+            summary["recent"] = checks.recent_builds(jenkins, hidden)
+            summary["hidden_jobs"] = sorted(hidden)
             sshd = host.sshd_running()
-            status.set(summary, {"sshd": sshd, "internet": internet}, vitals)
+            host_state = {"sshd": sshd, "internet": internet}
+            summary["since"] = clock.observe(
+                since.anomaly_keys(summary, vitals, host_state, hostname), time.time())
+            status.set(summary, host_state, vitals)
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
                           lambda problem: notify.facts(problem, summary, vitals))
@@ -104,7 +112,7 @@ def button_name(code: int) -> str:
     """A cabinet key as a metric label: the view a button picks, or what it does."""
     if code in BUTTON_KEYS:
         i = BUTTON_KEYS.index(code)
-        return VIEWS[i] if i < len(VIEWS) else f"button{i + 1}"
+        return BUTTON_ACTIONS[i] if i < len(BUTTON_ACTIONS) else f"button{i + 1}"
     return {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_LEFT: "left",
             KEY_RIGHT: "right"}.get(code, "other")
 
@@ -143,16 +151,20 @@ def main() -> None:
         started = check.start_job(settings.jenkins_url, settings.check_job, settings.webhook_secret_file)
         plasma.answer("check-started" if started else "check-unreachable")
 
+    lamp_config = lamp.LampConfig.load(settings.lamp_file or lamp.DEFAULT_FILE)
+    home_assistant = lamp.HomeAssistant(settings.ha_url, settings.ha_token)
+    lamp_watch = lamp.LampWatch(home_assistant, lamp_config.entity)
+
     def lamp_answered(gesture: str, answer: str) -> None:
         bm.LAMP.inc(gesture=gesture, result="unreachable" if answer == lamp.UNREACHABLE else "ok")
         # The lamp works in quiet hours too (that's when the night light is
         # for), but the button lights stay dark then.
         if board.mode(time.time()) != QUIET:
             plasma.answer(answer)
+        lamp_watch.poke()  # the board shows the new state within a couple of seconds
 
-    lamp_config = lamp.LampConfig.load(settings.lamp_file or lamp.DEFAULT_FILE)
     lamp_button = lamp.LampButton(
-        lamp.Lamp(lamp_config, lamp.HomeAssistant(settings.ha_url, settings.ha_token)),
+        lamp.Lamp(lamp_config, home_assistant),
         lamp.Gestures(lamp_config.double_seconds, lamp_config.long_seconds), lamp_answered)
 
     def on_release(code: int) -> None:
@@ -188,7 +200,11 @@ def main() -> None:
                 else:
                     plasma.answer("check-armed")
         elif code in BUTTON_KEYS:
-            board.press_view(BUTTON_KEYS.index(code), now)
+            i = BUTTON_KEYS.index(code)
+            if i < len(BUTTON_ACTIONS):
+                board.press_view(VIEWS.index(BUTTON_ACTIONS[i]), now)
+            else:  # a free button: input, nothing more
+                board.wake(now)
         elif code in (KEY_LEFT, KEY_RIGHT):
             board.step_view(1 if code == KEY_RIGHT else -1, now)
         else:  # any other cabinet key counts as input (ignored while it's off)
@@ -200,7 +216,8 @@ def main() -> None:
                      args=(settings.input_device_name, on_key, on_release, {KEY_LAMP}),
                      daemon=True).start()
     threading.Thread(target=lamp_button.run, daemon=True).start()
-    threading.Thread(target=web.serve, args=(settings, board, status),
+    threading.Thread(target=lamp_watch.run, daemon=True).start()
+    threading.Thread(target=web.serve, args=(settings, board, status, lamp_watch),
                      daemon=True).start()
     log.info("brick-status up: prometheus=%s board=http://%s:%d",
              settings.prometheus_url, settings.http_host, settings.http_port)

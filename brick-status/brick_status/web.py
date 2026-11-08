@@ -10,11 +10,15 @@ import time
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
 from . import board_metrics as bm
 from . import lights, matrix, volume
 from .metrics import CONTENT_TYPE
+
+if TYPE_CHECKING:
+    from .lamp import LampWatch
 
 STATIC = (Path(__file__).parent / "static").resolve()
 # Changes every time brick-status starts, e.g. after a deploy; the page
@@ -54,7 +58,7 @@ def crt_playlist(settings) -> dict:
             "activity": entry("activity"), "activity_log": entry("activity-log")}
 
 
-def serve(settings, board, status) -> None:
+def serve(settings, board, status, lamp_watch: "LampWatch | None" = None) -> None:
     crt = crt_playlist(settings)
     activity = lights.Activity(settings.plasma_url)
 
@@ -76,6 +80,7 @@ def serve(settings, board, status) -> None:
                     "now": now,
                     "crt": crt,
                     "activity": activity.running(),
+                    "lamp": lamp_watch.get() if lamp_watch is not None else None,
                     **status.get(),
                 }).encode()
                 self._send(200, "application/json", body)

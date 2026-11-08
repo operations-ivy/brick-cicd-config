@@ -11,10 +11,15 @@ from .board import QuietSchedule
 DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16:00, "
                  "Wed 00:00-Wed 16:00, Thu 00:00-Thu 16:00, Fri 00:00-Fri 16:00")
 
-# The board views, in button order (the sixth button is free).
-# wigle-sync's checks show in the Services view (its group is still collected:
-# its page, the "uploading" lights and the CRT label read it).
-VIEWS = ["overview", "builds", "cluster", "argocd", "services"]
+# The board's screens (the redesign, brick-cicd-config#45): home (everything on
+# one screen), the recent builds, the cluster's lists (wigle-sync's checks among
+# them), and the anomalies.
+VIEWS = ["overview", "builds", "cluster", "anomalies"]
+# What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
+# a screen, and the first of the bottom row the anomalies' own page (the user,
+# 2026-11-07). The other two are free (not the volume: the dial does that); a
+# press there only wakes the board.
+BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest are free
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the
@@ -72,6 +77,7 @@ class Settings:
     ha_url: str = "https://homeassistant.brick.nozdormu.cloud"
     ha_token: str = ""
     lamp_file: str = ""
+    board_file: str = ""  # board.yaml: hidden_jobs (checks.hidden_jobs)
     webhook_secret_file: str = os.path.expanduser("~/.config/brick-jenkins/secrets/webhook_secret")
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
@@ -133,6 +139,7 @@ class Settings:
         s.ha_url = env("BRICK_STATUS_HA_URL", s.ha_url).rstrip("/")
         s.ha_token = env("BRICK_STATUS_HA_TOKEN", s.ha_token)
         s.lamp_file = env("BRICK_STATUS_LAMP_FILE", s.lamp_file)
+        s.board_file = env("BRICK_STATUS_BOARD_FILE", s.board_file)
         s.webhook_secret_file = env("BRICK_STATUS_WEBHOOK_SECRET_FILE", s.webhook_secret_file)
         if v := env("BRICK_STATUS_SLEEP_MORNING"):
             s.sleep_morning = time.fromisoformat(v)
