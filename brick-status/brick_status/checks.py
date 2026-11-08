@@ -6,17 +6,23 @@ build or a wigle-sync upload), or unknown (no data).
 
 import base64
 import json
+import logging
 import re
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
+
+import yaml
 
 OK, WARN, FAIL, ACTIVE, UNKNOWN = "ok", "warn", "fail", "active", "unknown"
 # Worst first, for rolling a group up into one state.
 SEVERITY = [FAIL, WARN, UNKNOWN, ACTIVE, OK]
 
+
+log = logging.getLogger(__name__)
 # A finished Jenkins build's result, as the board shows it.
 JENKINS_RESULTS = {"SUCCESS": (OK, "passed"), "UNSTABLE": (WARN, "unstable"),
                    "FAILURE": (FAIL, "failed"), "ABORTED": (WARN, "aborted"),
@@ -170,8 +176,11 @@ class Jenkins:
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         self.headers = {"Authorization": f"Basic {token}"}
 
-    def jobs(self) -> list[dict]:
-        qs = urllib.parse.urlencode({"tree": self.TREE})
+    # Each job's last ten builds, for the board's recent-builds screen.
+    RECENT_TREE = "jobs[name,builds[number,result,timestamp,duration,building,displayName,description]{0,10}]"
+
+    def jobs(self, tree: str = TREE) -> list[dict]:
+        qs = urllib.parse.urlencode({"tree": tree})
         req = urllib.request.Request(f"{self.url}/api/json?{qs}", headers=self.headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.load(resp)["jobs"]
@@ -196,6 +205,48 @@ def build_label(display_name: str | None) -> str:
 
 # Run every couple of minutes to look for work: not a build to light up for.
 POLLERS = {"build-branches"}
+
+
+BOARD_FILE = Path(__file__).resolve().parent.parent / "board.yaml"
+
+
+def hidden_jobs(path: str | Path = "") -> set[str]:
+    """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
+    try:
+        data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}
+    except (OSError, yaml.YAMLError) as e:
+        log.warning("board file: %s", e)
+        return set()
+    return {str(j) for j in data.get("hidden_jobs") or []}
+
+
+def recent_builds(jenkins: Jenkins, hidden: set[str] = frozenset(), limit: int = 9,
+                  now: float | None = None) -> list[dict] | None:
+    """The newest `limit` builds of every job but the hidden ones, newest first:
+    job, number, state, what happened and when, how long it took. None when
+    Jenkins can't be asked (the builds group already says so)."""
+    now = time.time() if now is None else now
+    try:
+        jobs = jenkins.jobs(Jenkins.RECENT_TREE)
+    except Exception:
+        return None
+    builds = [(job["name"], b) for job in jobs if job["name"] not in hidden for b in job.get("builds") or []]
+    builds.sort(key=lambda jb: jb[1].get("timestamp", 0), reverse=True)
+    out = []
+    for name, b in builds[:limit]:
+        started = b.get("timestamp", 0) / 1000
+        if b.get("building"):
+            state, what = ACTIVE, f"running {_ago(now - started)}"
+            stage = plasma_stage(b.get("description"))
+            if stage:
+                what += f", {stage}"
+        else:
+            state, word = JENKINS_RESULTS.get(b.get("result"), (UNKNOWN, str(b.get("result")).lower()))
+            what = f"{word} {_ago(now - started)} ago"
+        out.append({"job": name, "number": b.get("number"), "state": state, "what": what,
+                    "took": "" if b.get("building") else _ago((b.get("duration") or 0) / 1000),
+                    "label": build_label(b.get("displayName"))})
+    return out
 
 
 def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:

@@ -1,0 +1,10 @@
+# The status board (brick_status), as YAML (BRICK_STATUS_BOARD_FILE to use
+# another file). Read on every poll, so an edit shows within a minute.
+
+# Jenkins jobs the board doesn't show: not in the recent builds (button 2) nor
+# in Home's housekeeping count. They run on a timer to look for work and would
+# fill the lists (build-branches runs every 2 minutes). A failure of one still
+# shows under Anomalies, so a stuck poller isn't invisible.
+hidden_jobs:
+  - build-branches
+  - maintenance-refresh

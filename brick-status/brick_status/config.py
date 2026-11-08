@@ -78,6 +78,7 @@ class Settings:
     ha_url: str = "https://homeassistant.brick.nozdormu.cloud"
     ha_token: str = ""
     lamp_file: str = ""
+    board_file: str = ""  # board.yaml: hidden_jobs (checks.hidden_jobs)
     webhook_secret_file: str = os.path.expanduser("~/.config/brick-jenkins/secrets/webhook_secret")
     # Plasma LED slot (0-9, 4 LEDs each) for each of the six buttons, in
     # BUTTON_KEYS order. brick9000's chain runs right to left along the top
@@ -139,6 +140,7 @@ class Settings:
         s.ha_url = env("BRICK_STATUS_HA_URL", s.ha_url).rstrip("/")
         s.ha_token = env("BRICK_STATUS_HA_TOKEN", s.ha_token)
         s.lamp_file = env("BRICK_STATUS_LAMP_FILE", s.lamp_file)
+        s.board_file = env("BRICK_STATUS_BOARD_FILE", s.board_file)
         s.webhook_secret_file = env("BRICK_STATUS_WEBHOOK_SECRET_FILE", s.webhook_secret_file)
         if v := env("BRICK_STATUS_SLEEP_MORNING"):
             s.sleep_morning = time.fromisoformat(v)

@@ -51,11 +51,6 @@
     animation: roll 9s linear infinite;
   }
   @keyframes roll { from { top: -20vh; } to { top: 110vh; } }
-  /* And on top of it, now and then, a scan line: one thin bright sweep (scanLine()). */
-  #scan { position: fixed; left: 0; right: 0; top: -2vh; height: 2px; z-index: 12; pointer-events: none; opacity: 0;
-          background: rgba(140, 250, 255, 0.55); box-shadow: 0 0 0.5em 0.15em rgba(0, 234, 255, 0.35); }
-  #scan.go { animation: sweep 1.6s linear; }
-  @keyframes sweep { 0% { top: -2vh; opacity: 1; } 100% { top: 102vh; opacity: 0.6; } }
 
   .ok { --s: var(--green); } .warn { --s: var(--amber); } .fail { --s: var(--red); }
   .active { --s: var(--cyan); } .unknown { --s: var(--slate); }
@@ -198,7 +193,6 @@
 </style>
 </head>
 <body>
-<div id="scan"></div>
 <header>
   <span class="logo">BRICK<b>//</b>NET</span>
   <span class="summary" id="summary"></span>
@@ -233,7 +227,7 @@ const worst = states => SEVERITY.find(s => states.includes(s)) || "ok";
 const WORD = { ok: "OK", warn: "WARN", fail: "FAIL", active: "RUN", unknown: "??" };
 
 // The six front-panel buttons (config.BUTTON_ACTIONS): screens on top; the bottom row is free.
-const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null, null];
+const PAD = [["overview", "HOME"], ["builds", "RECENT"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null, null];
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
@@ -244,9 +238,9 @@ const item = (state, name, what, extra = "") =>
   `<div class="item ${state}"><span class="led"></span><span class="name">${esc(name)}${extra}</span>
    <span class="what">${esc(what)}</span></div>`;
 
-function pipeline(builds, argo) {
+function pipeline(builds, argo, hidden) {
   if (!builds) return `<div class="note">no data from Jenkins</div>`;
-  const checks = builds.checks;
+  const checks = builds.checks.filter(c => !hidden.includes(c.name));
   const by = Object.fromEntries(checks.map(c => [c.name, c]));
   const tests = checks.filter(c => c.name.startsWith("test-") && c.name !== "test-all");
   const rows = [];
@@ -297,7 +291,18 @@ function anomalyPage(list) {
     <span class="where">${esc(a.name)}</span><span class="detail">${esc(a.what)}</span></div>`).join("");
 }
 
-// The detail screens (buttons 2 and 3): every check of their groups.
+// Button 2: the newest builds of every job board.yaml doesn't hide, newest first.
+function recentPage(recent) {
+  if (!recent) return `<div class="note">no data from Jenkins</div>`;
+  if (!recent.length) return `<div class="note">no builds yet</div>`;
+  return `<div class="list">${recent.map(b => {
+    const label = b.label ? ` <span class="small">${esc(b.label)}</span>` : "";
+    const took = b.took ? ` · ${b.took}` : "";
+    return item(b.state, `#${b.number} ${b.job}`, `${b.what}${took}`, label);
+  }).join("")}</div>`;
+}
+
+// The cluster screen (button 3): every check of its groups.
 const short = d => String(d).replace(/^(passed|succeeded),? /, "").replace(/ ago$/, "");
 function detail(s, groups) {
   return `<div class="list compact">${groups.map(([title, name]) => {
@@ -511,16 +516,18 @@ function render(s) {
     setHTML("main-list", anomalyPage(found));
     setState("main-panel", found.length ? worst(found.map(a => a.state)) : "ok");
   } else if (view === "builds") {
-    document.getElementById("main-title").textContent = "PIPELINE // ALL JOBS";
-    setHTML("main-list", detail(s, [["JENKINS", "builds"]]));
-    setState("main-panel", g.builds?.state || "unknown");
+    document.getElementById("main-title").textContent = "RECENT BUILDS";
+    setHTML("main-list", recentPage(s.recent));
+    // The frame follows each job's current state, not old history: a failure a
+    // day ago that has passed since isn't red.
+    setState("main-panel", s.recent ? (g.builds?.state || "unknown") : "unknown");
   } else if (view === "cluster") {
     document.getElementById("main-title").textContent = "CLUSTER";
     setHTML("main-list", detail(s, [["NODES & WORKLOADS", "cluster"], ["ARGO CD", "argocd"], ["UNITS", "services"], ["WIGLE", "wigle"]]));
     setState("main-panel", worst(["cluster", "argocd", "services", "wigle"].map(n => g[n]?.state || "unknown")));
   } else {
     document.getElementById("main-title").textContent = "PIPELINE";
-    setHTML("main-list", pipeline(g.builds, g.argocd));
+    setHTML("main-list", pipeline(g.builds, g.argocd, s.hidden_jobs || []));
     setState("main-panel", worst([g.builds?.state || "unknown", g.argocd?.state || "ok"]));
   }
   setHTML("nodes-panel", nodes(s.vitals));
@@ -575,18 +582,7 @@ async function poll() {
   }
 }
 
-// Every 30 to 120 seconds, at random, one sweep (the user, 2026-11-07: rarer than the
-// band). Restarting the animation needs a reflow.
-function scanLine() {
-  const el = document.getElementById("scan");
-  el.classList.remove("go");
-  void el.offsetWidth;
-  el.classList.add("go");
-  setTimeout(scanLine, 30000 + Math.random() * 90000);
-}
-
 document.fonts.load('15px "VT323"').finally(() => {
-  setTimeout(scanLine, 5000 + Math.random() * 25000);
   tick(); poll(); pollVolume();
   setInterval(tick, 1000);
   setInterval(poll, 1000);

@@ -2314,3 +2314,61 @@ class LampReadTest(unittest.TestCase):
         self.assertEqual(watch.get()["brightness_pct"], 5)
         ha.read.assert_called_once_with("light.lamp")
 
+
+class RecentBuildsTest(unittest.TestCase):
+    """checks.recent_builds: the board's recent-builds screen (button 2)."""
+
+    NOW = 1_800_000_000.0
+
+    def jenkins(self, jobs=None, fails=False):
+        from unittest import mock
+        j = mock.Mock()
+        if fails:
+            j.jobs.side_effect = OSError("down")
+        else:
+            j.jobs.return_value = jobs
+        return j
+
+    def build(self, number, minutes_ago, result="SUCCESS", seconds=60, building=False, name=None):
+        return {"number": number, "result": None if building else result, "building": building,
+                "timestamp": (self.NOW - minutes_ago * 60) * 1000, "duration": seconds * 1000,
+                "displayName": name or f"#{number}", "description": None}
+
+    def test_newest_first_without_the_pollers(self):
+        jobs = [
+            {"name": "build-branches", "builds": [self.build(n, n) for n in range(1, 30)]},
+            {"name": "maintenance-refresh", "builds": [self.build(1, 2)]},
+            {"name": "build-image", "builds": [self.build(91, 300, name="#91 overwatch:0.8.7"), self.build(90, 900)]},
+            {"name": "check-all", "builds": [self.build(12, 60, result="FAILURE", seconds=362)]},
+        ]
+        recent = checks.recent_builds(self.jenkins(jobs), {"build-branches", "maintenance-refresh"}, now=self.NOW)
+        self.assertEqual([(r["job"], r["number"]) for r in recent],
+                         [("check-all", 12), ("build-image", 91), ("build-image", 90)])
+        self.assertEqual(recent[0]["state"], checks.FAIL)
+        self.assertTrue(recent[0]["what"].startswith("failed"), recent[0]["what"])
+        self.assertEqual(recent[1]["label"], "overwatch:0.8.7")
+
+    def test_at_most_nine(self):
+        jobs = [{"name": f"job{i}", "builds": [self.build(1, i)]} for i in range(20)]
+        self.assertEqual(len(checks.recent_builds(self.jenkins(jobs), now=self.NOW)), 9)
+
+    def test_a_running_build_says_so(self):
+        jobs = [{"name": "test-all", "builds": [self.build(7, 3, building=True)]}]
+        r = checks.recent_builds(self.jenkins(jobs), now=self.NOW)[0]
+        self.assertEqual(r["state"], checks.ACTIVE)
+        self.assertIn("running", r["what"])
+        self.assertEqual(r["took"], "")
+
+    def test_hidden_jobs_come_from_board_yaml(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
+            f.write("hidden_jobs:\n  - build-branches\n  - maintenance-refresh\n")
+            f.flush()
+            self.assertEqual(checks.hidden_jobs(f.name), {"build-branches", "maintenance-refresh"})
+        self.assertEqual(checks.hidden_jobs("/nonexistent/board.yaml"), set())
+        # The checked-in file hides the two pollers.
+        self.assertTrue({"build-branches", "maintenance-refresh"} <= checks.hidden_jobs())
+
+    def test_jenkins_down_is_none(self):
+        self.assertIsNone(checks.recent_builds(self.jenkins(fails=True), now=self.NOW))
+
