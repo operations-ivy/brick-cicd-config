@@ -44,12 +44,18 @@
     background: repeating-linear-gradient(to bottom, rgba(0,0,0,0.28) 0 1px, transparent 1px 3px),
                 radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.6) 100%);
   }
+  /* The faint band, rolling down every 9 s, under everything. */
   body::before {
     content: ""; position: fixed; left: 0; right: 0; height: 18vh; z-index: 11; pointer-events: none;
     background: linear-gradient(to bottom, transparent, rgba(0,234,255,0.035), transparent);
     animation: roll 9s linear infinite;
   }
   @keyframes roll { from { top: -20vh; } to { top: 110vh; } }
+  /* And on top of it, now and then, a scan line: one thin bright sweep (scanLine()). */
+  #scan { position: fixed; left: 0; right: 0; top: -2vh; height: 2px; z-index: 12; pointer-events: none; opacity: 0;
+          background: rgba(140, 250, 255, 0.55); box-shadow: 0 0 0.5em 0.15em rgba(0, 234, 255, 0.35); }
+  #scan.go { animation: sweep 1.6s linear; }
+  @keyframes sweep { 0% { top: -2vh; opacity: 1; } 100% { top: 102vh; opacity: 0.6; } }
 
   .ok { --s: var(--green); } .warn { --s: var(--amber); } .fail { --s: var(--red); }
   .active { --s: var(--cyan); } .unknown { --s: var(--slate); }
@@ -75,7 +81,7 @@
   .clock { font-size: 1.35em; color: var(--magenta); text-shadow: 0 0 0.3em var(--magenta); }
 
   main { min-height: 0; padding: 0.55em 0.8em; display: grid; gap: 0.55em;
-         grid-template-columns: 21vw minmax(0, 1fr) minmax(0, 1.3fr); grid-template-rows: minmax(0, 1fr) auto; }
+         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; }
 
   /* Panels: a pixel frame with bracket corners and a tab for the title. */
   .panel { position: relative; background: var(--panel); border: 2px solid var(--edge); padding: 1.05em 0.6em 0.45em;
@@ -87,10 +93,18 @@
                 color: var(--void); background: var(--s, var(--cyan)); padding: 0 0.35em; line-height: 1.05; }
   .panel.fail { animation: alarm 1.1s steps(2, jump-none) infinite; }
   @keyframes alarm { 50% { border-color: var(--red); } }
-  .col { display: grid; gap: 0.55em; min-height: 0; }
-  .mid { grid-template-rows: auto auto minmax(0, 1fr); }
-  .right { grid-template-rows: minmax(0, 1fr) auto; }
-  .right.detail { grid-template-rows: minmax(0, 1fr); }
+  /* The CRT and the pipeline: twin boxes across the top (the user, 2026-11-07). */
+  #main-panel { grid-row: 1; grid-column: 2; }
+  #ls-panel { grid-row: 2; grid-column: 1; display: grid; gap: 0.15em; align-content: center; padding-bottom: 0.3em; }
+  #anomaly-panel { grid-row: 2; grid-column: 2; }
+  /* The detail screens fill the pipeline's box in two columns. */
+  body.detail #main-panel { grid-row: 1 / span 2; }
+  body.detail #anomaly-panel { display: none; }
+  .list.compact { display: block; columns: 2; column-gap: 1em; }
+  .list.compact .item, .list.compact .heading { break-inside: avoid; }
+  .list.compact .item .name { font-size: 0.82em; }
+  .list.compact .item .what { font-size: 0.78em; max-width: 7em; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 0.8em; color: var(--dim); letter-spacing: 0.08em; min-width: 2.6em; }
 
   /* Segment bars: the pixel meter used by the lamp, the speaker and the nodes. */
   .bar { display: grid; grid-template-columns: repeat(var(--n, 10), 1fr); gap: 0.12em; height: 0.75em; }
@@ -98,28 +112,27 @@
   .bar i.on { background: var(--s); box-shadow: 0 0 0.3em var(--s); }
 
   /* The lamp: the board's most pressed button (69 presses a week). */
-  /* Lamp and speaker: one line each (the user, 2026-11-07: half the size). */
-  #lamp-panel, #vol-panel { padding-bottom: 0.3em; }
-  /* No picture: the bar glows in the lamp's own colour (warm amber to cool white). */
-  .lamp { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
+  /* Lamp and speaker: one tile, a line each (the user, 2026-11-07). No picture:
+     the lamp's bar glows in its own colour (warm amber to cool white). */
+  .lamp { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
   .big { font-size: 1.1em; line-height: 1; color: var(--s); white-space: nowrap; }
   #lamp .bar, #vol .bar { height: 0.45em; }
   .small { font-size: 0.78em; color: var(--dim); }
 
   /* The speaker: the volume page is the most used page after Prometheus. */
-  .vol { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
+  .vol { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 0.5em; align-items: center; }
   .vol.muted .big { animation: blink 1s steps(2, jump-none) infinite; }
   .keys { display: flex; gap: 0.5em; font-size: 0.78em; color: var(--dim); }
   .keys b { color: var(--cyan); font-weight: 400; border: 1px solid var(--edge); padding: 0 0.25em; }
 
   /* Lists: the pipeline, anomalies, and the detail screens. */
   .list { display: grid; gap: 0.08em; align-content: start; }
-  .item { display: grid; grid-template-columns: 0.8em minmax(0, 1fr) auto; gap: 0.45em; align-items: center; }
+  .item { display: grid; grid-template-columns: 0.8em minmax(0, 1fr) auto; gap: 0.45em; align-items: center; line-height: 1.1; }
   .item .led { width: 0.6em; height: 0.6em; background: var(--s); box-shadow: 0 0 0.35em var(--s); }
   .item.fail .led, .item.fail .what { animation: blink 0.9s steps(2, jump-none) infinite; }
   .item.active .led { animation: pulse 1.2s ease-in-out infinite; }
-  .item .name { font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .item .what { font-size: 0.95em; color: var(--s); white-space: nowrap; }
+  .item .name { font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .what { font-size: 0.85em; color: var(--s); white-space: nowrap; }
   .item.ok .what { color: var(--dim); }
   .pips { display: inline-flex; gap: 0.12em; margin-left: 0.4em; vertical-align: middle; }
   .pips i { width: 0.45em; height: 0.45em; background: var(--s); }
@@ -148,15 +161,21 @@
   .crt, .crt * { cursor: none !important; }
 
   /* The nodes: a strip along the bottom, smaller than before (#45). */
-  .nodes { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  .nodes { grid-column: 1 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
            gap: 0.9em; padding: 0.95em 0.6em 0.35em; --s: var(--cyan); }
   .node { display: grid; grid-template-columns: auto 1fr auto; gap: 0.05em 0.35em; align-items: center; font-size: 0.85em; min-width: 0; }
-  .node .host { grid-column: 1 / -1; font-size: 1.15em; color: var(--s); white-space: nowrap; }
+  .node .host { grid-column: 1 / -1; font-size: 1.15em; color: var(--cyan); white-space: nowrap; }
   .node .host::before { content: "> "; color: var(--magenta); }
   .node .k { color: var(--dim); }
   .node .v { color: var(--dim); text-align: right; min-width: 2.6em; }
   .node .bar { --n: 8; height: 0.5em; }
-  .node.warn .host, .node.fail .host { animation: blink 1s steps(2, jump-none) infinite; }
+  /* Only the reading that's off flashes, never the host (the user, 2026-11-07). */
+  .node .v.warn { color: var(--amber); } .node .v.fail { color: var(--red); }
+  .node .bar.fail, .node .v.fail { animation: blink 1s steps(2, jump-none) infinite; }
+  /* Disk first and brighter: the reading the user watches most. */
+  .node .k.dsk, .node .v.dsk { color: var(--text); }
+  .node .v.dsk.warn { color: var(--amber); } .node .v.dsk.fail { color: var(--red); }
+  .node .bar.dsk { height: 0.7em; }
 
   /* Footer: the six buttons and the three around the cabinet. */
   footer { display: flex; align-items: center; gap: 1.2em; padding: 0.2em 0.8em 0.3em; border-top: 2px solid var(--edge);
@@ -174,6 +193,7 @@
 </style>
 </head>
 <body>
+<div id="scan"></div>
 <header>
   <span class="logo">BRICK<b>//</b>NET</span>
   <span class="summary" id="summary"></span>
@@ -187,15 +207,9 @@
 </header>
 <main>
   <div class="crt panel" id="crt"><h2>CRT</h2><div class="glass"><div id="term"></div><div id="term-log"></div></div><div class="label" id="crt-label"></div></div>
-  <div class="col mid">
-    <div class="panel" id="lamp-panel"><h2>LAMP</h2><div id="lamp"></div></div>
-    <div class="panel" id="vol-panel"><h2>SPEAKER</h2><div id="vol"></div></div>
-    <div class="panel" id="deploy-panel"><h2>LAST DEPLOY</h2><div id="deploy"></div></div>
-  </div>
-  <div class="col right" id="right">
-    <div class="panel" id="main-panel"><h2 id="main-title">PIPELINE</h2><div id="main-list"></div></div>
-    <div class="panel" id="anomaly-panel"><h2>ANOMALIES</h2><div id="anomalies"></div></div>
-  </div>
+  <div class="panel" id="main-panel"><h2 id="main-title">PIPELINE</h2><div id="main-list"></div></div>
+  <div class="panel" id="ls-panel"><h2>LAMP · SPEAKER</h2><div id="lamp"></div><div id="vol"></div></div>
+  <div class="panel" id="anomaly-panel"><h2>ANOMALIES</h2><div id="anomalies"></div></div>
   <div class="nodes panel" id="nodes-panel"><h2>NODES</h2></div>
 </main>
 <footer>
@@ -219,14 +233,14 @@ const PAD = [["overview", "HOME"], ["builds", "PIPELINE"], ["cluster", "CLUSTER"
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
-const WORK = ["build-image", "check-all", "verify-images", "deploy-brick9000", "deploy-brick1982",
-              "prune-images", "wigle-sync-now", "chuck-importer"];
+// prune-images (nightly) and chuck-importer (monthly at most) count as housekeeping too.
+const WORK = ["build-image", "check-all", "verify-images", "deploy-brick9000", "deploy-brick1982", "wigle-sync-now"];
 const segs = (n, lit) => Array.from({ length: n }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("");
 const item = (state, name, what, extra = "") =>
   `<div class="item ${state}"><span class="led"></span><span class="name">${esc(name)}${extra}</span>
    <span class="what">${esc(what)}</span></div>`;
 
-function pipeline(builds) {
+function pipeline(builds, argo) {
   if (!builds) return `<div class="note">no data from Jenkins</div>`;
   const checks = builds.checks;
   const by = Object.fromEntries(checks.map(c => [c.name, c]));
@@ -241,6 +255,13 @@ function pipeline(builds) {
     const passing = tests.filter(t => t.state === "ok").length;
     const all = by["test-all"];
     rows.push(item(st, "tests", `${passing}/${tests.length} · ${all ? all.detail : ""}`, pips));
+  }
+  if (argo) {
+    const apps = argo.checks.find(c => c.name === "apps");
+    const synced = argo.checks.find(c => c.name.startsWith("synced "));
+    const what = [synced && `${synced.name.replace(/^synced /, "")} ${synced.detail.replace(/^succeeded, /, "")}`,
+                  apps && `${apps.detail.split(" ")[0]} apps`].filter(Boolean).join(" · ");
+    rows.push(item(argo.state, "argo cd", what));
   }
   const chores = checks.filter(c => !WORK.includes(c.name) && !c.name.startsWith("test-"));
   const choreState = worst(chores.map(c => c.state));
@@ -263,14 +284,17 @@ function anomalies(s) {
     if (d >= 85) out.push({ state: d >= 95 ? "fail" : "warn", name: `${n.node}/disk`, what: `${Math.round(d)}%` });
   }
   if (!out.length) return `<div class="clear">&gt; all clear</div>`;
-  return `<div class="list">${out.sort(bySeverity).slice(0, 7).map(a => item(a.state, a.name, a.what)).join("")}</div>`;
+  const shown = out.sort(bySeverity).slice(0, 3).map(a => item(a.state, a.name, a.what)).join("");
+  const more = out.length > 3 ? `<div class="note">+${out.length - 3} more</div>` : "";
+  return `<div class="list">${shown}${more}</div>`;
 }
 
 // The detail screens (buttons 2 and 3): every check of their groups.
+const short = d => String(d).replace(/^(passed|succeeded),? /, "").replace(/ ago$/, "");
 function detail(s, groups) {
-  return `<div class="list">${groups.map(([title, name]) => {
+  return `<div class="list compact">${groups.map(([title, name]) => {
     const g = s.groups?.[name];
-    const rows = g ? [...g.checks].sort(bySeverity).map(c => item(c.state, c.name, c.detail)).join("")
+    const rows = g ? [...g.checks].sort(bySeverity).map(c => item(c.state, c.name, short(c.detail))).join("")
                    : `<div class="note">no data</div>`;
     return `<div class="heading">${title}</div>${rows}`;
   }).join("")}</div>`;
@@ -285,11 +309,11 @@ function lampColour(k) {
 }
 
 function lampPanel(l) {
-  if (!l) return `<div class="lamp"><div class="big" style="--s:var(--slate)">OFFLINE</div>
+  if (!l) return `<div class="lamp"><span class="tag">LAMP</span><div class="big" style="--s:var(--slate)">OFFLINE</div>
                   <span class="small">no answer from Home Assistant</span></div>`;
   const pct = l.on ? (l.brightness_pct ?? 100) : 0;
   const kelvin = l.kelvin ? `${l.kelvin} K` : "";
-  return `<div class="lamp ${l.on ? "on" : ""}">
+  return `<div class="lamp ${l.on ? "on" : ""}"><span class="tag">LAMP</span>
     <div class="big glow" style="--s:${l.on ? "var(--amber)" : "var(--dim)"}">${l.on ? "ON " + pct + "%" : "OFF"}</div>
     <div class="bar" style="--s:${lampColour(l.kelvin)}">${segs(10, Math.ceil(pct / 10))}</div>
     <span class="small">${kelvin}</span></div>`;
@@ -299,7 +323,7 @@ let vol = null;
 function volPanel() {
   if (!vol) return `<div class="note">no answer from the speaker</div>`;
   const pct = Math.round(vol.level * 100);
-  return `<div class="vol ${vol.muted ? "muted" : ""}">
+  return `<div class="vol ${vol.muted ? "muted" : ""}"><span class="tag">SPKR</span>
     <span class="big glow" style="--s:${vol.muted ? "var(--red)" : "var(--cyan)"}">${vol.muted ? "MUTED" : pct + "%"}</span>
     <div class="bar" style="--s:${vol.muted ? "var(--slate)" : "var(--cyan)"}">${segs(10, Math.round(pct / 10))}</div>
     <span class="keys">dial</span></div>`;
@@ -307,15 +331,6 @@ function volPanel() {
 async function pollVolume() {
   try { vol = await (await fetch("/api/volume", { cache: "no-store" })).json(); } catch (e) { vol = null; }
   setHTML("vol", volPanel());
-}
-
-function deployPanel(argo) {
-  if (!argo) return `<div class="note">no data from Argo CD</div>`;
-  const apps = argo.checks.find(c => c.name === "apps");
-  const synced = argo.checks.filter(c => c.name.startsWith("synced "));
-  const rows = synced.map(c => item(c.state, c.name.replace(/^synced /, ""), c.detail.replace(/^succeeded, /, "")));
-  if (apps) rows.push(item(apps.state, "apps", apps.detail.split(" ")[0]));
-  return `<div class="list">${rows.join("")}</div>`;
 }
 
 function summary(s) {
@@ -339,7 +354,7 @@ function summary(s) {
 }
 
 // Node vitals: [label, warn, fail, full scale], in °C here (the old page showed °F).
-const LEVELS = { cpu: ["CPU", 85, 95, 100], mem: ["MEM", 85, 95, 100], temp: ["TMP", 70, 80, 85] };
+const LEVELS = { disk: ["DSK", 85, 95, 100], cpu: ["CPU", 85, 95, 100], mem: ["MEM", 85, 95, 100], temp: ["TMP", 70, 80, 85] };
 function level(k, v) {
   if (v === undefined || v === null) return { state: "unknown", pct: 0 };
   const [, warn, fail, full] = LEVELS[k];
@@ -347,13 +362,12 @@ function level(k, v) {
 }
 function nodes(list) {
   return `<h2>NODES</h2>` + (list || []).map(n => {
-    const lv = Object.fromEntries(Object.keys(LEVELS).map(k => [k, level(k, n[k])]));
-    const st = worst([...Object.values(lv).map(l => l.state), n.disk >= 95 ? "fail" : n.disk >= 85 ? "warn" : "ok"]);
     const rows = Object.keys(LEVELS).map(k => {
+      const lv = level(k, n[k]), cls = `${lv.state}${k === "disk" ? " dsk" : ""}`;
       const v = n[k] === undefined || n[k] === null ? "--" : k === "temp" ? `${Math.round(n[k])}°` : `${Math.round(n[k])}%`;
-      return `<span class="k">${LEVELS[k][0]}</span><span class="bar ${lv[k].state}">${segs(8, Math.ceil(lv[k].pct / 12.5))}</span><span class="v">${v}</span>`;
+      return `<span class="k ${cls}">${LEVELS[k][0]}</span><span class="bar ${cls}">${segs(8, Math.ceil(lv.pct / 12.5))}</span><span class="v ${cls}">${v}</span>`;
     }).join("");
-    return `<div class="node ${st}"><div class="host">${esc(n.node)} <span class="k">dsk ${Math.round(n.disk ?? 0)}%</span></div>${rows}</div>`;
+    return `<div class="node"><div class="host">${esc(n.node)}</div>${rows}</div>`;
   }).join("");
 }
 
@@ -481,14 +495,11 @@ function render(s) {
   document.body.classList.toggle("alarm", s.overall === "fail");
   setHTML("summary", summary(s));
   setHTML("lamp", lampPanel(s.lamp));
-  setState("lamp-panel", s.lamp ? (s.lamp.on ? "warn" : "ok") : "unknown");
-  setHTML("deploy", deployPanel(g.argocd));
-  setState("deploy-panel", g.argocd?.state || "unknown");
+  setState("ls-panel", s.lamp ? (s.lamp.on ? "warn" : "ok") : "unknown");
 
   const view = s.view || "overview";
-  const right = document.getElementById("right");
-  right.classList.toggle("detail", view !== "overview");
-  document.getElementById("anomaly-panel").hidden = view !== "overview";
+  document.body.classList.toggle("detail", view !== "overview");
+  setHTML("anomalies", anomalies(s));
   if (view === "builds") {
     document.getElementById("main-title").textContent = "PIPELINE // ALL JOBS";
     setHTML("main-list", detail(s, [["JENKINS", "builds"]]));
@@ -499,9 +510,8 @@ function render(s) {
     setState("main-panel", worst(["cluster", "argocd", "services", "wigle"].map(n => g[n]?.state || "unknown")));
   } else {
     document.getElementById("main-title").textContent = "PIPELINE";
-    setHTML("main-list", pipeline(g.builds));
-    setState("main-panel", g.builds?.state || "unknown");
-    setHTML("anomalies", anomalies(s));
+    setHTML("main-list", pipeline(g.builds, g.argocd));
+    setState("main-panel", worst([g.builds?.state || "unknown", g.argocd?.state || "ok"]));
   }
   setHTML("nodes-panel", nodes(s.vitals));
 
@@ -555,7 +565,18 @@ async function poll() {
   }
 }
 
+// Every 30 to 120 seconds, at random, one sweep (the user, 2026-11-07: rarer than the
+// band). Restarting the animation needs a reflow.
+function scanLine() {
+  const el = document.getElementById("scan");
+  el.classList.remove("go");
+  void el.offsetWidth;
+  el.classList.add("go");
+  setTimeout(scanLine, 30000 + Math.random() * 90000);
+}
+
 document.fonts.load('15px "VT323"').finally(() => {
+  setTimeout(scanLine, 5000 + Math.random() * 25000);
   tick(); poll(); pollVolume();
   setInterval(tick, 1000);
   setInterval(poll, 1000);
