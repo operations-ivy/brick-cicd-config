@@ -19,7 +19,7 @@ controller:
   image:
     registry: docker.io
     repository: whitepatrick/brick-jenkins
-    tag: "2.580.1-cff7db863149"
+    tag: "2.580.1-c3b6ccb098ab"
     pullPolicy: IfNotPresent
   # The chart's own plugin download would need the internet on every start;
   # the image has them instead. overwritePlugins clears the home's plugins on
@@ -206,6 +206,45 @@ extraObjects:
       apiGroup: rbac.authorization.k8s.io
       kind: Role
       name: jenkins-jobs
+    subjects:
+      - kind: ServiceAccount
+        name: jenkins
+        namespace: jenkins
+  # The power-down job (bin/power-down): cordon, drain and uncordon a node, and
+  # check what's left on it. What `kubectl drain` needs: patch nodes,
+  # evict pods (which honours PodDisruptionBudgets), read DaemonSets to skip
+  # theirs. No delete on pods: a pod an eviction can't move fails the drain.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: jenkins-power-down
+    rules:
+      - apiGroups: [""]
+        resources: [nodes]
+        verbs: [get, list, watch, patch]
+      - apiGroups: [""]
+        resources: [pods]
+        verbs: [get, list]
+      - apiGroups: [""]
+        resources: [pods/eviction]
+        verbs: [create]
+      - apiGroups: [apps]
+        resources: [daemonsets]
+        verbs: [get]
+      # Single-copy Deployments are restarted (kubectl rollout restart, a patch)
+      # while the node is cordoned, so they move before the drain stops them.
+      # RBAC can't narrow patch to "restart": it could change a Deployment.
+      - apiGroups: [apps]
+        resources: [deployments]
+        verbs: [get, list, watch, patch]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: jenkins-power-down
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: jenkins-power-down
     subjects:
       - kind: ServiceAccount
         name: jenkins

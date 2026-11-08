@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""Take a brick out of service before it's powered down, and put it back
+(brick-cicd-config#100). The power-down job runs this with its parameters
+in the environment:
+
+    NODE      brick666, brick9000 or brick1982 (brick2000 and brick420 are refused)
+    ACTION    down: checks, maintenance window, stop, drain, shut down
+              up:   wait for it, uncordon, end the window, smoke
+    DURATION  the maintenance window's length (as the maintenance-window job)
+    SHUTDOWN  true: power it off at the end of `down`
+    DRY_RUN   true: run the read-only checks and print the plan, change nothing
+
+`down` opens the window first, so the board and the Presto are calm before
+anything stops, and shuts down last. A failed drain undoes the cordon and
+the window. `up` can be started from the LAN by webhook once the host is
+plugged back in.
+"""
+
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from typing import NoReturn
+from dataclasses import dataclass
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+MAINTENANCE = BIN / "maintenance"
+SMOKE = BIN / "smoke"
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+DRAIN_TIMEOUT = "5m"
+MOVE_TIMEOUT = "2m"  # per single-copy Deployment moved before the drain
+READY_TIMEOUT = "5m"
+DOWN_WAIT = 180  # seconds for the host to drop off after poweroff
+UP_WAIT = 900  # seconds for it to answer SSH again after it's plugged in
+POLL = 5  # seconds between tries
+APT = ("apt", "apt-get", "dpkg", "unattended-upgr")
+AGENTS = "jenkins-agents"  # a pod here is a running Jenkins build
+
+
+@dataclass(frozen=True)
+class Host:
+    k3s: bool = False
+    busy_processes: tuple[str, ...] = ()  # refuse while any of these runs
+    busy_units: tuple[str, ...] = ()  # user units: refuse while one is active
+    pause_units: tuple[str, ...] = ()  # user units to stop; their timers rerun them
+    # Deployments (namespace/name) that need this host's own hardware: they can't
+    # move first and wait, Pending, until it's back.
+    pinned: tuple[str, ...] = ()
+
+
+HOSTS = {
+    # The overwatch scanner needs brick666's Bluetooth.
+    "brick666": Host(k3s=True, pinned=("overwatch/overwatch-scanner",)),
+    # A game would lose everything since its last in-game save (gotchas.md).
+    "brick9000": Host(busy_processes=("retroarch",), busy_units=("brick-deploy.service",),
+                      pause_units=("brick-roms.service", "brick-mirror.service")),
+    "brick1982": Host(busy_units=("brick-deploy.service", "lcars-deploy.service")),
+}
+
+REFUSED = {
+    "brick2000": """\
+brick2000 runs Jenkins and holds every volume: this job can't drain the host
+it runs on. By hand, from the laptop (docs/status.md, 2026-10-17 and 10-24):
+  1. No Jenkins build or Job pod running.
+  2. kubectl cordon brick2000
+  3. kubectl drain brick2000 --ignore-daemonsets --delete-emptydir-data --disable-eviction
+     (Postgres, Prometheus, Loki, Tempo, Jenkins and Home Assistant stop and
+     wait, Pending, for brick2000's volumes)
+  4. ssh brick2000 sudo systemctl poweroff
+Back: plug /extra's USB drive in first, power on, kubectl uncordon brick2000,
+scripts/validate --cluster (brick-k8s-config). Start a maintenance window for
+it with the maintenance-window job first, so the board stays calm.""",
+    "brick420": """\
+brick420 is the only control plane: powering it down takes the cluster's API
+with it. Power it down by hand, last, and bring it back first
+(docs/status.md, 2026-10-24).""",
+}
+
+
+@dataclass(frozen=True)
+class Step:
+    what: str
+    do: Callable[[], None]
+
+
+def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, text=True, **kwargs)
+
+
+def ssh(host: str, command: str, **kwargs) -> subprocess.CompletedProcess:
+    return run([*SSH, host, command], **kwargs)
+
+
+def answers(host: str) -> bool:
+    return ssh(host, "true", capture_output=True).returncode == 0
+
+
+def die(message: str) -> NoReturn:
+    raise SystemExit(f"power-down: {message}")
+
+
+def check(cmd: list[str], message: str = "", **kwargs) -> subprocess.CompletedProcess:
+    """Run cmd; stop the job with message (and its stderr, if captured) if it fails."""
+    result = run(cmd, **kwargs)
+    if result.returncode != 0:
+        die(f"{message or 'failed: ' + shlex.join(cmd)}{': ' + result.stderr.strip() if result.stderr else ''}")
+    return result
+
+
+# --- checks (read-only, dry runs too) -----------------------------------------
+def busy_script(host: Host) -> str:
+    """A remote shell script that prints one line per reason not to stop now."""
+    lines = [f"pgrep -x {shlex.quote(p)} >/dev/null && echo 'running: {p}'"
+             for p in (*APT, *host.busy_processes)]
+    lines += [f"systemctl --user is-active --quiet {shlex.quote(u)} && echo 'active: {u}'"
+              for u in host.busy_units]
+    return "\n".join(lines) + "\ntrue\n"
+
+
+def busy(node: str, host: Host) -> list[str]:
+    reasons = check([*SSH, node, busy_script(host)], f"{node} doesn't answer SSH",
+                    capture_output=True).stdout.splitlines()
+    if host.k3s:
+        reasons += [f"Jenkins build: {name(p)}" for p in agent_pods(node)]
+    return reasons
+
+
+def agent_pods(node: str) -> list[dict]:
+    return pods("--field-selector", f"spec.nodeName={node}", namespace=AGENTS)
+
+
+# --- actions ---------------------------------------------------------------------
+def maintenance(node: str, duration: str = "1h", end: bool = False) -> None:
+    env = {**os.environ, "NODE": node, "DURATION": duration, "END": "true" if end else "false"}
+    check([str(MAINTENANCE), "window"], "the maintenance window failed", env=env)
+
+
+def pause(node: str, units: tuple[str, ...]) -> None:
+    quoted = " ".join(shlex.quote(u) for u in units)
+    # reset-failed: a unit stopped mid-run mustn't trip BrickUnitProblem.
+    check([*SSH, node, f"systemctl --user stop {quoted}; systemctl --user reset-failed"],
+          f"couldn't stop {quoted} on {node}")
+
+
+def drain(node: str, host: Host) -> None:
+    check(["kubectl", "cordon", node])
+    move_first(node, host)
+    drained = run(["kubectl", "drain", node, "--ignore-daemonsets", "--delete-emptydir-data",
+                   f"--timeout={DRAIN_TIMEOUT}"])
+    if drained.returncode != 0:
+        # Leave it as it was: schedulable, out of maintenance.
+        run(["kubectl", "uncordon", node])
+        maintenance(node, end=True)
+        die(f"{node} didn't drain (a PodDisruptionBudget?); uncordoned and out of maintenance again")
+    if left := leftovers(node):
+        die(f"{node} still runs pods after the drain, so it's not safe to power off "
+            "(it stays cordoned, in maintenance):\n  " + "\n  ".join(left))
+    print(f"{node} is drained: only DaemonSet pods left on it.")
+    if pending := pending_pods():
+        print("Waiting for a node (Pending), usually pinned to this one:\n  " + "\n  ".join(pending))
+
+
+def single_copies(node: str, host: Host) -> list[str]:
+    """Deployments with one replica and a pod on the node (namespace/name), not
+    pinned to it: a drain would stop them before their replacement starts."""
+    here = pods("--field-selector", f"spec.nodeName={node}")
+    on_node = {f"{p['metadata']['namespace']}/{deployment_of(p)}" for p in here if deployment_of(p)}
+    listed = json.loads(check(["kubectl", "get", "deployments", "-A", "-o", "json"], "can't list deployments",
+                              capture_output=True).stdout)["items"]
+    return sorted(name(d) for d in listed
+                  if name(d) in on_node and name(d) not in host.pinned
+                  and d["spec"].get("replicas", 1) == 1
+                  and d["spec"].get("strategy", {}).get("type") != "Recreate")
+
+
+def deployment_of(pod: dict) -> str:
+    """The Deployment a pod belongs to ("" if none): its ReplicaSet's name
+    without the pod-template-hash suffix."""
+    meta = pod["metadata"]
+    template = meta.get("labels", {}).get("pod-template-hash")
+    for owner in meta.get("ownerReferences", []):
+        if owner.get("kind") == "ReplicaSet" and template:
+            return owner["name"].removesuffix(f"-{template}")
+    return ""
+
+
+def move_first(node: str, host: Host) -> None:
+    """Restart each single-copy Deployment while the node is cordoned: its new pod
+    starts elsewhere before the old one stops (a rolling update surges by one),
+    so coredns, Argo CD and the like never go away. One that won't move in time
+    is left to the drain."""
+    for deployment in single_copies(node, host):
+        namespace, deploy = deployment.split("/")
+        print(f"moving {deployment} off {node} before the drain", flush=True)
+        check(["kubectl", "rollout", "restart", "-n", namespace, f"deployment/{deploy}"])
+        moved = run(["kubectl", "rollout", "status", "-n", namespace, f"deployment/{deploy}",
+                     f"--timeout={MOVE_TIMEOUT}"])
+        if moved.returncode != 0:
+            print(f"warning: {deployment} didn't move within {MOVE_TIMEOUT}; the drain stops it", flush=True)
+
+
+def pods(*selector: str, namespace: str = "") -> list[dict]:
+    where = ["-n", namespace] if namespace else ["-A"]
+    result = check(["kubectl", "get", "pods", *where, *selector, "-o", "json"], "can't list pods",
+                   capture_output=True)
+    return json.loads(result.stdout)["items"]
+
+
+def name(pod: dict) -> str:
+    return f"{pod['metadata']['namespace']}/{pod['metadata']['name']}"
+
+
+def leftovers(node: str) -> list[str]:
+    """Pods still on the node, other than DaemonSets' and finished ones."""
+    return [name(p) for p in pods("--field-selector", f"spec.nodeName={node}")
+            if p.get("status", {}).get("phase") not in ("Succeeded", "Failed")
+            and not any(o.get("kind") == "DaemonSet" for o in p["metadata"].get("ownerReferences", []))]
+
+
+def pending_pods() -> list[str]:
+    return [name(p) for p in pods("--field-selector", "status.phase=Pending")]
+
+
+def wait(node: str, up: bool, seconds: int) -> None:
+    deadline = time.monotonic() + seconds
+    while answers(node) != up:
+        if time.monotonic() > deadline:
+            state = "answer SSH" if up else "go off the network"
+            die(f"{node} didn't {state} within {seconds} s")
+        time.sleep(POLL)
+
+
+def poweroff(node: str) -> None:
+    # Off a few seconds after SSH returns, so the job gets its answer first.
+    check([*SSH, node, "sudo systemd-run --on-active=5 systemctl poweroff"], f"{node} refused to power off")
+    wait(node, up=False, seconds=DOWN_WAIT)
+    print(f"{node} is off the network: safe to unplug once its activity light stops.")
+
+
+def ready_and_uncordon(node: str) -> None:
+    check(["kubectl", "wait", "--for=condition=Ready", f"node/{node}", f"--timeout={READY_TIMEOUT}"])
+    check(["kubectl", "uncordon", node])
+
+
+def smoke() -> None:
+    check([str(SMOKE)], "smoke found problems (above)")
+
+
+# --- plans -----------------------------------------------------------------------
+def down_plan(node: str, host: Host, duration: str, shutdown: bool) -> list[Step]:
+    steps = [Step(f"maintenance window for {node}, {duration}: the board and the Presto stay calm",
+                  lambda: maintenance(node, duration))]
+    if host.pause_units:
+        steps.append(Step(f"stop {', '.join(host.pause_units)} (their timers rerun them after boot)",
+                          lambda: pause(node, host.pause_units)))
+    if host.k3s:
+        steps.append(Step(f"cordon and drain {node} (DaemonSets stay; PodDisruptionBudgets respected, "
+                          f"{DRAIN_TIMEOUT} at most), single-copy Deployments moved first",
+                          lambda: drain(node, host)))
+    if shutdown:
+        steps.append(Step(f"power {node} off and wait for it to leave the network", lambda: poweroff(node)))
+    return steps
+
+
+def up_plan(node: str, host: Host) -> list[Step]:
+    steps = [Step(f"wait for {node} to answer SSH ({UP_WAIT // 60} min at most)",
+                  lambda: wait(node, up=True, seconds=UP_WAIT))]
+    if host.k3s:
+        steps.append(Step(f"wait for node {node} to be Ready, then uncordon it",
+                          lambda: ready_and_uncordon(node)))
+    steps += [Step(f"end {node}'s maintenance window", lambda: maintenance(node, end=True)),
+              Step("smoke: is everything up?", smoke)]
+    return steps
+
+
+def execute(steps: list[Step], dry_run: bool) -> None:
+    for number, step in enumerate(steps, 1):
+        print(f"{'would' if dry_run else '==>'} {number}. {step.what}", flush=True)
+        if not dry_run:
+            step.do()
+
+
+def main() -> int:
+    node = os.environ.get("NODE", "").strip()
+    action = os.environ.get("ACTION", "down").strip()
+    duration = os.environ.get("DURATION", "4h").strip()
+    shutdown = os.environ.get("SHUTDOWN", "true") == "true"
+    dry_run = os.environ.get("DRY_RUN", "true") == "true"
+    if node in REFUSED:
+        die(f"refused.\n{REFUSED[node]}")
+    if node not in HOSTS:
+        die(f"NODE must be one of {', '.join(HOSTS)}, not {node!r}")
+    host = HOSTS[node]
+    match action:
+        case "down":
+            if reasons := busy(node, host):
+                die(f"{node} is busy, try again later:\n  " + "\n  ".join(reasons))
+            steps = down_plan(node, host, duration, shutdown)
+        case "up":
+            steps = up_plan(node, host)
+        case _:
+            die(f"ACTION must be down or up, not {action!r}")
+    if dry_run:
+        print(f"DRY RUN: nothing changes. {node} {action}:")
+    execute(steps, dry_run)
+    if not dry_run and action == "down" and not shutdown:
+        print(f"{node} is ready to power down; run ACTION=up once it's back.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
