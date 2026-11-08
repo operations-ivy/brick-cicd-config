@@ -1595,13 +1595,21 @@ class UnitsTest(unittest.TestCase):
 
 
 class CrtTest(unittest.TestCase):
-    def test_the_playlist_is_cmatrix_and_the_gallery_six_hours_each(self):
+    def test_the_playlist_is_cmatrix_only(self):
         s = Settings()
         s.cmatrix = sys.executable  # stands in for an installed cmatrix
         crt = web.crt_playlist(s)
-        self.assertEqual([p["name"] for p in crt["programs"]], ["cmatrix", "gallery"])
-        self.assertEqual([(p["tint"], p["font"]) for p in crt["programs"]], [(False, 11), (True, 7)])
+        self.assertEqual([p["name"] for p in crt["programs"]], ["cmatrix"])
+        self.assertEqual([(p["tint"], p["font"]) for p in crt["programs"]], [(False, 11)])
         self.assertEqual(crt["minutes"], 360.0)
+
+    def test_the_gallery_can_still_be_named(self):
+        s = Settings()
+        s.cmatrix = sys.executable
+        s.crt_programs = ["cmatrix", "gallery"]
+        crt = web.crt_playlist(s)
+        self.assertEqual([(p["name"], p["tint"], p["font"]) for p in crt["programs"]],
+                         [("cmatrix", False, 11), ("gallery", True, 7)])
 
     def test_the_other_programs_are_gone(self):
         self.assertEqual(set(matrix.PROGRAMS), {"cmatrix", "gallery", "activity", "activity-log"})
