@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, units, web
+from . import check, checks, host, lamp, lights, notify, since, units, web
 from .board import ACTIVE, QUIET, Board
 from .config import BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RIGHT, KEY_WAKE, VIEWS, Settings
 from .hardware import Screen, watch_buttons
@@ -62,6 +62,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     state = Path(settings.notify_dir)
     pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
     ntfy = ntfy_from(settings)
+    clock = since.Since(state / "anomalies-since.json")
     while True:
         started = time.monotonic()
         try:
@@ -78,7 +79,10 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             summary["recent"] = checks.recent_builds(jenkins, hidden)
             summary["hidden_jobs"] = sorted(hidden)
             sshd = host.sshd_running()
-            status.set(summary, {"sshd": sshd, "internet": internet}, vitals)
+            host_state = {"sshd": sshd, "internet": internet}
+            summary["since"] = clock.observe(
+                since.anomaly_keys(summary, vitals, host_state, socket.gethostname()), time.time())
+            status.set(summary, host_state, vitals)
             wake.set()
             pager.observe(*notify.find_problems(summary, internet, vitals), time.time(),
                           lambda problem: notify.facts(problem, summary, vitals))

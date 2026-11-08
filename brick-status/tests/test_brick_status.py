@@ -2372,3 +2372,40 @@ class RecentBuildsTest(unittest.TestCase):
     def test_jenkins_down_is_none(self):
         self.assertIsNone(checks.recent_builds(self.jenkins(fails=True), now=self.NOW))
 
+
+class SinceTest(unittest.TestCase):
+    """since.py: how long each anomaly has been there, kept across restarts."""
+
+    def setUp(self):
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.file = self.dir / "anomalies-since.json"
+
+    def test_keys_match_the_anomalies_page(self):
+        from brick_status import since
+        summary = {"groups": {"cluster": {"checks": [{"name": "workloads", "state": "warn"},
+                                                       {"name": "brick420", "state": "ok"}]},
+                              "builds": {"checks": [{"name": "build-branches", "state": "fail"}]}}}
+        vitals = [{"node": "brick9000", "temp": 71.0, "disk": 65.0}, {"node": "brick2000", "temp": 50, "disk": 90}]
+        keys = since.anomaly_keys(summary, vitals, {"internet": False, "sshd": True}, "brick9000")
+        self.assertEqual(keys, {"cluster/workloads", "builds/build-branches", "brick9000/temp",
+                                "brick2000/disk", "internet"})
+
+    def test_first_seen_is_kept_and_cleared(self):
+        from brick_status import since
+        clock = since.Since(self.file)
+        self.assertEqual(clock.observe({"a"}, 100.0), {"a": 100.0})
+        self.assertEqual(clock.observe({"a", "b"}, 200.0), {"a": 100.0, "b": 200.0})
+        self.assertEqual(clock.observe({"b"}, 300.0), {"b": 200.0})  # a cleared: forgotten
+        self.assertEqual(clock.observe({"a", "b"}, 400.0), {"a": 400.0, "b": 200.0})  # a again: a new clock
+
+    def test_a_restart_keeps_the_clock(self):
+        from brick_status import since
+        since.Since(self.file).observe({"cluster/workloads"}, 1000.0)
+        self.assertEqual(since.Since(self.file).observe({"cluster/workloads"}, 90000.0),
+                         {"cluster/workloads": 1000.0})
+
+    def test_a_bad_file_starts_over(self):
+        from brick_status import since
+        self.file.write_text("not json")
+        self.assertEqual(since.Since(self.file).observe({"x"}, 5.0), {"x": 5.0})
+
