@@ -25,6 +25,34 @@ data:
             "iconColor": "rgba(0, 211, 255, 1)",
             "name": "Annotations & Alerts",
             "type": "dashboard"
+          },
+          {
+            "datasource": {
+              "type": "loki",
+              "uid": "loki"
+            },
+            "enable": true,
+            "iconColor": "#FF9830",
+            "name": "Changes: Jenkins",
+            "expr": "{source=\"jenkins\", kind=\"change\"} | json | job !~ \"test-.*|check-all|verify-images|mirror-repos|find-builds\" | params_DRY_RUN != \"true\"",
+            "instant": false,
+            "titleFormat": "{{job}} #{{build}}: {{result}}",
+            "textFormat": "{{params_BRANCH}}{{params_NODE}} {{params_ACTION}}{{params_TAG}} ({{cause}})",
+            "tagKeys": "job,result"
+          },
+          {
+            "datasource": {
+              "type": "loki",
+              "uid": "loki"
+            },
+            "enable": true,
+            "iconColor": "#B877D9",
+            "name": "Changes: Argo CD syncs",
+            "expr": "{namespace=\"argocd\", container=\"application-controller\"} |= \"Sync operation to\" | logfmt",
+            "instant": false,
+            "titleFormat": "Argo CD sync: {{application}}",
+            "textFormat": "{{msg}}",
+            "tagKeys": "application"
           }
         ]
       },
