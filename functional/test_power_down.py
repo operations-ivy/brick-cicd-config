@@ -36,7 +36,7 @@ exit 0
     "kubectl": """
 echo "kubectl $*" >>"$STATE/log"
 case "$*" in
-  "get pods -n jenkins-agents"*) cat "$STATE/agents" 2>/dev/null ;;
+  "get pods -n jenkins-agents"*) cat "$STATE/agents" 2>/dev/null || echo '{"items": []}' ;;
   *spec.nodeName=*) cat "$STATE/node.json" 2>/dev/null || echo '{"items": []}' ;;
   *status.phase=Pending*) cat "$STATE/pending.json" 2>/dev/null || echo '{"items": []}' ;;
   drain*) exit "$(cat "$STATE/drain_rc" 2>/dev/null || echo 0)" ;;
@@ -104,9 +104,9 @@ class PowerDown(unittest.TestCase):
         self.assertEqual(self.changes(), [])
 
     def test_a_jenkins_build_on_the_node_is_busy(self):
-        (self.state / "agents").write_text("pod/test-wigle-sync-abc\n")
+        (self.state / "agents").write_text(json.dumps({"items": [pod("jenkins-agents", "test-wigle-sync-abc")]}))
         error, _ = self.go(NODE="brick666")
-        self.assertIn("Jenkins build: pod/test-wigle-sync-abc", error)
+        self.assertIn("Jenkins build: jenkins-agents/test-wigle-sync-abc", error)
         self.assertEqual(self.changes(), [])
 
     def test_dry_run_checks_and_prints_but_changes_nothing(self):
