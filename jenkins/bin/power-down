@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""Take a brick out of service before it's powered down, and put it back
+(brick-cicd-config#100). The power-down job runs this with its parameters
+in the environment:
+
+    NODE      brick666, brick9000 or brick1982 (brick2000 and brick420 are refused)
+    ACTION    down: checks, maintenance window, stop, drain, shut down
+              up:   wait for it, uncordon, end the window, smoke
+    DURATION  the maintenance window's length (as the maintenance-window job)
+    SHUTDOWN  true: power it off at the end of `down`
+    DRY_RUN   true: run the read-only checks and print the plan, change nothing
+
+`down` opens the window first, so the board and the Presto are calm before
+anything stops, and shuts down last. A failed drain undoes the cordon and
+the window. `up` can be started from the LAN by webhook once the host is
+plugged back in.
+"""
+
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+MAINTENANCE = BIN / "maintenance"
+SMOKE = BIN / "smoke"
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+DRAIN_TIMEOUT = "5m"
+READY_TIMEOUT = "5m"
+DOWN_WAIT = 180  # seconds for the host to drop off after poweroff
+UP_WAIT = 900  # seconds for it to answer SSH again after it's plugged in
+POLL = 5  # seconds between tries
+APT = ("apt", "apt-get", "dpkg", "unattended-upgr")
+AGENTS = "jenkins-agents"  # a pod here is a running Jenkins build
+
+
+@dataclass(frozen=True)
+class Host:
+    k3s: bool = False
+    busy_processes: tuple[str, ...] = ()  # refuse while any of these runs
+    busy_units: tuple[str, ...] = ()  # user units: refuse while one is active
+    pause_units: tuple[str, ...] = ()  # user units to stop; their timers rerun them
+
+
+HOSTS = {
+    "brick666": Host(k3s=True),
+    # A game would lose everything since its last in-game save (gotchas.md).
+    "brick9000": Host(busy_processes=("retroarch",), busy_units=("brick-deploy.service",),
+                      pause_units=("brick-roms.service", "brick-mirror.service")),
+    "brick1982": Host(busy_units=("brick-deploy.service", "lcars-deploy.service")),
+}
+
+REFUSED = {
+    "brick2000": """\
+brick2000 runs Jenkins and holds every volume: this job can't drain the host
+it runs on. By hand, from the laptop (docs/status.md, 2026-10-17 and 10-24):
+  1. No Jenkins build or Job pod running.
+  2. kubectl cordon brick2000
+  3. kubectl drain brick2000 --ignore-daemonsets --delete-emptydir-data --disable-eviction
+     (Postgres, Prometheus, Loki, Tempo, Jenkins and Home Assistant stop and
+     wait, Pending, for brick2000's volumes)
+  4. ssh brick2000 sudo systemctl poweroff
+Back: plug /extra's USB drive in first, power on, kubectl uncordon brick2000,
+scripts/validate --cluster (brick-k8s-config). Start a maintenance window for
+it with the maintenance-window job first, so the board stays calm.""",
+    "brick420": """\
+brick420 is the only control plane: powering it down takes the cluster's API
+with it. Power it down by hand, last, and bring it back first
+(docs/status.md, 2026-10-24).""",
+}
+
+
+@dataclass(frozen=True)
+class Step:
+    what: str
+    do: Callable[[], None]
+
+
+def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, text=True, **kwargs)
+
+
+def ssh(host: str, command: str, **kwargs) -> subprocess.CompletedProcess:
+    return run([*SSH, host, command], **kwargs)
+
+
+def answers(host: str) -> bool:
+    return ssh(host, "true", capture_output=True).returncode == 0
+
+
+def check(cmd: list[str]) -> None:
+    if run(cmd).returncode != 0:
+        raise SystemExit(f"power-down: failed: {shlex.join(cmd)}")
+
+
+# --- checks (read-only, dry runs too) -----------------------------------------
+def busy_script(host: Host) -> str:
+    """A remote shell script that prints one line per reason not to stop now."""
+    lines = [f"pgrep -x {shlex.quote(p)} >/dev/null && echo 'running: {p}'"
+             for p in (*APT, *host.busy_processes)]
+    lines += [f"systemctl --user is-active --quiet {shlex.quote(u)} && echo 'active: {u}'"
+              for u in host.busy_units]
+    return "\n".join(lines) + "\ntrue\n"
+
+
+def busy(node: str, host: Host) -> list[str]:
+    result = ssh(node, busy_script(host), capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f"power-down: {node} doesn't answer SSH: {result.stderr.strip()}")
+    reasons = result.stdout.split("\n")
+    if host.k3s:
+        pods = run(["kubectl", "get", "pods", "-n", AGENTS, "--field-selector", f"spec.nodeName={node}",
+                    "-o", "name"], capture_output=True)
+        if pods.returncode != 0:
+            raise SystemExit(f"power-down: can't list {AGENTS} pods: {pods.stderr.strip()}")
+        reasons += [f"Jenkins build: {p}" for p in pods.stdout.split()]
+    return [r for r in reasons if r]
+
+
+# --- actions ---------------------------------------------------------------------
+def maintenance(node: str, duration: str = "1h", end: bool = False) -> None:
+    env = {**os.environ, "NODE": node, "DURATION": duration, "END": "true" if end else "false"}
+    if run([str(MAINTENANCE), "window"], env=env).returncode != 0:
+        raise SystemExit("power-down: the maintenance window failed")
+
+
+def pause(node: str, units: tuple[str, ...]) -> None:
+    quoted = " ".join(shlex.quote(u) for u in units)
+    # reset-failed: a unit stopped mid-run mustn't trip BrickUnitProblem.
+    if ssh(node, f"systemctl --user stop {quoted}; systemctl --user reset-failed").returncode != 0:
+        raise SystemExit(f"power-down: couldn't stop {quoted} on {node}")
+
+
+def drain(node: str) -> None:
+    check(["kubectl", "cordon", node])
+    drained = run(["kubectl", "drain", node, "--ignore-daemonsets", "--delete-emptydir-data",
+                   f"--timeout={DRAIN_TIMEOUT}"])
+    if drained.returncode != 0:
+        # Leave it as it was: schedulable, out of maintenance.
+        run(["kubectl", "uncordon", node])
+        maintenance(node, end=True)
+        raise SystemExit(f"power-down: {node} didn't drain (a PodDisruptionBudget?); "
+                         "uncordoned and out of maintenance again")
+    if left := leftovers(node):
+        raise SystemExit(f"power-down: {node} still runs pods after the drain, so it's not safe to "
+                         "power off (it stays cordoned, in maintenance):\n  " + "\n  ".join(left))
+    print(f"{node} is drained: only DaemonSet pods left on it.")
+    if pending := pending_pods():
+        print("Waiting for a node (Pending), usually pinned to this one:\n  " + "\n  ".join(pending))
+
+
+def pods(*selector: str) -> list[dict]:
+    result = run(["kubectl", "get", "pods", "-A", *selector, "-o", "json"], capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f"power-down: can't list pods: {result.stderr.strip()}")
+    return json.loads(result.stdout)["items"]
+
+
+def name(pod: dict) -> str:
+    return f"{pod['metadata']['namespace']}/{pod['metadata']['name']}"
+
+
+def leftovers(node: str) -> list[str]:
+    """Pods still on the node, other than DaemonSets' and finished ones."""
+    return [name(p) for p in pods("--field-selector", f"spec.nodeName={node}")
+            if p.get("status", {}).get("phase") not in ("Succeeded", "Failed")
+            and not any(o.get("kind") == "DaemonSet" for o in p["metadata"].get("ownerReferences", []))]
+
+
+def pending_pods() -> list[str]:
+    return [name(p) for p in pods("--field-selector", "status.phase=Pending")]
+
+
+def wait(node: str, up: bool, seconds: int) -> None:
+    deadline = time.monotonic() + seconds
+    while answers(node) != up:
+        if time.monotonic() > deadline:
+            state = "answer SSH" if up else "go off the network"
+            raise SystemExit(f"power-down: {node} didn't {state} within {seconds} s")
+        time.sleep(POLL)
+
+
+def poweroff(node: str) -> None:
+    # Off a few seconds after SSH returns, so the job gets its answer first.
+    if ssh(node, "sudo systemd-run --on-active=5 systemctl poweroff").returncode != 0:
+        raise SystemExit(f"power-down: {node} refused to power off")
+    wait(node, up=False, seconds=DOWN_WAIT)
+    print(f"{node} is off the network: safe to unplug once its activity light stops.")
+
+
+def smoke() -> None:
+    if run([str(SMOKE)]).returncode != 0:
+        raise SystemExit("power-down: smoke found problems (above)")
+
+
+# --- plans -----------------------------------------------------------------------
+def down_plan(node: str, host: Host, duration: str, shutdown: bool) -> list[Step]:
+    steps = [Step(f"maintenance window for {node}, {duration}: the board and the Presto stay calm",
+                  lambda: maintenance(node, duration))]
+    if host.pause_units:
+        steps.append(Step(f"stop {', '.join(host.pause_units)} (their timers rerun them after boot)",
+                          lambda: pause(node, host.pause_units)))
+    if host.k3s:
+        steps.append(Step(f"cordon and drain {node} (DaemonSets stay; PodDisruptionBudgets respected, "
+                          f"{DRAIN_TIMEOUT} at most)", lambda: drain(node)))
+    if shutdown:
+        steps.append(Step(f"power {node} off and wait for it to leave the network", lambda: poweroff(node)))
+    return steps
+
+
+def up_plan(node: str, host: Host) -> list[Step]:
+    steps = [Step(f"wait for {node} to answer SSH ({UP_WAIT // 60} min at most)",
+                  lambda: wait(node, up=True, seconds=UP_WAIT))]
+    if host.k3s:
+        steps.append(Step(f"wait for node {node} to be Ready, then uncordon it", lambda: (
+            check(["kubectl", "wait", "--for=condition=Ready", f"node/{node}", f"--timeout={READY_TIMEOUT}"]),
+            check(["kubectl", "uncordon", node]))))
+    steps += [Step(f"end {node}'s maintenance window", lambda: maintenance(node, end=True)),
+              Step("smoke: is everything up?", smoke)]
+    return steps
+
+
+def execute(steps: list[Step], dry_run: bool) -> None:
+    for number, step in enumerate(steps, 1):
+        print(f"{'would' if dry_run else '==>'} {number}. {step.what}", flush=True)
+        if not dry_run:
+            step.do()
+
+
+def main() -> int:
+    node = os.environ.get("NODE", "").strip()
+    action = os.environ.get("ACTION", "down").strip()
+    duration = os.environ.get("DURATION", "4h").strip()
+    shutdown = os.environ.get("SHUTDOWN", "true") == "true"
+    dry_run = os.environ.get("DRY_RUN", "true") == "true"
+    if node in REFUSED:
+        raise SystemExit(f"power-down: refused.\n{REFUSED[node]}")
+    if node not in HOSTS:
+        raise SystemExit(f"power-down: NODE must be one of {', '.join(HOSTS)}, not {node!r}")
+    host = HOSTS[node]
+    match action:
+        case "down":
+            if reasons := busy(node, host):
+                raise SystemExit(f"power-down: {node} is busy, try again later:\n  " + "\n  ".join(reasons))
+            steps = down_plan(node, host, duration, shutdown)
+        case "up":
+            steps = up_plan(node, host)
+        case _:
+            raise SystemExit(f"power-down: ACTION must be down or up, not {action!r}")
+    if dry_run:
+        print(f"DRY RUN: nothing changes. {node} {action}:")
+    execute(steps, dry_run)
+    if not dry_run and action == "down" and not shutdown:
+        print(f"{node} is ready to power down; run ACTION=up once it's back.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
