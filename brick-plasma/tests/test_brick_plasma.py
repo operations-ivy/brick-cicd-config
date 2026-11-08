@@ -161,9 +161,13 @@ class ShippedDisplaysTest(unittest.TestCase):
         show = self.named["ramona"]
         self.assertEqual(show.file, "board.yaml")
         self.assertGreaterEqual(show.priority, self.named["off"].priority)  # over quiet hours too
-        self.assertEqual(show.ttl, 10)
-        frames = patterns.make("ramona", seconds=10.0)
-        self.assertEqual(len(frames), 10 * patterns.FPS)
+        # As long as brick-status's show (ramona.SECONDS).
+        root = Path(__file__).resolve().parents[2]
+        seconds = float(re.search(r"^SECONDS = ([\d.]+)", (root / "brick-status" / "brick_status" / "ramona.py")
+                                  .read_text(), re.M).group(1))
+        self.assertEqual(show.ttl, seconds)
+        frames = patterns.make("ramona", seconds=seconds)
+        self.assertEqual(len(frames), int(seconds * patterns.FPS))
         self.assertTrue(all(len(f) == patterns.WIDTH for f in frames))
         self.assertEqual(frames[-1], [(255, 255, 255)] * patterns.WIDTH)  # the white finish
         self.assertGreater(len({f[0] for f in frames}), 50)  # it really is crazy

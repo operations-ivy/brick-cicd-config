@@ -95,8 +95,8 @@ class Plasma:
 
     def ramona(self) -> None:
         """The Ramona button's show (ramona.py), from its own sender so a
-        lamp or check answer can't cut it short. The display sets its ten
-        seconds; sending it again starts them again."""
+        lamp or check answer can't cut it short. The display sets its
+        length (ramona.SECONDS); sending it again starts it again."""
         self._send({"pattern": "ramona"}, "ramona")
 
     def off(self) -> None:

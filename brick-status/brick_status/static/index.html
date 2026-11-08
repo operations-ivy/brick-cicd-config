@@ -205,7 +205,7 @@
             image-rendering: pixelated; display: none; }
 
   /* The Ramona button's show (brick_status/ramona.py): a chunky-pixel canvas over
-     everything, and the CRT cycling every hue. Only for the show's ten seconds. */
+     everything, and the CRT cycling every hue. Only while a show is on. */
   #ramona { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none;
             image-rendering: pixelated; mix-blend-mode: screen; }
   body.ramona .crt .glass { animation: ramona-hue 1.2s linear infinite; }

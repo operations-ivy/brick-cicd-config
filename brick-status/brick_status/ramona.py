@@ -1,5 +1,5 @@
 """The Ramona button (brick-cicd-config#152): the cabinet's front-right button
-(1UP, KEY_O) starts ten seconds of everything at once, for the user's
+(1UP, KEY_O) starts thirty seconds of everything at once, for the user's
 daughter, who loves the lights.
 
 - the button lights play brick-plasma's "ramona" display (it ends by itself);
@@ -7,7 +7,7 @@ daughter, who loves the lights.
 - the Hue lamp beside the cabinet runs through colours, then goes back to
   exactly how it was (on or off, brightness, colour).
 
-A press during a show starts the ten seconds again; it never stacks a second
+A press during a show starts the thirty seconds again; it never stacks a second
 show, and the lamp goes back to how it was before the first. It works any time,
 quiet hours too (the user, 2026-11-08), but not while a game is open: 1UP is a
 game's button then.
@@ -20,7 +20,7 @@ from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
-SECONDS = 10.0
+SECONDS = 30.0  # the user, 2026-11-08 (was 10); brick-plasma's ramona display matches
 # The lamp's colours, one every STEP seconds: a rainbow with white in it.
 COLOURS = [[255, 0, 0], [255, 140, 0], [255, 255, 0], [0, 255, 0], [0, 200, 255],
            [40, 90, 255], [170, 60, 255], [255, 0, 180], [255, 255, 255]]
@@ -38,7 +38,7 @@ class Show:
         self._lock = threading.Lock()
 
     def start(self) -> bool:
-        """Start the show, or start its ten seconds again. True if no show was on."""
+        """Start the show, or start it again from the top. True if no show was on."""
         now = self.clock()
         with self._lock:
             fresh = now >= self._until

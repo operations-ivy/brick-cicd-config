@@ -820,12 +820,13 @@ class FakeHA:
 
 
 class RamonaTest(unittest.TestCase):
-    def test_ten_seconds_then_done(self):
+    def test_thirty_seconds_then_done(self):
+        self.assertEqual(ramona.SECONDS, 30.0)  # the user, 2026-11-08
         clock = FakeClock()
         show = ramona.Show(clock=clock)
         self.assertFalse(show.on())
         self.assertTrue(show.start())
-        clock.now += 9.9
+        clock.now += ramona.SECONDS - 0.1
         self.assertTrue(show.on())
         clock.now += 0.2
         self.assertFalse(show.on())
@@ -837,8 +838,8 @@ class RamonaTest(unittest.TestCase):
         self.assertTrue(show.start())
         clock.now += 6
         self.assertFalse(show.start())  # not a new show: no second lamp party
-        self.assertAlmostEqual(show.remaining(), 10.0)
-        clock.now += 10.1
+        self.assertAlmostEqual(show.remaining(), ramona.SECONDS)
+        clock.now += ramona.SECONDS + 0.1
         self.assertFalse(show.on())
 
     def test_the_lamp_goes_back_as_it_was(self):
@@ -908,10 +909,11 @@ class RamonaTest(unittest.TestCase):
         self.assertAlmostEqual(max(abs(v) for v in samples), ramona_sound.PEAK)
         # Every part of the show has sound in it: no silent second.
         rate = ramona_sound.RATE
-        for second in range(10):
+        for second in range(int(ramona_sound.SECONDS)):
             chunk = samples[second * rate:(second + 1) * rate]
             self.assertGreater(max(abs(v) for v in chunk), 0.05, f"second {second}")
         self.assertEqual(samples, ramona_sound.synth())  # the same every time
+        self.assertEqual(ramona_sound.SECONDS, ramona.SECONDS)
 
     def test_the_sound_plays_and_a_second_press_starts_it_again(self):
         with tempfile.TemporaryDirectory() as d:

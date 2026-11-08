@@ -1,14 +1,17 @@
-"""The Ramona button's sound (ramona.py): ten seconds of chiptune, made here.
+"""The Ramona button's sound (ramona.py): thirty seconds of chiptune, made here.
 
 Synthesized at start, so there's no audio file to license or fetch, and played
-through PipeWire's pw-play at the speaker's own volume (the dial sets it). The
-parts follow the button lights' show (brick-plasma's "ramona" effect):
+through PipeWire's pw-play at the speaker's own volume (the dial sets it).
 
-  0-2 s     a square-wave arpeggio climbing, like the spinning rainbow
-  2-4 s     bubbles: short blips at random pitches, like the boil
-  4-5.5 s   a two-tone siren, like the strobe
+The show's length is played as ten-second rounds, each a whole step higher
+than the last, and only the last ends on the chord (with the lights' white
+flash). A round:
+
+  0-2 s     a square-wave arpeggio climbing
+  2-4 s     bubbles: short blips at random pitches
+  4-5.5 s   a two-tone siren
   5.5-8.5 s fireworks: whistles rising, then a pop of noise
-  8.5-10 s  a fanfare up the scale, ending on a chord (the white flash)
+  8.5-10 s  a fanfare up the scale (and the closing chord, last round only)
 
 Seeded, so it's the same every time.
 """
@@ -25,7 +28,8 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 RATE = 22050
-SECONDS = 10.0
+SECONDS = 30.0  # ramona.SECONDS
+ROUND = 10.0
 PEAK = 0.45  # of full scale: loud enough on the cabinet's speaker, never clipping
 
 # C major, two octaves from middle C.
@@ -45,15 +49,26 @@ def synth(seconds: float = SECONDS, rate: int = RATE, seed: int = 2017) -> list[
     """The show's sound as samples from -1 to 1."""
     n = int(seconds * rate)
     out = [0.0] * n
-    rng = random.Random(seed)
+    rounds = max(1, round(seconds / ROUND))
+    for r in range(rounds):
+        _round(out, rate, r * ROUND, 2 ** (2 * r / 12), random.Random(seed + r), last=r == rounds - 1,
+               end=seconds)
+    top = max(1e-9, max(abs(v) for v in out))
+    return [v / top * PEAK for v in out]
+
+
+def _round(out: list[float], rate: int, at: float, up: float, rng: random.Random, last: bool,
+           end: float) -> None:
+    """One ten-second round into `out`, from `at` seconds, every pitch times `up`."""
+    n = len(out)
 
     def note(start: float, length: float, freq: float, shape: str = "square", loud: float = 0.6) -> None:
-        a, count = int(start * rate), int(length * rate)
+        a, count = int((at + start) * rate), int(length * rate)
         for i in range(count):
             if a + i >= n:
                 break
             t = i / rate
-            wave_ = _square(freq, t) if shape == "square" else math.sin(2 * math.pi * freq * t)
+            wave_ = _square(freq * up, t) if shape == "square" else math.sin(2 * math.pi * freq * up * t)
             out[a + i] += loud * _env(i, count) * wave_
 
     # 0-2 s: the arpeggio, sixteenth notes climbing and climbing again.
@@ -67,14 +82,13 @@ def synth(seconds: float = SECONDS, rate: int = RATE, seed: int = 2017) -> list[
         note(4.0 + k * 0.25, 0.24, 988 if k % 2 == 0 else 740, "square", 0.45)
     # 5.5-8.5 s: fireworks, a whistle up then a pop.
     for k in range(5):
-        start = 5.5 + k * 0.6
         whistle = int(0.35 * rate)
-        a = int(start * rate)
+        a = int((at + 5.5 + k * 0.6) * rate)
         phase = 0.0
         for i in range(whistle):
             if a + i >= n:
                 break
-            freq = 600 + 1800 * i / whistle
+            freq = (600 + 1800 * i / whistle) * up
             phase += freq / rate
             out[a + i] += 0.35 * _env(i, whistle) * math.sin(2 * math.pi * phase)
         pop = int(0.25 * rate)
@@ -83,14 +97,12 @@ def synth(seconds: float = SECONDS, rate: int = RATE, seed: int = 2017) -> list[
             if b + i >= n:
                 break
             out[b + i] += 0.8 * (1 - i / pop) ** 3 * rng.uniform(-1, 1)
-    # 8.5-10 s: the fanfare up the scale, then a C major chord to the end.
+    # 8.5-10 s: the fanfare up the scale; the last round ends on a C major chord.
     for k, degree in enumerate([0, 2, 4, 7, 9, 11]):
         note(8.5 + k * 0.1, 0.09, SCALE[degree])
-    for freq in (SCALE[7], SCALE[9], SCALE[11]):
-        note(9.15, seconds - 9.15, freq, "square", 0.3)
-
-    top = max(1e-9, max(abs(v) for v in out))
-    return [v / top * PEAK for v in out]
+    if last:
+        for freq in (SCALE[7], SCALE[9], SCALE[11]):
+            note(9.15, end - at - 9.15, freq, "square", 0.3)
 
 
 def write_wav(path: Path, samples: list[float], rate: int = RATE) -> None:
