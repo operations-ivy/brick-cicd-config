@@ -32,6 +32,7 @@ MAINTENANCE = BIN / "maintenance"
 SMOKE = BIN / "smoke"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 DRAIN_TIMEOUT = "5m"
+MOVE_TIMEOUT = "2m"  # per single-copy Deployment moved before the drain
 READY_TIMEOUT = "5m"
 DOWN_WAIT = 180  # seconds for the host to drop off after poweroff
 UP_WAIT = 900  # seconds for it to answer SSH again after it's plugged in
@@ -46,10 +47,14 @@ class Host:
     busy_processes: tuple[str, ...] = ()  # refuse while any of these runs
     busy_units: tuple[str, ...] = ()  # user units: refuse while one is active
     pause_units: tuple[str, ...] = ()  # user units to stop; their timers rerun them
+    # Deployments (namespace/name) that need this host's own hardware: they can't
+    # move first and wait, Pending, until it's back.
+    pinned: tuple[str, ...] = ()
 
 
 HOSTS = {
-    "brick666": Host(k3s=True),
+    # The overwatch scanner needs brick666's Bluetooth.
+    "brick666": Host(k3s=True, pinned=("overwatch/overwatch-scanner",)),
     # A game would lose everything since its last in-game save (gotchas.md).
     "brick9000": Host(busy_processes=("retroarch",), busy_units=("brick-deploy.service",),
                       pause_units=("brick-roms.service", "brick-mirror.service")),
@@ -141,8 +146,9 @@ def pause(node: str, units: tuple[str, ...]) -> None:
           f"couldn't stop {quoted} on {node}")
 
 
-def drain(node: str) -> None:
+def drain(node: str, host: Host) -> None:
     check(["kubectl", "cordon", node])
+    move_first(node, host)
     drained = run(["kubectl", "drain", node, "--ignore-daemonsets", "--delete-emptydir-data",
                    f"--timeout={DRAIN_TIMEOUT}"])
     if drained.returncode != 0:
@@ -156,6 +162,45 @@ def drain(node: str) -> None:
     print(f"{node} is drained: only DaemonSet pods left on it.")
     if pending := pending_pods():
         print("Waiting for a node (Pending), usually pinned to this one:\n  " + "\n  ".join(pending))
+
+
+def single_copies(node: str, host: Host) -> list[str]:
+    """Deployments with one replica and a pod on the node (namespace/name), not
+    pinned to it: a drain would stop them before their replacement starts."""
+    here = pods("--field-selector", f"spec.nodeName={node}")
+    on_node = {f"{p['metadata']['namespace']}/{deployment_of(p)}" for p in here if deployment_of(p)}
+    listed = json.loads(check(["kubectl", "get", "deployments", "-A", "-o", "json"], "can't list deployments",
+                              capture_output=True).stdout)["items"]
+    return sorted(name(d) for d in listed
+                  if name(d) in on_node and name(d) not in host.pinned
+                  and d["spec"].get("replicas", 1) == 1
+                  and d["spec"].get("strategy", {}).get("type") != "Recreate")
+
+
+def deployment_of(pod: dict) -> str:
+    """The Deployment a pod belongs to ("" if none): its ReplicaSet's name
+    without the pod-template-hash suffix."""
+    meta = pod["metadata"]
+    template = meta.get("labels", {}).get("pod-template-hash")
+    for owner in meta.get("ownerReferences", []):
+        if owner.get("kind") == "ReplicaSet" and template:
+            return owner["name"].removesuffix(f"-{template}")
+    return ""
+
+
+def move_first(node: str, host: Host) -> None:
+    """Restart each single-copy Deployment while the node is cordoned: its new pod
+    starts elsewhere before the old one stops (a rolling update surges by one),
+    so coredns, Argo CD and the like never go away. One that won't move in time
+    is left to the drain."""
+    for deployment in single_copies(node, host):
+        namespace, deploy = deployment.split("/")
+        print(f"moving {deployment} off {node} before the drain", flush=True)
+        check(["kubectl", "rollout", "restart", "-n", namespace, f"deployment/{deploy}"])
+        moved = run(["kubectl", "rollout", "status", "-n", namespace, f"deployment/{deploy}",
+                     f"--timeout={MOVE_TIMEOUT}"])
+        if moved.returncode != 0:
+            print(f"warning: {deployment} didn't move within {MOVE_TIMEOUT}; the drain stops it", flush=True)
 
 
 def pods(*selector: str, namespace: str = "") -> list[dict]:
@@ -214,7 +259,8 @@ def down_plan(node: str, host: Host, duration: str, shutdown: bool) -> list[Step
                           lambda: pause(node, host.pause_units)))
     if host.k3s:
         steps.append(Step(f"cordon and drain {node} (DaemonSets stay; PodDisruptionBudgets respected, "
-                          f"{DRAIN_TIMEOUT} at most)", lambda: drain(node)))
+                          f"{DRAIN_TIMEOUT} at most), single-copy Deployments moved first",
+                          lambda: drain(node, host)))
     if shutdown:
         steps.append(Step(f"power {node} off and wait for it to leave the network", lambda: poweroff(node)))
     return steps

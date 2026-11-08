@@ -37,9 +37,13 @@ exit 0
 echo "kubectl $*" >>"$STATE/log"
 case "$*" in
   "get pods -n jenkins-agents"*) cat "$STATE/agents" 2>/dev/null || echo '{"items": []}' ;;
-  *spec.nodeName=*) cat "$STATE/node.json" 2>/dev/null || echo '{"items": []}' ;;
+  *spec.nodeName=*)  # the node's pods: before.json until the drain, node.json after
+    f=before.json; [ -e "$STATE/drained" ] && f=node.json
+    cat "$STATE/$f" 2>/dev/null || echo '{"items": []}' ;;
+  "get deployments"*) cat "$STATE/deployments.json" 2>/dev/null || echo '{"items": []}' ;;
   *status.phase=Pending*) cat "$STATE/pending.json" 2>/dev/null || echo '{"items": []}' ;;
-  drain*) exit "$(cat "$STATE/drain_rc" 2>/dev/null || echo 0)" ;;
+  drain*) touch "$STATE/drained"; exit "$(cat "$STATE/drain_rc" 2>/dev/null || echo 0)" ;;
+  "rollout status"*deployment/slow*) exit 1 ;;
 esac
 exit 0
 """,
@@ -48,9 +52,20 @@ exit 0
 }
 
 
-def pod(namespace: str, name: str, owner: str = "ReplicaSet") -> dict:
+def pod(namespace: str, name: str, owner: str = "ReplicaSet", deployment: str = "") -> dict:
+    """A pod; with deployment, one of that Deployment's (owned by its ReplicaSet)."""
+    if deployment:
+        return {"metadata": {"namespace": namespace, "name": f"{deployment}-5f7d9-x2c4q",
+                             "labels": {"pod-template-hash": "5f7d9"},
+                             "ownerReferences": [{"kind": "ReplicaSet", "name": f"{deployment}-5f7d9"}]},
+                "status": {"phase": "Running"}}
     return {"metadata": {"namespace": namespace, "name": name, "ownerReferences": [{"kind": owner}]},
             "status": {"phase": "Running"}}
+
+
+def deployment(namespace: str, name: str, replicas: int = 1, strategy: str = "RollingUpdate") -> dict:
+    return {"metadata": {"namespace": namespace, "name": name},
+            "spec": {"replicas": replicas, "strategy": {"type": strategy}}}
 
 
 class PowerDown(unittest.TestCase):
@@ -80,7 +95,7 @@ class PowerDown(unittest.TestCase):
 
     def changes(self) -> list[str]:
         """The calls that change something (not the reads and SSH probes)."""
-        reads = ("kubectl get", "kubectl wait")
+        reads = ("kubectl get", "kubectl wait", "kubectl rollout status")
         return [line for line in self.log() if not line.startswith(reads)
                 and not line.endswith(" true") and "pgrep" not in line]
 
@@ -131,6 +146,33 @@ class PowerDown(unittest.TestCase):
         self.assertIn("brick666 is drained", out)
         self.assertIn("overwatch/scanner-0", out)
         self.assertIn("off the network", out)
+
+    def test_single_copies_move_before_the_drain(self):
+        (self.state / "before.json").write_text(json.dumps({"items": [
+            pod("kube-system", "", deployment="coredns"), pod("argocd", "", deployment="argocd-repo-server"),
+            pod("wigle", "", deployment="wigle-console"), pod("overwatch", "", deployment="overwatch-scanner"),
+            pod("db", "", deployment="recreated"), pod("monitoring", "alloy-x", owner="DaemonSet")]}))
+        (self.state / "deployments.json").write_text(json.dumps({"items": [
+            deployment("kube-system", "coredns"), deployment("argocd", "argocd-repo-server"),
+            deployment("wigle", "wigle-console", replicas=2), deployment("overwatch", "overwatch-scanner"),
+            deployment("db", "recreated", strategy="Recreate"), deployment("other", "coredns")]}))
+        error, out = self.go(NODE="brick666", SHUTDOWN="false")
+        self.assertIsNone(error)
+        changes = self.changes()
+        self.assertEqual(changes[1], "kubectl cordon brick666")
+        # Only single-copy, rolling, not-pinned Deployments on this node, before the drain.
+        self.assertEqual(changes[2:4], ["kubectl rollout restart -n argocd deployment/argocd-repo-server",
+                                        "kubectl rollout restart -n kube-system deployment/coredns"])
+        self.assertTrue(changes[4].startswith("kubectl drain brick666"))
+        self.assertIn("kubectl rollout status -n kube-system deployment/coredns --timeout=2m", self.log())
+
+    def test_a_copy_that_wont_move_is_left_to_the_drain(self):
+        (self.state / "before.json").write_text(json.dumps({"items": [pod("x", "", deployment="slow")]}))
+        (self.state / "deployments.json").write_text(json.dumps({"items": [deployment("x", "slow")]}))
+        error, out = self.go(NODE="brick666", SHUTDOWN="false")
+        self.assertIsNone(error)
+        self.assertIn("warning: x/slow didn't move within 2m", out)
+        self.assertTrue(any(c.startswith("kubectl drain") for c in self.changes()))
 
     def test_failed_drain_is_undone(self):
         (self.state / "drain_rc").write_text("1")
