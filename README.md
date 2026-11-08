@@ -424,8 +424,8 @@ how many apps are synced and healthy, each app that isn't (out of sync is
 health fails; a failed last sync warns), and the last four syncs. wigle-sync's
 checks moved to the Services view (and its button's colour), and still feed its
 page, the "uploading" lights and the CRT label. The
-joystick left/right steps through the views. Pressing the front-right button
-(1UP, `KEY_O`) twice within 1.5 seconds starts the `check-all` Jenkins job
+joystick left/right steps through the views. Pressing button 6 (the bottom
+row's right-hand button, `KEY_X`) twice within 1.5 seconds starts the `check-all` Jenkins job
 (`scripts/smoke`, then `test-all`) through its webhook, with the webhook secret
 from `~/.config/brick-jenkins/secrets/webhook_secret`. One press only arms it
 (a white flash); the lights then answer blue (started) or amber (Jenkins
@@ -441,11 +441,21 @@ calls Home Assistant as its **Board** user, `BRICK_STATUS_HA_TOKEN` in the env
 file, which home-assistant's `scripts/setup` puts there. It works during quiet
 hours (the lights stay dark), doesn't wake the board, and does nothing while
 a game is open.
+The front-right button (1UP, `KEY_O`) is the party button (`party.py`, #152):
+twenty seconds of everything at once. The button lights play brick-plasma's
+`party` display (priority 100, so it shows through quiet hours too), the board
+page lays colour floods and pixel fireworks over itself with the party name in
+the middle (`BRICK_STATUS_PARTY_NAME` in the env file, PARTY if unset), the
+speaker plays a chiptune synthesized at start (`party_sound.py`, through
+`pw-play` at the dial's volume), and the Hue lamp runs through colours, then goes
+back exactly as it was. A press during a show starts it again from the top. It
+works any time, quiet hours too (the screen comes on for it), but not while a
+game is open.
 The buttons bounce (a release
 can be followed by a phantom press 16-120ms later), so presses within 150ms
 of the same button's release are ignored. The other cabinet keys (Start,
 joystick up/down) don't change the view but count as input. While a game
-is open (brick-retro), the side and front-right buttons do nothing.
+is open (brick-retro), the side, check and party buttons do nothing.
 
 The quiet schedule is `BRICK_STATUS_QUIET` in the env file: daily windows
 (`00:00-06:00`) or weekly ones (`Mon 00:00-Fri 16:00`), several per entry

@@ -1,9 +1,9 @@
-"""The Ramona button (brick-cicd-config#152): the cabinet's front-right button
-(1UP, KEY_O) starts twenty seconds of everything at once, for the user's
-daughter, who loves the lights.
+"""The party button (brick-cicd-config#152): the cabinet's front-right button
+(1UP, KEY_O) starts twenty seconds of everything at once, for whoever loves
+the lights most. The name it shows is BRICK_STATUS_PARTY_NAME (default PARTY).
 
-- the button lights play brick-plasma's "ramona" display (it ends by itself);
-- the board page lays a full-screen show over itself (/api/state's "ramona");
+- the button lights play brick-plasma's "party" display (it ends by itself);
+- the board page lays a full-screen show over itself (/api/state's "party");
 - the Hue lamp beside the cabinet runs through colours, then goes back to
   exactly how it was (on or off, brightness, colour).
 
@@ -20,7 +20,7 @@ from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
-SECONDS = 20.0  # the user, 2026-11-08 (10 was too short, 30 too long); brick-plasma's ramona display matches
+SECONDS = 20.0  # the user, 2026-11-08 (10 was too short, 30 too long); brick-plasma's party display matches
 # The lamp's colours, one every STEP seconds: a rainbow with white in it.
 COLOURS = [[255, 0, 0], [255, 140, 0], [255, 255, 0], [0, 255, 0], [0, 200, 255],
            [40, 90, 255], [170, 60, 255], [255, 0, 180], [255, 255, 255]]
@@ -89,7 +89,7 @@ class LampParty:
     def run(self) -> None:
         before = self.ha.state(self.entity)
         if before is None:
-            log.info("ramona: the lamp can't be read, so it stays out of the show")
+            log.info("party: the lamp can't be read, so it stays out of the show")
             return
         step = 0
         try:
@@ -100,4 +100,4 @@ class LampParty:
         finally:
             service, data = restore_call(before)
             ok, _ = self.ha.call(service, self.entity, **data)
-            log.info("ramona: lamp %s after %d colours", "put back" if ok else "NOT put back", step)
+            log.info("party: lamp %s after %d colours", "put back" if ok else "NOT put back", step)

@@ -157,16 +157,16 @@ class ShippedDisplaysTest(unittest.TestCase):
         self.assertEqual(self.errors, [])
         self.assertGreaterEqual(len({d.file for d in self.named.values()}), 3)
 
-    def test_the_ramona_show(self):
-        show = self.named["ramona"]
+    def test_the_party_show(self):
+        show = self.named["party"]
         self.assertEqual(show.file, "board.yaml")
         self.assertGreaterEqual(show.priority, self.named["off"].priority)  # over quiet hours too
-        # As long as brick-status's show (ramona.SECONDS).
+        # As long as brick-status's show (party.SECONDS).
         root = Path(__file__).resolve().parents[2]
-        seconds = float(re.search(r"^SECONDS = ([\d.]+)", (root / "brick-status" / "brick_status" / "ramona.py")
+        seconds = float(re.search(r"^SECONDS = ([\d.]+)", (root / "brick-status" / "brick_status" / "party.py")
                                   .read_text(), re.M).group(1))
         self.assertEqual(show.ttl, seconds)
-        frames = patterns.make("ramona", seconds=seconds)
+        frames = patterns.make("party", seconds=seconds)
         self.assertEqual(len(frames), int(seconds * patterns.FPS))
         self.assertTrue(all(len(f) == patterns.WIDTH for f in frames))
         self.assertEqual(frames[-1], [(255, 255, 255)] * patterns.WIDTH)  # the white finish

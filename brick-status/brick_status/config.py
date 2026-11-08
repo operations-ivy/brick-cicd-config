@@ -32,11 +32,11 @@ KEY_RIGHT = 106
 KEY_WAKE = 1
 # The bottom row's right-hand button (button 6, KEY_X): pressed twice, it
 # starts Jenkins' check-all job (check.py). It was 1UP's until 2026-11-08,
-# when 1UP became the Ramona button (the user).
+# when 1UP became the party button (the user).
 KEY_CHECK = 45
 # The cabinet's front-right button (1UP, KEY_O): ten seconds of light show on
-# the buttons, the screen and the lamp (ramona.py, #152). Checked on the hardware.
-KEY_RAMONA = 24
+# the buttons, the screen and the lamp (party.py, #152). Checked on the hardware.
+KEY_PARTY = 24
 # The cabinet's front-left button (COIN, KEY_I): the Hue lamp beside it, by
 # single, double and long press (lamp.py).
 KEY_LAMP = 23
@@ -108,6 +108,10 @@ class Settings:
     # Where tapping a page goes: the board's mirror, which only opens at home
     # (the name points at a LAN address). Empty for nowhere.
     ntfy_click: str = "https://status.brick.nozdormu.cloud"
+    # The name the party button's show puts on screen and in the footer
+    # (party.py). Set per cabinet in the env file; keep personal names there,
+    # not in this public repo.
+    party_name: str = "PARTY"
     # Open problems, unsent pages, and the incident log the weekly report reads.
     notify_dir: str = os.path.join(
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "brick-status")
@@ -118,6 +122,7 @@ class Settings:
         env = os.environ.get
         s.prometheus_url = env("BRICK_STATUS_PROMETHEUS_URL", s.prometheus_url).rstrip("/")
         s.poll_seconds = float(env("BRICK_STATUS_POLL_SECONDS", s.poll_seconds))
+        s.party_name = (env("BRICK_STATUS_PARTY_NAME", s.party_name).strip() or "PARTY")[:16].upper()
         s.jenkins_url = env("BRICK_STATUS_JENKINS_URL", s.jenkins_url).rstrip("/")
         s.jenkins_user = env("BRICK_STATUS_JENKINS_USER", s.jenkins_user)
         s.jenkins_password = env("BRICK_STATUS_JENKINS_PASSWORD", s.jenkins_password)
@@ -158,9 +163,9 @@ class Settings:
         return s
 
     @property
-    def ramona_sound(self) -> str:
-        """The Ramona button's sound, made at start (ramona_sound.py)."""
-        return os.path.join(self.notify_dir, "ramona.wav")
+    def party_sound(self) -> str:
+        """The party button's sound, made at start (party_sound.py)."""
+        return os.path.join(self.notify_dir, "party.wav")
 
     @property
     def board_state(self) -> str:

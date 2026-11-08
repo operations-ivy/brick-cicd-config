@@ -46,12 +46,12 @@ displays:
     seconds: 8.0
     priority: 60
 
-  # The Ramona button (1UP, brick_status/ramona.py, #152): twenty seconds of
-  # everything, from its own "ramona" sender. Over quiet hours too (the user,
+  # The party button (1UP, brick_status/party.py, #152): twenty seconds of
+  # everything, from its own "party" sender. Over quiet hours too (the user,
   # 2026-11-08: the full show any time): level with "off", it wins as the
   # newer signal, and brick-status leaves its own signal alone during a show.
-  ramona:
-    effect: ramona
+  party:
+    effect: party
     seconds: 20.0
     priority: 100
     ttl: 20

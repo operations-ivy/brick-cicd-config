@@ -1,4 +1,4 @@
-"""The Ramona button's sound (ramona.py): twenty seconds of chiptune, made here.
+"""The party button's sound (party.py): twenty seconds of chiptune, made here.
 
 Synthesized at start, so there's no audio file to license or fetch, and played
 through PipeWire's pw-play at the speaker's own volume (the dial sets it).
@@ -28,7 +28,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 RATE = 22050
-SECONDS = 20.0  # ramona.SECONDS
+SECONDS = 20.0  # party.SECONDS
 ROUND = 10.0
 PEAK = 0.45  # of full scale: loud enough on the cabinet's speaker, never clipping
 
@@ -131,11 +131,11 @@ class Player:
             write_wav(self.path, synth())
             self._ready.set()
         except OSError as e:
-            log.warning("ramona: couldn't make the sound (%s); the show stays silent", e)
+            log.warning("party: couldn't make the sound (%s); the show stays silent", e)
 
     def play(self) -> None:
         if not self._ready.is_set():
-            log.info("ramona: the sound isn't made yet; silent this time")
+            log.info("party: the sound isn't made yet; silent this time")
             return
         with self._lock:
             if self._playing is not None and self._playing.poll() is None:
@@ -144,4 +144,4 @@ class Player:
                 self._playing = subprocess.Popen([self.command, str(self.path)],
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except OSError as e:
-                log.warning("ramona: couldn't play the sound (%s)", e)
+                log.warning("party: couldn't play the sound (%s)", e)

@@ -1,6 +1,6 @@
 // Check the whole homelab now: scripts/smoke (is everything up?), then
 // test-all (every repo's tests on main). Started by pressing brick9000's
-// front-right button twice (brick-status/brick_status/check.py). The lights
+// button 6 (the bottom row's right-hand one) twice (brick-status/brick_status/check.py). The lights
 // show the stages and test-all's nightly pattern, then green for a pass or red
 // for a failure. Read-only: it changes nothing anywhere.
 pipeline {

@@ -204,12 +204,12 @@
   #static { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none;
             image-rendering: pixelated; display: none; }
 
-  /* The Ramona button's show (brick_status/ramona.py): a chunky-pixel canvas over
+  /* The party button's show (brick_status/party.py): a chunky-pixel canvas over
      everything, and the CRT cycling every hue. Only while a show is on. */
-  #ramona { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none;
+  #party { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none;
             image-rendering: pixelated; mix-blend-mode: screen; }
-  body.ramona .crt .glass { animation: ramona-hue 1.2s linear infinite; }
-  @keyframes ramona-hue { from { filter: hue-rotate(0deg) saturate(3); } to { filter: hue-rotate(360deg) saturate(3); } }
+  body.party .crt .glass { animation: party-hue 1.2s linear infinite; }
+  @keyframes party-hue { from { filter: hue-rotate(0deg) saturate(3); } to { filter: hue-rotate(360deg) saturate(3); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
 </head>
@@ -231,10 +231,10 @@
   <div class="panel" id="ls-panel"><h2>LAMP · SPEAKER</h2><div id="lamp"></div><div id="vol"></div></div>
   <div class="nodes panel" id="nodes-panel"><h2>NODES</h2></div>
 </main>
-<canvas id="ramona" hidden></canvas>
+<canvas id="party" hidden></canvas>
 <footer>
   <div class="pad" id="pad"></div>
-  <div class="hint"><b>LAMP</b> tap · 2×: scene · hold: night &nbsp; <b>1UP</b> RAMONA<br>
+  <div class="hint"><b>LAMP</b> tap · 2×: scene · hold: night &nbsp; <b>1UP</b> <span id="party-name">PARTY</span><br>
     <b>SIDE</b> sleep / wake &nbsp; <b>STICK</b> ← → screens</div>
 </footer>
 
@@ -561,7 +561,8 @@ function setState(id, state) {
 }
 
 function render(s) {
-  if (s.ramona > 0) ramonaShow(s.ramona);
+  if (s.party_name) { partyName = s.party_name; document.getElementById("party-name").textContent = partyName; }
+  if (s.party > 0) partyShow(s.party);
   const g = s.groups || {};
   document.body.classList.toggle("alarm", s.overall === "fail");
   const found = findAnomalies(s);
@@ -696,29 +697,29 @@ document.fonts.load('15px "VT323"').finally(() => {
   setInterval(pollVolume, 3000);
 });
 
-// The Ramona button's show: colour floods sweeping the screen, pixel fireworks
-// bursting over it, and RAMONA in the middle. Drawn at an eighth of the
+// The party button's show: colour floods sweeping the screen, pixel fireworks
+// bursting over it, and the party name (BRICK_STATUS_PARTY_NAME) in the middle. Drawn at an eighth of the
 // screen's size and scaled up, and only while a show is on: the page asks
-// /api/state every second, and each answer with "ramona" > 0 sets the end.
-let ramonaEnd = 0, ramonaRunning = false;
-function ramonaShow(secondsLeft) {
-  ramonaEnd = performance.now() + secondsLeft * 1000;
-  document.body.classList.add("ramona");
-  if (ramonaRunning) return;
-  const canvas = document.getElementById("ramona");
+// /api/state every second, and each answer with "party" > 0 sets the end.
+let partyEnd = 0, partyRunning = false, partyName = "PARTY";
+function partyShow(secondsLeft) {
+  partyEnd = performance.now() + secondsLeft * 1000;
+  document.body.classList.add("party");
+  if (partyRunning) return;
+  const canvas = document.getElementById("party");
   canvas.hidden = false;
   const w = canvas.width = Math.max(1, Math.round(innerWidth / 8));
   const h = canvas.height = Math.max(1, Math.round(innerHeight / 8));
   const ctx = canvas.getContext("2d");
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const sparks = [];
-  ramonaRunning = true;
+  partyRunning = true;
   const start = performance.now();
   function frame(now) {
-    if (now >= ramonaEnd) {
-      ramonaRunning = false;
+    if (now >= partyEnd) {
+      partyRunning = false;
       canvas.hidden = true;
-      document.body.classList.remove("ramona");
+      document.body.classList.remove("party");
       return;
     }
     const t = (now - start) / 1000;
@@ -748,7 +749,7 @@ function ramonaShow(secondsLeft) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = `hsl(${(t * 300) % 360}, 100%, 60%)`;
-    ctx.fillText("RAMONA", w / 2, h / 2);
+    ctx.fillText(partyName, w / 2, h / 2);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

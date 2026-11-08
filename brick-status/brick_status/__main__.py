@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 
 from . import board_metrics as bm
-from . import check, checks, host, lamp, lights, notify, ramona, ramona_sound, since, units, web
+from . import check, checks, host, lamp, lights, notify, party, party_sound, since, units, web
 from .board import ACTIVE, QUIET, Board
-from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_RAMONA, KEY_RIGHT, KEY_WAKE,
+from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY, KEY_RIGHT, KEY_WAKE,
                      VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
@@ -111,7 +111,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
 
 def button_name(code: int) -> str:
     """A cabinet key as a metric label: the view a button picks, or what it does."""
-    named = {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_RAMONA: "ramona",
+    named = {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_PARTY: "party",
              KEY_LEFT: "left", KEY_RIGHT: "right"}
     if code in named:  # before BUTTON_KEYS: the check button is one of the six
         return named[code]
@@ -167,16 +167,16 @@ def main() -> None:
             plasma.answer(answer)
         lamp_watch.poke()  # the board shows the new state within a couple of seconds
 
-    show = ramona.Show()
-    party = ramona.LampParty(home_assistant, lamp_config.entity, show)
-    sound = ramona_sound.Player(Path(settings.ramona_sound))
+    show = party.Show()
+    party = party.LampParty(home_assistant, lamp_config.entity, show)
+    sound = party_sound.Player(Path(settings.party_sound))
     threading.Thread(target=sound.prepare, daemon=True).start()
 
     def start_show() -> None:
         fresh = show.start()
-        plasma.ramona()
+        plasma.party()
         sound.play()
-        log.info("ramona: %s", "show on" if fresh else "ten more seconds")
+        log.info("party: %s", "show on" if fresh else "ten more seconds")
         if fresh:
             threading.Thread(target=party.run, daemon=True).start()
 
@@ -197,7 +197,7 @@ def main() -> None:
             if not os.path.exists(settings.retro_flag):
                 lamp_button.press()
             return
-        if code == KEY_RAMONA:
+        if code == KEY_PARTY:
             # Any time, quiet hours too; not while a game is open (1UP is a
             # game's button then).
             if not os.path.exists(settings.retro_flag):

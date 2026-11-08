@@ -253,8 +253,8 @@ def solid(colour: Rgb, seconds: float = 0.0) -> list[Frame]:
     return [[colour] * WIDTH]
 
 
-def ramona(seconds: float = 20.0, seed: int = 2017) -> list[Frame]:
-    """The Ramona button's show (brick-cicd-config#152): every effect the
+def party(seconds: float = 20.0, seed: int = 2017) -> list[Frame]:
+    """The party button's show (brick-cicd-config#152): every effect the
     cabinet has, back to back and faster, then a white flash to finish.
 
     A spinning rainbow, a fast boil, strobing random colours, the nightly
@@ -313,7 +313,7 @@ EFFECTS = {
     "rainbow": rainbow,
     "boil": boil,
     "nightly": nightly,
-    "ramona": ramona,
+    "party": party,
 }
 
 
