@@ -820,8 +820,8 @@ class FakeHA:
 
 
 class RamonaTest(unittest.TestCase):
-    def test_thirty_seconds_then_done(self):
-        self.assertEqual(ramona.SECONDS, 30.0)  # the user, 2026-11-08
+    def test_twenty_seconds_then_done(self):
+        self.assertEqual(ramona.SECONDS, 20.0)  # the user, 2026-11-08
         clock = FakeClock()
         show = ramona.Show(clock=clock)
         self.assertFalse(show.on())

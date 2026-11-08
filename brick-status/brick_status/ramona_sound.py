@@ -1,4 +1,4 @@
-"""The Ramona button's sound (ramona.py): thirty seconds of chiptune, made here.
+"""The Ramona button's sound (ramona.py): twenty seconds of chiptune, made here.
 
 Synthesized at start, so there's no audio file to license or fetch, and played
 through PipeWire's pw-play at the speaker's own volume (the dial sets it).
@@ -28,7 +28,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 RATE = 22050
-SECONDS = 30.0  # ramona.SECONDS
+SECONDS = 20.0  # ramona.SECONDS
 ROUND = 10.0
 PEAK = 0.45  # of full scale: loud enough on the cabinet's speaker, never clipping
 
