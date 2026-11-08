@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Write an Xcursor theme whose every cursor is one transparent pixel.
+
+brick9000 has no mouse anyone uses, but labwc still draws its arrow where
+the pointer rests: the board's `cursor: none` only covers what Chromium
+draws. labwc reads XCURSOR_THEME at login (install.sh sets it to this
+theme), so the compositor and every app get an invisible cursor.
+
+Usage: blank-cursor-theme [ICONS_DIR]   (default ~/.local/share/icons)
+"""
+
+import struct
+import sys
+from pathlib import Path
+
+THEME = "brick-blank"
+# Xcursor file format (man Xcursor): a file header, a table of contents,
+# then one image chunk.
+MAGIC = b"Xcur"
+FILE_HEADER = 16
+FILE_VERSION = 0x10000
+TOC_ENTRY = 12
+IMAGE_TYPE = 0xFFFD0002
+IMAGE_HEADER = 36
+IMAGE_VERSION = 1
+NOMINAL_SIZE = 24
+
+# Every name labwc, wlroots and Chromium ask for (CSS cursor names plus the
+# X11 names), so none falls back to a visible theme.
+NAMES = """
+default left_ptr arrow top_left_arrow text xterm ibeam vertical-text pointer
+hand hand1 hand2 pointing_hand wait watch progress left_ptr_watch half-busy
+crosshair cross tcross cell plus move fleur all-scroll size_all grab openhand
+grabbing closedhand dnd-none dnd-move dnd-copy dnd-link not-allowed no-drop
+crossed_circle forbidden circle help question_arrow whats_this context-menu
+alias copy zoom-in zoom-out col-resize row-resize ew-resize ns-resize
+nesw-resize nwse-resize n-resize s-resize e-resize w-resize ne-resize
+nw-resize se-resize sw-resize sb_h_double_arrow sb_v_double_arrow h_double_arrow
+v_double_arrow size_hor size_ver size_bdiag size_fdiag fd_double_arrow
+bd_double_arrow top_side bottom_side left_side right_side top_left_corner
+top_right_corner bottom_left_corner bottom_right_corner split_h split_v
+X_cursor pirate draft pencil color-picker right_ptr center_ptr
+""".split()
+
+
+def blank_cursor() -> bytes:
+    """One 1x1 fully transparent image, hotspot at its only pixel."""
+    image = struct.pack(
+        "<9I", IMAGE_HEADER, IMAGE_TYPE, NOMINAL_SIZE, IMAGE_VERSION,
+        1, 1, 0, 0, 0,  # width, height, x hotspot, y hotspot, delay
+    ) + struct.pack("<I", 0)  # one ARGB pixel, alpha 0
+    position = FILE_HEADER + TOC_ENTRY
+    return (
+        MAGIC
+        + struct.pack("<3I", FILE_HEADER, FILE_VERSION, 1)
+        + struct.pack("<3I", IMAGE_TYPE, NOMINAL_SIZE, position)
+        + image
+    )
+
+
+def write_theme(icons: Path) -> Path:
+    """Write the theme under icons/brick-blank; return its folder."""
+    theme = icons / THEME
+    cursors = theme / "cursors"
+    cursors.mkdir(parents=True, exist_ok=True)
+    # No Inherits: a name missing here must not fall back to a visible arrow.
+    (theme / "index.theme").write_text(
+        f"[Icon Theme]\nName={THEME}\nComment=Every cursor invisible (brick9000)\n"
+    )
+    data = blank_cursor()
+    for name in NAMES:
+        (cursors / name).write_bytes(data)
+    return theme
+
+
+def main() -> None:
+    icons = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / ".local/share/icons"
+    print(f"wrote {write_theme(icons)} ({len(NAMES)} cursors)")
+
+
+if __name__ == "__main__":
+    main()
