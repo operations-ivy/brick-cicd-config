@@ -20,8 +20,8 @@ from . import board_metrics as bm
 from . import (check, checks, host, lamp, lights, notify, party, party_sound, since, units,
                web)
 from .board import ACTIVE, QUIET, Board
-from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY, KEY_RIGHT, KEY_WAKE,
-                     VIEWS, Settings)
+from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY,
+                     KEY_RIGHT, KEY_WAKE, VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
 log = logging.getLogger("brick-status")

@@ -601,9 +601,9 @@ class MirrorTest(unittest.TestCase):
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
         settings = Settings(http_host="127.0.0.1", http_port=port)
-        self.board = board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
+        self.board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
         status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
-        threading.Thread(target=web.serve, args=(settings, board, status), daemon=True).start()
+        threading.Thread(target=web.serve, args=(settings, self.board, status), daemon=True).start()
         self.base = f"http://127.0.0.1:{port}"
         for _ in range(50):
             try:
