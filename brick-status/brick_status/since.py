@@ -17,6 +17,9 @@ log = logging.getLogger(__name__)
 
 NOT_FINE = ("fail", "warn", "unknown")
 TEMP_WARN_C = 70  # the page's TMP warning level
+# A temperature warning clears only below this, so a degree either side of
+# TEMP_WARN_C can't flap it on and off.
+TEMP_CLEAR_C = 68
 DISK_WARN_PCT = 85  # and DSK's
 
 
@@ -25,7 +28,7 @@ def anomaly_keys(summary: dict, vitals: list[dict], host_state: dict, hostname: 
     keys = {f"{group}/{c['name']}" for group, g in (summary.get("groups") or {}).items()
             for c in g.get("checks", []) if c.get("state") in NOT_FINE}
     for n in vitals:
-        if (n.get("temp") or 0) >= TEMP_WARN_C:
+        if n.get("temp_warn", (n.get("temp") or 0) >= TEMP_WARN_C):
             keys.add(f"{n['node']}/temp")
         if (n.get("disk") or 0) >= DISK_WARN_PCT:
             keys.add(f"{n['node']}/disk")
@@ -34,6 +37,24 @@ def anomaly_keys(summary: dict, vitals: list[dict], host_state: dict, hostname: 
     if host_state.get("sshd") is False:
         keys.add(f"{hostname}/sshd")
     return keys
+
+
+class TempWarnings:
+    """Which nodes have a temperature warning: raised at TEMP_WARN_C, cleared
+    below TEMP_CLEAR_C. `mark` sets each vital's "temp_warn", which the page
+    and `anomaly_keys` read."""
+
+    def __init__(self):
+        self.warm: set[str] = set()
+
+    def mark(self, vitals: list[dict]) -> None:
+        for n in vitals:
+            node, temp = n["node"], n.get("temp")
+            if temp is None or temp < TEMP_CLEAR_C:
+                self.warm.discard(node)
+            elif temp >= TEMP_WARN_C:
+                self.warm.add(node)
+            n["temp_warn"] = node in self.warm
 
 
 class Since:

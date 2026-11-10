@@ -93,7 +93,9 @@
   .anom .where { font-size: 1.0em; color: var(--s); }
   .anom .detail { grid-column: 2; font-size: 0.9em; color: var(--text); overflow-wrap: anywhere; }
   .anom.fail .led { animation: blink 0.9s steps(2, jump-none) infinite; }
-  .summary .badge { color: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
+  /* No animation: a continuous fade kept Chromium near a core on brick9000, enough
+     to hold a temperature warning up by itself (2026-11-09). */
+  .summary .badge { color: var(--amber); }
   .summary .badge.stale { color: var(--red); text-shadow: 0 0 0.3em var(--red); }
   /* Left more than a day: magenta, so it can't be mistaken for today's trouble. */
   .anom .age { grid-column: 2; font-size: 0.8em; color: var(--dim); }
@@ -139,7 +141,7 @@
   .item { display: grid; grid-template-columns: 0.8em minmax(0, 1fr) auto; gap: 0.45em; align-items: center; line-height: 1.1; }
   .item .led { width: 0.6em; height: 0.6em; background: var(--s); box-shadow: 0 0 0.35em var(--s); }
   .item.fail .led, .item.fail .what { animation: blink 0.9s steps(2, jump-none) infinite; }
-  .item.active .led { animation: pulse 1.2s ease-in-out infinite; }
+  .item.active .led { animation: pulse 1.2s steps(2, jump-none) infinite; }
   .item .name { font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .item .what { font-size: 0.85em; color: var(--s); white-space: nowrap; }
   .item.ok .what { color: var(--dim); }
@@ -302,7 +304,8 @@ function findAnomalies(s) {
   if (s.host?.sshd === false) out.push({ state: "fail", name: "brick9000/sshd", what: "down" });
   for (const n of s.vitals || []) {
     const t = n.temp, d = n.disk;
-    if (t >= 70) out.push({ state: t >= 80 ? "fail" : "warn", name: `${n.node}/temp`, what: `${Math.round(t)}°C` });
+    // temp_warn: raised at 70°C, cleared below 68°C (since.py, TempWarnings).
+    if (n.temp_warn ?? t >= 70) out.push({ state: t >= 80 ? "fail" : "warn", name: `${n.node}/temp`, what: `${Math.round(t)}°C` });
     if (d >= 85) out.push({ state: d >= 95 ? "fail" : "warn", name: `${n.node}/disk`, what: `${Math.round(d)}%` });
   }
   // How long each has been there (since.py keeps the first-seen times on brick9000).

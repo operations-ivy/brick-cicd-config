@@ -66,6 +66,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     pager = notify.Pager(state / "notify.json", state / "incidents.jsonl")
     ntfy = ntfy_from(settings)
     clock = since.Since(state / "anomalies-since.json")
+    warm = since.TempWarnings()
     while True:
         started = time.monotonic()
         try:
@@ -75,6 +76,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
                 log.warning("vitals query failed: %s", e)
                 vitals = []
             vitals.append(local.read())
+            warm.mark(vitals)
             internet = host.internet_up()
             summary = checks.summarize(checks.collect(prom, jenkins, internet)
                                        + units.board_checks(prom, hostname))

@@ -1707,6 +1707,26 @@ class UnitsTest(unittest.TestCase):
                          [("brick-roms.service", "failed"), ("late.timer", "overdue"), ("stopped.timer", "stopped")])
         self.assertEqual(found[1][2], "overdue by 20m")
 
+    def test_a_quick_service_finishing_mid_read_is_not_a_stopped_timer(self):
+        # wifi-watchdog's service takes 0.1 s: list-timers saw no next run, and by
+        # is-active it had finished. The second look finds the re-armed timer.
+        lists = iter([[{"unit": "brick-wifi-watchdog.timer", "next": 0,
+                        "activates": "brick-wifi-watchdog.service"}],
+                      [{"unit": "brick-wifi-watchdog.timer", "next": int((NOW + 300) * 1e6)}]])
+        with mock.patch.object(units, "systemctl", lambda user, *args: [] if "list-units" in args else next(lists)), \
+                mock.patch.object(units, "is_enabled", return_value=True), \
+                mock.patch.object(units, "is_running", return_value=False):
+            data = units.read(True)
+        self.assertEqual(units.problems(data, NOW), [])
+
+    def test_a_timer_still_without_a_next_run_is_stopped(self):
+        lists = iter([[{"unit": "gone.timer", "next": 0, "activates": "gone.service"}], [{"unit": "gone.timer", "next": 0}]])
+        with mock.patch.object(units, "systemctl", lambda user, *args: [] if "list-units" in args else next(lists)), \
+                mock.patch.object(units, "is_enabled", return_value=True), \
+                mock.patch.object(units, "is_running", return_value=False):
+            data = units.read(True)
+        self.assertEqual([(u, kind) for u, kind, _ in units.problems(data, NOW)], [("gone.timer", "stopped")])
+
     def test_local_checks_cover_both_scopes_and_say_ok_when_clean(self):
         scopes = {False: {"failed": [], "timers": []},
                   True: {"failed": ["brick-mirror.service"], "timers": []}}
@@ -2570,6 +2590,22 @@ class SinceTest(unittest.TestCase):
         keys = since.anomaly_keys(summary, vitals, {"internet": False, "sshd": True}, "brick9000")
         self.assertEqual(keys, {"cluster/workloads", "builds/build-branches", "brick9000/temp",
                                 "brick2000/disk", "internet"})
+
+    def test_temperature_warning_clears_only_below_68(self):
+        from brick_status import since
+        warm = since.TempWarnings()
+        seen = []
+        for t in (69.5, 70.0, 69.0, 68.0, 67.9, 69.9, None, 72.0):
+            vitals = [{"node": "brick9000", "temp": t}]
+            warm.mark(vitals)
+            seen.append(vitals[0]["temp_warn"])
+        self.assertEqual(seen, [False, True, True, True, False, False, False, True])
+
+    def test_keys_follow_the_temperature_warning(self):
+        from brick_status import since
+        vitals = [{"node": "brick9000", "temp": 69.0, "temp_warn": True},
+                  {"node": "brick666", "temp": 71.0, "temp_warn": False}]
+        self.assertEqual(since.anomaly_keys({}, vitals, {}, "brick9000"), {"brick9000/temp"})
 
     def test_first_seen_is_kept_and_cleared(self):
         from brick_status import since
