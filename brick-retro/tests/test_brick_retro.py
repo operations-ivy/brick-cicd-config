@@ -577,6 +577,13 @@ class WallpaperTests(unittest.TestCase):
         cfg = (Path(__file__).resolve().parents[2] / "brick9000/retroarch/retroarch.cfg").read_text()
         self.assertIn('menu_wallpaper = "~/brick-cicd-config/brick9000/retroarch/wallpaper.png"', cfg)
 
+    def test_the_menu_font_is_the_boards_and_vendored_with_its_licence(self):
+        repo = Path(__file__).resolve().parents[2]
+        cfg = (repo / "brick9000/retroarch/retroarch.cfg").read_text()
+        self.assertIn('xmb_font = "~/brick-cicd-config/brick9000/retroarch/fonts/VT323-Regular.ttf"', cfg)
+        self.assertEqual((repo / "brick9000/retroarch/fonts/VT323-Regular.ttf").read_bytes()[:4], b"\x00\x01\x00\x00")
+        self.assertIn("SIL Open Font License", (repo / "brick9000/retroarch/fonts/LICENSE-vt323").read_text())
+
 
 class LabelTests(unittest.TestCase):
     def test_tags_that_say_nothing_go(self):
