@@ -17,9 +17,10 @@ DEFAULT_QUIET = ("00:00-06:00; 2026-10-09: Mon 00:01-Mon 16:00, Tue 00:00-Tue 16
 VIEWS = ["overview", "builds", "cluster", "anomalies"]
 # What the six front-panel buttons do, in BUTTON_KEYS order: the top row picks
 # a screen, and the first of the bottom row the anomalies' own page (the user,
-# 2026-11-07). The fifth is free (not the volume: the dial does that); a press
-# there only wakes the board. The sixth is the check button (KEY_CHECK).
-BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest are free
+# 2026-11-07). The fifth enlarges the CRT to the whole screen and back
+# (CRT_BUTTON; the user, 2026-11-09). The sixth is the check button (KEY_CHECK).
+BUTTON_ACTIONS = ["overview", "builds", "cluster", "anomalies"]  # shorter than BUTTON_KEYS: the rest do other things
+CRT_BUTTON = 4  # BUTTON_KEYS index: the CRT full screen and back
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six
 # front-panel buttons (two rows of three), top row left to right, then the

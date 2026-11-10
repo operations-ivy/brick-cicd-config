@@ -79,6 +79,7 @@ def serve(settings, board, status, lamp_watch: "LampWatch | None" = None, show: 
                     "updated": status.updated,
                     "now": now,
                     "crt": crt,
+                    "crt_full": board.crt_full,
                     "activity": activity.running(),
                     "lamp": lamp_watch.get() if lamp_watch is not None else None,
                     # Seconds of the party button's show left (party.py); 0 when none.

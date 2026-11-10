@@ -138,6 +138,7 @@ class Board:
         self.morning = morning
         self.state_path = state_path
         self._view = 0
+        self._crt_full = False  # only the CRT button changes it: idle and quiet don't
         self._last_press: float | None = None
         self._awake_until: float | None = None
         self._asleep_until: float | None = self._load_sleep()
@@ -231,6 +232,21 @@ class Board:
             if 0 <= index < len(self.views):
                 self._view = index
             self._last_press = now
+
+    def toggle_crt(self, now: float) -> bool | None:
+        """The CRT button: the CRT to the whole screen, or back to its panel.
+        The new state, or None while the board is asleep (keys do nothing then)."""
+        with self._lock:
+            if self._asleep(now):
+                return None
+            self._crt_full = not self._crt_full
+            self._last_press = now
+            return self._crt_full
+
+    @property
+    def crt_full(self) -> bool:
+        with self._lock:
+            return self._crt_full
 
     def step_view(self, delta: int, now: float) -> None:
         with self._lock:
