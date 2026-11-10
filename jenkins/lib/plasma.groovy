@@ -25,11 +25,19 @@ def plasmaJson(String value) {
 def plasmaShow(String kind) {
     def name = currentBuild.displayName
     def title = name.contains(' ') ? name.substring(name.indexOf(' ') + 1) : env.JOB_NAME
-    def details = ["\"job\": ${plasmaJson(env.JOB_NAME)}", "\"build\": ${plasmaJson('#' + env.BUILD_NUMBER)}"]
-    def ref = params.REF ?: params.BRANCH
-    if (ref) {
-        details << "\"ref\": ${plasmaJson(ref.toString())}"
+    // The CRT shows these in order, dropping the last ones when short of rows:
+    // the job only when the title isn't already its name, then the branch
+    // (build-image's REF can be any ref), then the build number.
+    def details = []
+    if (title != env.JOB_NAME) {
+        details << "\"job\": ${plasmaJson(env.JOB_NAME)}"
     }
+    if (params.REF) {
+        details << "\"ref\": ${plasmaJson(params.REF.toString())}"
+    } else if (params.BRANCH) {
+        details << "\"branch\": ${plasmaJson(params.BRANCH.toString())}"
+    }
+    details << "\"build\": ${plasmaJson('#' + env.BUILD_NUMBER)}"
     return "{\"title\": ${plasmaJson(title)}, \"status\": ${plasmaJson(kind)}, \"details\": {${details.join(', ')}}}"
 }
 

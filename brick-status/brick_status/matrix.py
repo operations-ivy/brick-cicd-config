@@ -51,8 +51,8 @@ PROGRAMS = {
     "gallery": Program((sys.executable, "-m", "brick_status.crt_gallery"), font=7),
     # Not in the playlist: while the plasma API has activity, the page splits the
     # window: what's running, big enough to read across the room, over its log.
-    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=15),
-    "activity-log": Program((sys.executable, "-m", "brick_status.crt_logs"), font=9, slot="log"),
+    "activity": Program((sys.executable, "-m", "brick_status.crt_activity"), font=22),
+    "activity-log": Program((sys.executable, "-m", "brick_status.crt_logs"), font=12, slot="log"),
     # Not hollywood: whatever its settings, its widgets (atop, htop, tree, ...)
     # held the Pi 4 at 96% CPU (#28).
 }

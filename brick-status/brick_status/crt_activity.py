@@ -5,11 +5,13 @@ page sees activity:
 
     python3 -m brick_status.crt_activity
 
-One thing running: its title typed a key at a time, then its status and details.
-More than one: only their titles. The newest one's log scrolls in a terminal of
-its own below this one (crt_logs.py, the page's split window). The plasma API holds what senders say about
-themselves (brick-plasma's web.py, "show"); the page tints this with the board's
-health colour, like every program.
+One thing running: its title typed a key at a time, then its status and
+details, fitted to the rows there are: the gap above them goes first, then the
+last details; "running" always shows. More than one: only their titles. The
+newest one's log scrolls in a terminal of its own below this one (crt_logs.py,
+the page's split window). The plasma API holds what senders say about
+themselves (brick-plasma's web.py, "show"); the page tints this with the
+board's health colour, like every program.
 """
 
 import json
@@ -21,7 +23,7 @@ import urllib.request
 
 KEY_SECONDS = 0.1  # one letter: slow enough to watch
 POLL_SECONDS = 0.5
-TOP, LEFT = 2, 3  # the first title's row, and the left margin
+TOP, LEFT = 1, 3  # the first title's row, and the left margin
 PROMPT = "> "
 URL = os.environ.get("BRICK_STATUS_PLASMA_URL", "http://127.0.0.1:8766").rstrip("/")
 
@@ -34,11 +36,12 @@ def elapsed(seconds: float) -> str:
 class Screen:
     """Draws what's running, typing only what hasn't been typed yet."""
 
-    def __init__(self, cols: int, write, sleep=time.sleep, clock=time.monotonic):
-        self.cols, self.write, self.sleep, self.clock = cols, write, sleep, clock
+    def __init__(self, cols: int, write, sleep=time.sleep, clock=time.monotonic, rows: int = 99):
+        self.cols, self.rows, self.write, self.sleep, self.clock = cols, rows, write, sleep, clock
         self.typed: dict[str, str] = {}  # source to title, in the order they appeared
         self.since: dict[str, float] = {}
         self.below: list[str] | None = None
+        self.below_at = 0  # the row the details start on
 
     def _at(self, row: int, text: str = "") -> None:
         self.write(f"\x1b[{row};{LEFT}H\x1b[2K{text}")
@@ -84,14 +87,26 @@ class Screen:
                 if self.below:  # a second job arrived: its first's details go
                     self._redraw()
                 self._type(source, item["title"])
-        below = self._details(items[0]) if len(items) == 1 else []
-        if below != self.below:
-            first = TOP + len(self.typed) + 1
+        first, below = self._layout(self._details(items[0]) if len(items) == 1 else [])
+        if below != self.below or first != self.below_at:
             for row in range(len(self.below or [])):
-                self._at(first + row)
+                self._at(self.below_at + row)
             for row, line in enumerate(below):
                 self._at(first + row, line)
-            self.below = below
+            self.below, self.below_at = below, first
+
+    def _layout(self, lines: list[str]) -> tuple[int, list[str]]:
+        """Where the details start, and those that fit: a terminal moves a cursor
+        sent past its last row onto it, so extra lines would overwrite each other."""
+        free_from = TOP + len(self.typed)
+        room = self.rows - free_from + 1
+        if len(lines) < room:
+            return free_from + 1, lines  # a blank row under the title
+        if room < 1:
+            return free_from, []
+        if room == 1:
+            return free_from, lines[-1:]
+        return free_from, lines[:room - 1] + lines[-1:]
 
 
 def fetch() -> list[dict]:
@@ -108,7 +123,8 @@ def main() -> None:
         sys.stdout.flush()
 
     write("\x1b[2J\x1b[?25l")
-    screen = Screen(shutil.get_terminal_size().columns, write)
+    size = shutil.get_terminal_size()
+    screen = Screen(size.columns, write, rows=size.lines)
     while True:
         screen.update(fetch())
         time.sleep(POLL_SECONDS)

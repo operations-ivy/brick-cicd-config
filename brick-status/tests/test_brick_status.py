@@ -1584,6 +1584,8 @@ class JenkinsJobsTest(unittest.TestCase):
 class CrtActivityTest(unittest.TestCase):
     ONE = {"source": "a", "title": "overwatch:0.8.6", "status": "build", "details": {"job": "build-image"}}
     TWO = {"source": "b", "title": "deploy-brick9000", "status": "deploy", "details": {}}
+    DEPLOY = {"source": "d", "title": "deploy brick9000", "status": "deploy",
+              "details": {"branch": "feature/crt-branch", "commit": "5886cd2"}}
 
     def setUp(self):
         self.out, self.keys, self.now = [], [], 100.0
@@ -1650,6 +1652,29 @@ class CrtActivityTest(unittest.TestCase):
     def test_a_long_title_fits_the_window(self):
         self.screen.update([{**self.ONE, "title": "x" * 200}])
         self.assertLess(len(self.keys), 60)
+
+    def rows_drawn(self, rows):
+        screen = crt_activity.Screen(60, self.out.append, sleep=self.keys.append, clock=lambda: self.now, rows=rows)
+        screen.update([self.DEPLOY])
+        # Each row as last drawn (a later write to a row replaces it).
+        drawn = {int(row): text.strip()
+                 for row, text in re.findall(r"\x1b\[(\d+);3H\x1b\[2K([^\x1b]*)", "".join(self.out))}
+        self.out.clear()
+        return {row: text for row, text in drawn.items() if text and row > 1}  # row 1 is the title
+
+    def test_the_card_has_a_gap_when_there_is_room(self):
+        self.assertEqual(self.rows_drawn(6), {3: "status   deploy", 4: "branch   feature/crt-branch",
+                                             5: "commit   5886cd2", 6: "running  0s"})
+
+    def test_short_of_rows_the_gap_goes_first(self):
+        self.assertEqual(self.rows_drawn(5), {2: "status   deploy", 3: "branch   feature/crt-branch",
+                                             4: "commit   5886cd2", 5: "running  0s"})
+
+    def test_then_the_last_details_but_running_always_shows(self):
+        # A terminal puts a cursor sent past its last row on that row: every
+        # line beyond it would have landed on top of the last one.
+        self.assertEqual(self.rows_drawn(4), {2: "status   deploy", 3: "branch   feature/crt-branch",
+                                             4: "running  0s"})
 
     def test_nothing_running_clears_the_screen(self):
         self.screen.update([self.ONE])
@@ -2189,8 +2214,8 @@ class CrtSlotsTest(unittest.TestCase):
 
     def test_the_log_program_is_in_the_playlist_for_the_page(self):
         crt = web.crt_playlist(Settings())
-        self.assertEqual(crt["activity"]["font"], 15)
-        self.assertEqual(crt["activity_log"], {"name": "activity-log", "tint": True, "font": 9})
+        self.assertEqual(crt["activity"]["font"], 22)
+        self.assertEqual(crt["activity_log"], {"name": "activity-log", "tint": True, "font": 12})
         self.assertEqual(self.saved["activity-log"].slot, "log")
 
 

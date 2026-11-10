@@ -185,6 +185,13 @@ class Brick9000Deploy(DeployScripts, unittest.TestCase):
         self.assertIn("/signals/brick9000-deploy", result)
         self.assertIn("--max-time 1", result)
 
+    def test_the_crt_card_shows_the_branch_above_the_commit(self):
+        sha = self.h.commit("pass", "on a branch", branch="feature/lights")
+        self.h.follow("feature/lights")
+        self.h.deploy()
+        boil, _ = self.signals()
+        self.assertIn(f'"details": {{"branch": "feature/lights", "commit": "{sha[:7]}', boil)
+
     def test_a_failed_deploy_shows_as_failed(self):
         self.h.commit("fail", "bad")
         self.h.deploy()
