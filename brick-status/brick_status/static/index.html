@@ -160,7 +160,7 @@
   .crt .glass::after { content: ""; position: absolute; inset: 0; pointer-events: none;
     background: repeating-linear-gradient(to bottom, rgba(0,0,0,0.3) 0 1px, transparent 1px 3px); }
   .crt #term { position: absolute; inset: 0.3em; }
-  .crt { --split: 45%; }
+  .crt { --split: 60%; }  /* the job card at 22px: title, status, branch, commit, running */
   .crt #term-log { display: none; position: absolute; left: 0.3em; right: 0.3em; bottom: 0.3em;
     top: calc(var(--split) + 0.3em); border-top: 1px solid var(--edge); }
   .crt.split #term { bottom: auto; height: calc(var(--split) - 0.3em); }
