@@ -581,7 +581,8 @@ class WallpaperTests(unittest.TestCase):
         repo = Path(__file__).resolve().parents[2]
         cfg = (repo / "brick9000/retroarch/retroarch.cfg").read_text()
         self.assertIn('xmb_font = "~/brick-cicd-config/brick9000/retroarch/fonts/VT323-Regular.ttf"', cfg)
-        self.assertEqual((repo / "brick9000/retroarch/fonts/VT323-Regular.ttf").read_bytes()[:4], b"\x00\x01\x00\x00")
+        ttf_magic = b"\x00\x01\x00\x00"  # a TrueType font's first four bytes (sfnt version 1.0)
+        self.assertEqual((repo / "brick9000/retroarch/fonts/VT323-Regular.ttf").read_bytes()[:4], ttf_magic)
         self.assertIn("SIL Open Font License", (repo / "brick9000/retroarch/fonts/LICENSE-vt323").read_text())
 
 
