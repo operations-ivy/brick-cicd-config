@@ -139,12 +139,14 @@ def draw() -> Canvas:
 
     # The CRT panel on the right, where XMB puts a game's box art: the board's
     # panel (fill, 2 px edge), its magenta label, and the dark glass inside.
-    x0, y0, x1, y1 = 760, 196, 1128, 760
+    # XMB draws box art at about x 781-1138, y 240-600 on this screen; the
+    # label stays below XMB's row of icons (to y 200).
+    x0, y0, x1, y1 = 768, 226, 1148, 776
     c.rect(x0, y0, x1, y1, PANEL)
     c.frame(x0, y0, x1, y1, EDGE)
-    label(c, "CRT", x0 + 16, y0 - 14, MAGENTA)
-    c.rect(x0 + 14, y0 + 30, x1 - 14, y1 - 14, GLASS)
-    c.frame(x0 + 14, y0 + 30, x1 - 14, y1 - 14, EDGE, 1)
+    label(c, "CRT", x0 + 16, y0 - 16, MAGENTA)
+    c.rect(x0 + 8, y0 + 22, x1 - 8, y1 - 8, GLASS)
+    c.frame(x0 + 8, y0 + 22, x1 - 8, y1 - 8, EDGE, 1)
 
     # The vignette (dark from 60% out), under the wordmark so it stays bright.
     for y in range(H):
