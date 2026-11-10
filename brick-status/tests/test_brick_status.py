@@ -1584,6 +1584,8 @@ class JenkinsJobsTest(unittest.TestCase):
 class CrtActivityTest(unittest.TestCase):
     ONE = {"source": "a", "title": "overwatch:0.8.6", "status": "build", "details": {"job": "build-image"}}
     TWO = {"source": "b", "title": "deploy-brick9000", "status": "deploy", "details": {}}
+    DEPLOY = {"source": "d", "title": "deploy brick9000", "status": "deploy",
+              "details": {"branch": "feature/crt-branch", "commit": "5886cd2"}}
 
     def setUp(self):
         self.out, self.keys, self.now = [], [], 100.0
@@ -1651,17 +1653,14 @@ class CrtActivityTest(unittest.TestCase):
         self.screen.update([{**self.ONE, "title": "x" * 200}])
         self.assertLess(len(self.keys), 60)
 
-    DEPLOY = {"source": "d", "title": "deploy brick9000", "status": "deploy",
-              "details": {"branch": "feature/crt-branch", "commit": "5886cd2"}}
-
     def rows_drawn(self, rows):
         screen = crt_activity.Screen(60, self.out.append, sleep=self.keys.append, clock=lambda: self.now, rows=rows)
         screen.update([self.DEPLOY])
-        drawn = {}
-        for row, text in re.findall(r"\x1b\[(\d+);3H\x1b\[2K([^\x1b]*)", "".join(self.out)):
-            drawn[int(row)] = text.strip()
+        # Each row as last drawn (a later write to a row replaces it).
+        drawn = {int(row): text.strip()
+                 for row, text in re.findall(r"\x1b\[(\d+);3H\x1b\[2K([^\x1b]*)", "".join(self.out))}
         self.out.clear()
-        return {row: text for row, text in drawn.items() if text and row > 1}
+        return {row: text for row, text in drawn.items() if text and row > 1}  # row 1 is the title
 
     def test_the_card_has_a_gap_when_there_is_room(self):
         self.assertEqual(self.rows_drawn(6), {3: "status   deploy", 4: "branch   feature/crt-branch",

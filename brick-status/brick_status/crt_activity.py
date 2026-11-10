@@ -5,13 +5,13 @@ page sees activity:
 
     python3 -m brick_status.crt_activity
 
-One thing running: its title typed a key at a time, then its status and details.
-The details fit the rows there are: the
-gap above them goes first, then the last details; "running" always shows.
-More than one: only their titles. The newest one's log scrolls in a terminal of
-its own below this one (crt_logs.py, the page's split window). The plasma API holds what senders say about
-themselves (brick-plasma's web.py, "show"); the page tints this with the board's
-health colour, like every program.
+One thing running: its title typed a key at a time, then its status and
+details, fitted to the rows there are: the gap above them goes first, then the
+last details; "running" always shows. More than one: only their titles. The
+newest one's log scrolls in a terminal of its own below this one (crt_logs.py,
+the page's split window). The plasma API holds what senders say about
+themselves (brick-plasma's web.py, "show"); the page tints this with the
+board's health colour, like every program.
 """
 
 import json
@@ -102,8 +102,10 @@ class Screen:
         room = self.rows - free_from + 1
         if len(lines) < room:
             return free_from + 1, lines  # a blank row under the title
-        if room < 2:
-            return free_from, lines[-room:] if room > 0 else []
+        if room < 1:
+            return free_from, []
+        if room == 1:
+            return free_from, lines[-1:]
         return free_from, lines[:room - 1] + lines[-1:]
 
 
