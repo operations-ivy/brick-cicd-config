@@ -20,7 +20,7 @@ from . import board_metrics as bm
 from . import (check, checks, host, lamp, lights, notify, party, party_sound, since, units,
                web)
 from .board import ACTIVE, QUIET, Board
-from .config import (BUTTON_ACTIONS, BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY, KEY_RIGHT, KEY_WAKE,
+from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY, KEY_RIGHT, KEY_WAKE,
                      VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
@@ -122,7 +122,9 @@ def button_name(code: int) -> str:
         return NAMED_KEYS[code]
     if code in BUTTON_KEYS:
         i = BUTTON_KEYS.index(code)
-        return BUTTON_ACTIONS[i] if i < len(BUTTON_ACTIONS) else f"button{i + 1}"
+        if i < len(BUTTON_ACTIONS):
+            return BUTTON_ACTIONS[i]
+        return "crt" if i == CRT_BUTTON else f"button{i + 1}"
     return "other"
 
 
@@ -232,6 +234,12 @@ def main() -> None:
             i = BUTTON_KEYS.index(code)
             if i < len(BUTTON_ACTIONS):
                 board.press_view(VIEWS.index(BUTTON_ACTIONS[i]), now)
+            elif i == CRT_BUTTON:
+                # Not while a game is open: it's a game's button then.
+                if os.path.exists(settings.retro_flag):
+                    log.info("CRT button: ignored, a game is open")
+                elif (full := board.toggle_crt(now)) is not None:
+                    log.info("CRT button: %s", "full screen" if full else "back to its panel")
             else:  # a free button: input, nothing more
                 board.wake(now)
         elif code in (KEY_LEFT, KEY_RIGHT):

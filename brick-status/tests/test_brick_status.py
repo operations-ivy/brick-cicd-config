@@ -115,6 +115,22 @@ class BoardTest(unittest.TestCase):
         self.board.wake(ts(3))
         self.assertEqual(self.board.mode(ts(3, 1)), QUIET)
 
+    def test_the_crt_button_toggles_and_only_it_undoes_it(self):
+        self.assertFalse(self.board.crt_full)
+        self.assertTrue(self.board.toggle_crt(ts(12)))
+        self.assertEqual(self.board.mode(ts(12, 1)), ACTIVE)  # a press, like any button
+        # Idle puts the overview back; the CRT stays full screen until pressed again.
+        self.assertEqual(self.board.mode(ts(12, 30)), IDLE)
+        self.assertTrue(self.board.crt_full)
+        self.board.press_view(2, ts(13))
+        self.assertTrue(self.board.crt_full)
+        self.assertFalse(self.board.toggle_crt(ts(13, 1)))
+        self.assertFalse(self.board.crt_full)
+
+    def test_the_crt_button_does_nothing_while_quiet(self):
+        self.assertIsNone(self.board.toggle_crt(ts(3)))
+        self.assertFalse(self.board.crt_full)
+
     def test_side_button_wakes_for_30_minutes(self):
         self.assertEqual(self.board.side_button(ts(3)), "awake")
         self.assertEqual(self.board.mode(ts(3, 1)), IDLE)
@@ -585,7 +601,7 @@ class MirrorTest(unittest.TestCase):
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
         settings = Settings(http_host="127.0.0.1", http_port=port)
-        board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
+        self.board = board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
         status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
         threading.Thread(target=web.serve, args=(settings, board, status), daemon=True).start()
         self.base = f"http://127.0.0.1:{port}"
@@ -595,6 +611,14 @@ class MirrorTest(unittest.TestCase):
                 break
             except OSError:
                 pytime.sleep(0.05)
+
+    def test_state_says_whether_the_crt_is_full_screen(self):
+        def crt_full():
+            with urllib.request.urlopen(self.base + "/api/state", timeout=2) as r:
+                return json.load(r)["crt_full"]
+        self.assertFalse(crt_full())
+        self.board.toggle_crt(pytime.time())
+        self.assertTrue(crt_full())
 
     def get(self, path, proxied):
         headers = {"X-Forwarded-For": "192.168.1.50"} if proxied else {}
@@ -787,7 +811,7 @@ class MetricsTest(unittest.TestCase):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
         # The sixth is the check button (since 2026-11-08), named for that.
         self.assertEqual([button_name(k) for k in BUTTON_KEYS],
-                         ["overview", "builds", "cluster", "anomalies", "button5", "check"])
+                         ["overview", "builds", "cluster", "anomalies", "crt", "check"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")

@@ -168,6 +168,11 @@
   .crt .xterm-viewport { background: transparent !important; overflow: hidden !important; }
   .crt .label { position: absolute; left: 0.5em; right: 0.5em; bottom: 0.15em; font-size: 0.85em; color: var(--s);
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Button 5 (config.CRT_BUTTON): the CRT over the whole screen, under the raster,
+     until it's pressed again. */
+  body.crt-full .crt { position: fixed; inset: 0; z-index: 8; background: var(--void); padding: 1.4em 0.6em 1.6em; }
+  #static-full { display: none; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 9; pointer-events: none;
+                 image-rendering: pixelated; }
   .crt.ok { --s: var(--green); } .crt.warn { --s: var(--amber); } .crt.fail { --s: var(--red); }
   .crt, .crt * { cursor: none !important; }
 
@@ -234,6 +239,7 @@
   <div class="nodes panel" id="nodes-panel"><h2>NODES</h2></div>
 </main>
 <canvas id="party" hidden></canvas>
+<canvas id="static-full"></canvas>
 <footer>
   <div class="pad" id="pad"></div>
   <div class="hint"><b>LAMP</b> tap · 2×: scene · hold: night &nbsp; <b>1UP</b> <span id="party-name">PARTY</span><br>
@@ -251,9 +257,10 @@ const worst = states => SEVERITY.find(s => states.includes(s)) || "ok";
 const WORD = { ok: "OK", warn: "WARN", fail: "FAIL", active: "RUN", unknown: "??" };
 
 // The six front-panel buttons (config.BUTTON_ACTIONS): screens on top, the anomalies,
-// a free one, and the check button (config.KEY_CHECK, pressed twice).
-const PAD = [["overview", "HOME"], ["builds", "RECENT"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"], null,
-             ["check", "2× CHECK"]];
+// the CRT full screen and back (config.CRT_BUTTON), and the check button
+// (config.KEY_CHECK, pressed twice).
+const PAD = [["overview", "HOME"], ["builds", "RECENT"], ["cluster", "CLUSTER"], ["anomalies", "ANOMALIES"],
+             ["crt", "CRT"], ["check", "2× CHECK"]];
 
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
@@ -522,7 +529,8 @@ function makeTerm(elementId) { return {
   term: null, fit: null, source: null, key: null,
   start(colour, program = { name: "cmatrix", tint: false }) {
     if (MIRROR) return;
-    const key = `${program.name}/${colour}`;
+    const full = document.body.classList.contains("crt-full");
+    const key = `${program.name}/${colour}/${full}`;  // a new size needs a new terminal size
     if (this.source && this.key === key) return;
     this.stop();
     if (!this.term) {
@@ -540,7 +548,7 @@ function makeTerm(elementId) { return {
       } catch (e) { console.warn("WebGL renderer unavailable, using DOM renderer", e); }
     }
     this.term.options.theme = program.tint ? tintTheme(colour) : BASE_THEME;
-    this.term.options.fontSize = program.font || 11;
+    this.term.options.fontSize = Math.round((program.font || 11) * (full ? CRT_FULL_FONT : 1));
     this.fit.fit();
     this.term.reset();
     this.key = key;
@@ -598,6 +606,7 @@ function render(s) {
   setHTML("nodes-panel", nodes(s.vitals));
   if (view === "builds") fitRows(document.getElementById("main-list"));
 
+  setCrtFull(!!s.crt_full);
   const crt = document.getElementById("crt");
   const program = crtProgram(s);
   const split = program.name === "activity" && !!s.crt?.activity_log;
@@ -626,7 +635,7 @@ function render(s) {
   fresh.classList.toggle("stale", age === null || age > 60);
 
   setHTML("pad", PAD.map((b, i) => b
-    ? `<span data-n="${i + 1}" class="${b[0] === view ? "on" : b[0] === "anomalies" && found.some(a => a.stale) ? "stale" : b[0] === "anomalies" && found.length ? "alert" : ""}">${b[1]}${b[0] === "anomalies" && found.length ? " " + found.length : ""}</span>`
+    ? `<span data-n="${i + 1}" class="${b[0] === view || (b[0] === "crt" && crtFull) ? "on" : b[0] === "anomalies" && found.some(a => a.stale) ? "stale" : b[0] === "anomalies" && found.length ? "alert" : ""}">${b[1]}${b[0] === "anomalies" && found.length ? " " + found.length : ""}</span>`
     : `<span data-n="${i + 1}" class="free">free</span>`).join(""));
 }
 
@@ -653,18 +662,40 @@ function drawStatic(canvas, cover) {
     ctx.fillRect(0, Math.floor(Math.random() * h), w, 1);
   }
 }
-let tuning = false;
-function tuneIn() {
-  const canvas = document.getElementById("static");
-  if (tuning || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  tuning = true;
+// `atPeak` runs behind the first, all-noise frame: what changes is hidden by it.
+function tuneIn(canvas = document.getElementById("static"), atPeak = null) {
+  if (canvas.dataset.tuning || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (atPeak) atPeak();
+    return;
+  }
+  canvas.dataset.tuning = "1";
   canvas.style.display = "block";
   let frame = 0;
   const step = () => {
-    if (frame < STATIC_FRAMES.length) { drawStatic(canvas, STATIC_FRAMES[frame++]); setTimeout(step, STATIC_FRAME_MS); }
-    else { canvas.style.display = "none"; tuning = false; }
+    if (frame < STATIC_FRAMES.length) {
+      drawStatic(canvas, STATIC_FRAMES[frame++]);
+      if (frame === 1 && atPeak) atPeak();
+      setTimeout(step, STATIC_FRAME_MS);
+    } else { canvas.style.display = "none"; delete canvas.dataset.tuning; }
   };
   step();
+}
+
+// Button 5: the CRT to the whole screen and back, through the static, only when
+// pressed (a build ending and the CRT going back to cmatrix doesn't undo it).
+const CRT_FULL_FONT = 1.6;
+let crtFull = null;
+function setCrtFull(full) {
+  if (full === crtFull) return;
+  const first = crtFull === null;  // a page load: no transition
+  crtFull = full;
+  const swap = () => {
+    document.body.classList.toggle("crt-full", full);
+    matrix.stop(); matrixLog.stop();
+    if (lastState) render(lastState);  // starts them again at the new size
+  };
+  if (first) swap();
+  else tuneIn(document.getElementById("static-full"), swap);
 }
 // For a screenshot of the effect: ?static=0.55 holds one frame at that cover.
 const HOLD_STATIC = parseFloat(new URLSearchParams(location.search).get("static"));
@@ -675,12 +706,13 @@ function tick() {
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-let boot = null;
+let boot = null, lastState = null;
 async function poll() {
   try {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
     if (boot && s.boot !== boot) { location.reload(); return; }  // brick-status restarted: load the page it serves now
     boot = s.boot;
+    lastState = s;
     render(s);
   } catch (e) {
     document.getElementById("fresh").textContent = "LINK LOST";
