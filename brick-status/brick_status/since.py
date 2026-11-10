@@ -44,7 +44,7 @@ class TempWarnings:
     below TEMP_CLEAR_C. `mark` sets each vital's "temp_warn", which the page
     and `anomaly_keys` read."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.warm: set[str] = set()
 
     def mark(self, vitals: list[dict]) -> None:
