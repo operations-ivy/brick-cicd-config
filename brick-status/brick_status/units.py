@@ -52,6 +52,11 @@ def is_running(user: bool, unit: str) -> bool:
     return state in ("active", "activating", "reloading")
 
 
+def next_run(user: bool, unit: str) -> int:
+    """A timer's next run (microseconds since the epoch), 0 for none."""
+    return next((t.get("next") or 0 for t in systemctl(user, "list-timers", "--all", unit)), 0)
+
+
 def read(user: bool) -> dict:
     """One scope's failed units and timers, straight from systemd."""
     failed = [u["unit"] for u in systemctl(user, "list-units", "--state=failed", "--plain")]
@@ -62,6 +67,10 @@ def read(user: bool) -> dict:
             # An OnUnitActiveSec timer has no next run while its service runs
             # (brick-units.timer while it reports, brick-roms during a copy).
             t["running"] = bool(t.get("activates")) and is_running(user, t["activates"])
+            if not t["running"]:
+                # A quick service (wifi-watchdog's takes 0.1 s) can finish between
+                # list-timers and is-active: look again once it has re-armed.
+                t["next"] = next_run(user, t["unit"])
     return {"failed": failed, "timers": timers}
 
 
