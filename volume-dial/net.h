@@ -8,13 +8,24 @@
 // meanwhile just replace it), polls every 2 s when there's nothing to send,
 // and keeps one connection open. What brick9000 answers lands in live_*,
 // which dial.yaml reads (take()).
+//
+// It heals itself (#108): on 2026-10-26 the front door restarted mid-poll and
+// the kept-alive handle never worked again, so the dial showed OFFLINE until
+// it was unplugged. Now 3 failures in a row (about 6 s) throw the handle away
+// for a fresh one, which reconnects and looks the name up again. If it's still
+// offline 10 minutes later the dial restarts, once per outage (a flag that
+// survives the restart, cleared by the next good answer), so it doesn't
+// reboot every 10 minutes while brick9000 is simply off.
 #pragma once
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <string>
 
+#include "esp_attr.h"
 #include "esp_http_client.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -29,6 +40,11 @@ inline std::atomic<int> cap{500};  // /api/volume's "max", thousandths
 inline std::atomic<bool> online{false};
 inline std::atomic<uint32_t> answers{0};  // one more for every good answer
 inline TaskHandle_t task = nullptr;
+inline constexpr int FRESH_AFTER = 3;                      // failures in a row
+inline constexpr int64_t RESTART_AFTER_US = 10 * 60 * 1000000LL;  // offline
+// Set just before a restart, cleared by a good answer: one restart per outage.
+RTC_NOINIT_ATTR inline uint32_t restarted_offline;
+inline constexpr uint32_t RESTARTED = 0x0FF11E;
 inline std::string url;
 inline std::string body;  // the task's own
 
@@ -51,14 +67,20 @@ inline bool parse(const std::string &b) {
   return true;
 }
 
-inline void run(void *) {
+inline esp_http_client_handle_t fresh_client() {
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
   cfg.timeout_ms = 2000;
   cfg.event_handler = on_event;
   cfg.keep_alive_enable = true;
-  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  return esp_http_client_init(&cfg);
+}
+
+inline void run(void *) {
+  esp_http_client_handle_t c = fresh_client();
   std::string json;
+  int failures = 0;
+  int64_t last_ok = esp_timer_get_time();
   for (;;) {
     // A target to send wakes it at once; otherwise poll every 2 s.
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
@@ -78,7 +100,21 @@ inline void run(void *) {
     body.clear();
     bool ok = esp_http_client_perform(c) == ESP_OK && esp_http_client_get_status_code(c) == 200 && parse(body);
     online = ok;
-    if (ok) answers++;
+    if (ok) {
+      answers++;
+      failures = 0;
+      last_ok = esp_timer_get_time();
+      restarted_offline = 0;
+      continue;
+    }
+    if (++failures % FRESH_AFTER == 0) {
+      esp_http_client_cleanup(c);
+      c = fresh_client();
+    }
+    if (esp_timer_get_time() - last_ok > RESTART_AFTER_US && restarted_offline != RESTARTED) {
+      restarted_offline = RESTARTED;
+      esp_restart();
+    }
   }
 }
 
