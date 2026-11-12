@@ -17,16 +17,17 @@ shared); a game with no match isn't asked about again for MISS_DAYS.
 
 import difflib
 import json
-import logging
 import re
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import structlog
+
 from . import games
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 SERVER = "https://thumbnails.libretro.com"
 KINDS = ("Named_Boxarts", "Named_Titles", "Named_Snaps")
@@ -250,7 +251,7 @@ def sync(playlist_dir: Path, thumb_dir: Path, state: Path, rate: float = 1_000_0
                 try:
                     found = Index(index_fn(system, kind))
                 except Exception as e:  # the server's down or we're offline: try tomorrow
-                    log.warning("no thumbnail list for %s %s: %s", system, kind, e)
+                    log.warning("no thumbnail list", system=system, kind=kind, error=str(e))
                     found = None
                 fetched = 0
                 for label in missing:
@@ -263,9 +264,9 @@ def sync(playlist_dir: Path, thumb_dir: Path, state: Path, rate: float = 1_000_0
                         fetch_fn(system, kind, name, folder / file_name(label), limiter)
                         fetched += 1
                     except Exception as e:
-                        log.warning("thumbnail not fetched (%s): %s", name, e)
+                        log.warning("thumbnail not fetched", system=system, kind=kind, title=name, error=str(e))
                 if fetched:
-                    log.info("%s %s: fetched %d", system, kind, fetched)
+                    log.info("thumbnails fetched", system=system, kind=kind, fetched=fetched)
             have[kind] = sum(1 for lb in games if (folder / file_name(lb)).is_file())
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(json.dumps({"matcher": MATCHER, "misses": misses}))

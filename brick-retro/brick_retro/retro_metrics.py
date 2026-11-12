@@ -3,16 +3,17 @@ on brick9000 (brick-retro has no web server). Rewritten only when a value
 changes, so the SD card isn't written every second.
 """
 
-import logging
 import os
 import sys
 from pathlib import Path
+
+import structlog
 
 # The metrics module is brick-status's, from the same checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "brick-status"))
 from brick_status.metrics import Registry, write_textfile  # noqa: E402
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 TEXTFILE_DIR = os.environ.get("BRICK_TEXTFILE_DIR", "/var/lib/node-exporter-textfile")
 
 REGISTRY = Registry()
@@ -41,7 +42,7 @@ def flush(path: str = os.path.join(TEXTFILE_DIR, "brick-retro.prom")) -> None:
         write_textfile(path, text)
         _written = text
     except OSError as e:
-        log.warning("metrics not written to %s: %s", path, e)
+        log.warning("metrics not written", path=path, error=str(e))
 
 
 def games_text(counts: dict[str, int]) -> str:

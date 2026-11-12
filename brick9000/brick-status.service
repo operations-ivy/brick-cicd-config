@@ -8,7 +8,7 @@ After=graphical-session.target
 WorkingDirectory=%h/brick-cicd-config/brick-status
 ExecStart=/usr/bin/python3 -m brick_status
 EnvironmentFile=-%h/.config/brick-status/env
-Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1 LOG_FORMAT=json
 Restart=always
 RestartSec=5
 

@@ -10,10 +10,11 @@ doesn't reset the clock; an anomaly that clears is forgotten.
 """
 
 import json
-import logging
 from pathlib import Path
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 NOT_FINE = ("fail", "warn", "unknown")
 TEMP_WARN_C = 70  # the page's TMP warning level
@@ -82,4 +83,4 @@ class Since:
             tmp.write_text(json.dumps(self.first))
             tmp.replace(self.path)
         except OSError as e:
-            log.warning("anomaly times: %s", e)
+            log.warning("anomaly times not saved", error=str(e))

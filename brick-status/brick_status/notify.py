@@ -14,7 +14,6 @@ the weekly report, whether or not it paged.
 
 import base64
 import json
-import logging
 import os
 import random
 import re
@@ -24,9 +23,11 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import structlog
+
 from .checks import FAIL, MAINTENANCE_PREFIX, UNKNOWN, WARN
 
-log = logging.getLogger("brick-status.notify")
+log = structlog.get_logger("brick-status.notify")
 
 # How long each kind of problem must last before it pages. wigle-sync's check
 # only turns red after 2h of failing runs (checks.WIGLE_ERROR_WINDOW), so its
@@ -307,7 +308,7 @@ class Ntfy:
         try:
             image = art.read_bytes()
         except OSError as e:
-            log.warning("no art %s: %s", art.name, e)
+            log.warning("no art", art=art.name, error=str(e))
             image = None
         if image is not None:
             # With a file as the body, the text goes in a header.
@@ -317,7 +318,7 @@ class Ntfy:
             except urllib.error.HTTPError as e:
                 if not 400 <= e.code < 500:
                     raise
-                log.warning("ntfy refused the attachment (%s); sending text only", e.code)
+                log.warning("ntfy refused the attachment; sending text only", status=e.code)
         self._put(message["message"].encode(), headers)
 
     def _put(self, body: bytes, headers: dict) -> None:
@@ -342,7 +343,7 @@ def hold(pager: Pager) -> int:
     backlog. The incidents log still has every problem. Returns how many."""
     dropped = 0
     for message in pager.take():
-        log.info("not paged (pages paused): %s", message["title"])
+        log.info("not paged (pages paused)", title=message["title"])
         pager.sent(message)
         dropped += 1
     return dropped
@@ -358,9 +359,9 @@ def deliver(pager: Pager, ntfy: Ntfy | None) -> tuple[int, int]:
         try:
             ntfy.send(message)
         except Exception as e:  # offline, ntfy down: try again next poll
-            log.warning("page not sent yet (%s): %s", message["title"], e)
+            log.warning("page not sent yet", title=message["title"], error=str(e))
             return sent, 1
-        log.info("paged: %s", message["title"])
+        log.info("paged", title=message["title"])
         pager.sent(message)
         sent += 1
     return sent, 0

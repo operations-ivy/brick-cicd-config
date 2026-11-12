@@ -7,13 +7,14 @@ dies. Other senders (Jenkins, deploys) outrank it by priority.
 
 import http.client
 import json
-import logging
 import time
 from urllib.parse import urlsplit
 
+import structlog
+
 from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # A display's priority is in its file (brick-plasma/displays/board.yaml). The
 # view buttons aren't a named display: over a build, under a deploy.
@@ -140,6 +141,6 @@ class Plasma:
         finally:
             connection.close()
         if not ok and not self.failing:  # once, not every second
-            log.warning("plasma API: %s", problem)
+            log.warning("plasma API failing", error=problem)
         self.failing = not ok
         return ok

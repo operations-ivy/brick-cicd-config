@@ -8,7 +8,6 @@ a shade of it, by brightness), so the colour keeps its meaning whatever runs.
 """
 
 import fcntl
-import logging
 import os
 import pty
 import select
@@ -22,7 +21,9 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 # cmatrix -C accepts these; the page's terminal theme turns "yellow" into
 # burnt orange, since cmatrix has no orange.
@@ -84,7 +85,7 @@ def stream(name: str, cols: int, rows: int, colour: str, cmatrix: str = "cmatrix
         previous, _current[program.slot] = _current.get(program.slot), proc
     if previous is not None:
         _stop(previous)
-    log.info("%s started (%dx%d, %s)", name, cols, rows, colour)
+    log.info("matrix started", program=name, cols=cols, rows=rows, colour=colour)
 
     try:
         while proc.poll() is None:

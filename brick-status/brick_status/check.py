@@ -8,13 +8,14 @@ job then shows its own stages and its result.
 """
 
 import json
-import logging
 import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import quote
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 
 class DoublePress:
@@ -38,10 +39,10 @@ def start_job(jenkins_url: str, job: str, secret_file: str, timeout: float = 10.
     try:
         secret = Path(secret_file).read_text().strip()
     except OSError as e:
-        log.warning("%s: no webhook secret in %s (%s)", job, secret_file, e.strerror)
+        log.warning("no webhook secret", job=job, path=secret_file, error=e.strerror)
         return False
     if not secret:
-        log.warning("%s: the webhook secret file %s is empty", job, secret_file)
+        log.warning("webhook secret file empty", job=job, path=secret_file)
         return False
     url = f"{jenkins_url}/generic-webhook-trigger/invoke?token={quote(f'{job}-{secret}', safe='')}"
     request = urllib.request.Request(url, data=b"", method="POST")
@@ -49,17 +50,17 @@ def start_job(jenkins_url: str, job: str, secret_file: str, timeout: float = 10.
         with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read()
     except urllib.error.HTTPError as e:
-        log.warning("%s: Jenkins' webhook answered %d", job, e.code)
+        log.warning("Jenkins' webhook refused", job=job, status=e.code)
         return False
     except (OSError, ValueError) as e:
-        log.warning("%s: couldn't reach Jenkins (%s)", job, getattr(e, "reason", type(e).__name__))
+        log.warning("Jenkins unreachable", job=job, error=str(getattr(e, "reason", type(e).__name__)))
         return False
     try:
         jobs = json.loads(body).get("jobs") or {}
     except (ValueError, AttributeError):
         jobs = {}
     if not any(isinstance(j, dict) and j.get("triggered") for j in jobs.values()):
-        log.warning("%s: Jenkins answered but started nothing", job)
+        log.warning("Jenkins answered but started nothing", job=job)
         return False
-    log.info("%s: started", job)
+    log.info("job started", job=job)
     return True

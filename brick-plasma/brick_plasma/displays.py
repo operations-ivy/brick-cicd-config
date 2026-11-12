@@ -5,16 +5,16 @@ matter less than the service staying up, and every other source keeps working.
 The tests load the real directory, so one can't deploy (brick9000/deploy).
 """
 
-import logging
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+import structlog
 import yaml
 
 from . import apa102, patterns, signals
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 DIRECTORY = Path(__file__).resolve().parent.parent / "displays"
 MAX_SECONDS = 60.0  # a loop is held in memory, frame by frame
 KEYS = {"priority", "ttl", "slots"}  # the rest of a display goes to its effect
@@ -81,7 +81,7 @@ def load(directory: Path = DIRECTORY) -> tuple[dict[str, Display], list[str]]:
     found, errors = {}, []
 
     def problem(text: str) -> None:
-        log.error("displays: %s", text)
+        log.error("display problem", problem=text)
         errors.append(text)
 
     for path in sorted(Path(directory).glob("*.yaml")):

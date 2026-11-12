@@ -6,7 +6,6 @@ build or a wigle-sync upload), or unknown (no data).
 
 import base64
 import json
-import logging
 import re
 import time
 import urllib.parse
@@ -16,6 +15,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+import structlog
 import yaml
 
 OK, WARN, FAIL, ACTIVE, UNKNOWN = "ok", "warn", "fail", "active", "unknown"
@@ -23,7 +23,7 @@ OK, WARN, FAIL, ACTIVE, UNKNOWN = "ok", "warn", "fail", "active", "unknown"
 SEVERITY = [FAIL, WARN, UNKNOWN, ACTIVE, OK]
 
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # A finished Jenkins build's result, as the board shows it.
 JENKINS_RESULTS = {"SUCCESS": (OK, "passed"), "UNSTABLE": (WARN, "unstable"),
@@ -217,7 +217,7 @@ def hidden_jobs(path: str | Path | None = None) -> set[str]:
     try:
         data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}  # "" (unset) is the default too
     except (OSError, yaml.YAMLError) as e:
-        log.warning("board file: %s", e)
+        log.warning("board file unreadable", error=str(e))
         return set()
     return {str(j) for j in data.get("hidden_jobs") or []}
 
@@ -231,7 +231,7 @@ def recent_builds(jenkins: Jenkins, hidden: Collection[str] = frozenset(), limit
     try:
         jobs = jenkins.jobs(Jenkins.RECENT_TREE)
     except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
-        log.warning("recent builds: %s", e)
+        log.warning("recent builds unavailable", error=str(e))
         return None
     builds = [(job["name"], b) for job in jobs if job["name"] not in hidden for b in job.get("builds") or []]
     builds.sort(key=lambda jb: jb[1].get("timestamp", 0), reverse=True)

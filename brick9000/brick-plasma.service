@@ -7,7 +7,7 @@ Description=brick-plasma: the button lights' API
 [Service]
 WorkingDirectory=%h/brick-cicd-config/brick-plasma
 ExecStart=/usr/bin/python3 -m brick_plasma
-Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUNBUFFERED=1 LOG_FORMAT=json
 Restart=always
 RestartSec=2
 
