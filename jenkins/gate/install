@@ -1,0 +1,43 @@
+#!/bin/sh
+# Put jenkins-gate on hosts and narrow Jenkins' key to it (#133). Run from the
+# laptop, with your own key (sudo may ask for your password on each host):
+#
+#   jenkins/gate/install [--only] <jenkins key .pub> <host>...
+#
+# On each host (setup-host, run there): installs jenkins_gate.py as
+# /usr/local/bin/jenkins-gate (root's, 755), then rewrites zaphod's
+# ~/.ssh/authorized_keys so the line for that key reads
+# `command="/usr/local/bin/jenkins-gate",restrict <key>`. Other keys are left
+# alone; with --only, other lines whose comment starts with "jenkins@" are
+# dropped too (the old key, after a rotation). Safe to run again.
+#
+# The .pub is the public half of the brick-jenkins Secret's ssh-key, e.g.
+#   ssh-keygen -y -f ~/.config/brick-jenkins/secrets/ssh_key > jenkins.pub
+# (add the comment, jenkins@<something>, if ssh-keygen -y left it off).
+set -eu
+only=keep
+if [ "${1:-}" = --only ]; then
+    only=only
+    shift
+fi
+if [ $# -lt 2 ]; then
+    sed -n '2,18p' "$0" >&2
+    exit 2
+fi
+pub=$1
+shift
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck disable=SC2046  # three words: type, key, comment
+set -- $(awk 'NF >= 3 && $1 ~ /^ssh-/ {print $1, $2, $3; exit}' "$pub") "$@"
+case ${3:-} in
+    jenkins@*) ;;
+    *) echo "install: $pub needs a public key with a jenkins@... comment" >&2; exit 1 ;;
+esac
+type=$1 blob=$2 comment=$3
+shift 3
+
+for host in "$@"; do
+    echo "== $host"
+    scp -q "$here/jenkins_gate.py" "$here/setup-host" "$host:/tmp/"
+    ssh -t "$host" sh /tmp/setup-host "$type" "$blob" "$comment" "$only"
+done

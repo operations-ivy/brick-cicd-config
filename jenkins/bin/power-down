@@ -96,7 +96,7 @@ def ssh(host: str, command: str, **kwargs) -> subprocess.CompletedProcess:
 
 
 def answers(host: str) -> bool:
-    return ssh(host, "true", capture_output=True).returncode == 0
+    return ssh(host, "jenkins-gate true", capture_output=True).returncode == 0
 
 
 def die(message: str) -> NoReturn:
@@ -112,17 +112,14 @@ def check(cmd: list[str], message: str = "", **kwargs) -> subprocess.CompletedPr
 
 
 # --- checks (read-only, dry runs too) -----------------------------------------
-def busy_script(host: Host) -> str:
-    """A remote shell script that prints one line per reason not to stop now."""
-    lines = [f"pgrep -x {shlex.quote(p)} >/dev/null && echo 'running: {p}'"
-             for p in (*APT, *host.busy_processes)]
-    lines += [f"systemctl --user is-active --quiet {shlex.quote(u)} && echo 'active: {u}'"
-              for u in host.busy_units]
-    return "\n".join(lines) + "\ntrue\n"
+def busy_command(host: Host) -> str:
+    """jenkins-gate's busy, which prints one line per reason not to stop now."""
+    return " ".join(["jenkins-gate", "busy", *(f"proc:{p}" for p in (*APT, *host.busy_processes)),
+                     *(f"unit:{u}" for u in host.busy_units)])
 
 
 def busy(node: str, host: Host) -> list[str]:
-    reasons = check([*SSH, node, busy_script(host)], f"{node} doesn't answer SSH",
+    reasons = check([*SSH, node, busy_command(host)], f"{node} doesn't answer SSH",
                     capture_output=True).stdout.splitlines()
     if host.k3s:
         reasons += [f"Jenkins build: {name(p)}" for p in agent_pods(node)]
@@ -140,10 +137,10 @@ def maintenance(node: str, duration: str = "1h", end: bool = False) -> None:
 
 
 def pause(node: str, units: tuple[str, ...]) -> None:
-    quoted = " ".join(shlex.quote(u) for u in units)
-    # reset-failed: a unit stopped mid-run mustn't trip BrickUnitProblem.
-    check([*SSH, node, f"systemctl --user stop {quoted}; systemctl --user reset-failed"],
-          f"couldn't stop {quoted} on {node}")
+    names = " ".join(units)  # plain names: jenkins-gate refuses anything else
+    # The gate resets failed units too: one stopped mid-run mustn't trip BrickUnitProblem.
+    check([*SSH, node, f"jenkins-gate pause {names}"],
+          f"couldn't stop {names} on {node}")
 
 
 def drain(node: str, host: Host) -> None:
@@ -236,7 +233,7 @@ def wait(node: str, up: bool, seconds: int) -> None:
 
 def poweroff(node: str) -> None:
     # Off a few seconds after SSH returns, so the job gets its answer first.
-    check([*SSH, node, "sudo systemd-run --on-active=5 systemctl poweroff"], f"{node} refused to power off")
+    check([*SSH, node, "jenkins-gate poweroff"], f"{node} refused to power off")
     wait(node, up=False, seconds=DOWN_WAIT)
     print(f"{node} is off the network: safe to unplug once its activity light stops.")
 

@@ -5,4 +5,4 @@
 # buttons, not in this build's log. The timer keeps following the branch.
 set -eu
 . "$(dirname "$0")/lib.sh"
-start_deploy "$BRICK9000" .config/brick-status/env "${BRANCH:-}"
+start_deploy "$BRICK9000" "${BRANCH:-}"

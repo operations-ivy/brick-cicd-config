@@ -27,9 +27,9 @@ FAKES = {
 printf 'ssh %s\n' "$(echo "$*" | tr '\n' ' ')" >>"$STATE/log"
 for last; do :; done
 case "$last" in
-  *poweroff*) touch "$STATE/off" ;;
-  true) [ -e "$STATE/off" ] && exit 255 ;;
-  *pgrep*) cat "$STATE/busy" 2>/dev/null ;;
+  "jenkins-gate poweroff") touch "$STATE/off" ;;
+  "jenkins-gate true") [ -e "$STATE/off" ] && exit 255 ;;
+  "jenkins-gate busy "*) cat "$STATE/busy" 2>/dev/null ;;
 esac
 exit 0
 """,
@@ -97,7 +97,7 @@ class PowerDown(unittest.TestCase):
         """The calls that change something (not the reads and SSH probes)."""
         reads = ("kubectl get", "kubectl wait", "kubectl rollout status")
         return [line for line in self.log() if not line.startswith(reads)
-                and not line.endswith(" true") and "pgrep" not in line]
+                and not line.endswith(" true") and "jenkins-gate busy" not in line]
 
     def test_brick2000_is_refused_with_the_manual_steps(self):
         error, _ = self.go(NODE="brick2000")
@@ -131,7 +131,7 @@ class PowerDown(unittest.TestCase):
         self.assertIn("would 2. cordon and drain brick666", out)
         self.assertIn("would 3. power brick666 off", out)
         self.assertEqual(self.changes(), [])
-        self.assertTrue(any("pgrep" in line for line in self.log()), "the busy check still runs")
+        self.assertTrue(any("jenkins-gate busy" in line for line in self.log()), "the busy check still runs")
 
     def test_k3s_node_down_in_order(self):
         (self.state / "pending.json").write_text(json.dumps({"items": [pod("overwatch", "scanner-0")]}))
@@ -197,8 +197,7 @@ class PowerDown(unittest.TestCase):
         self.assertIsNone(error)
         changes = self.changes()
         self.assertEqual(changes[0], "maintenance NODE=brick9000 DURATION=1h END=false")
-        self.assertIn("systemctl --user stop brick-roms.service brick-mirror.service", changes[1])
-        self.assertIn("reset-failed", changes[1])
+        self.assertIn("jenkins-gate pause brick-roms.service brick-mirror.service", changes[1])
         self.assertIn("poweroff", changes[2])
         self.assertFalse(any(c.startswith("kubectl") for c in changes))
 
