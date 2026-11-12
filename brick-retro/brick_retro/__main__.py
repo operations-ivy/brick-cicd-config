@@ -9,7 +9,6 @@ quitting RetroArch, or holding Home for 3 seconds, shows the board again.
 Home held + D-pad up/down sets the volume. While RetroArch runs, brick-status keeps the screen on (the flag file).
 """
 
-import logging
 import os
 import select
 import subprocess
@@ -18,11 +17,13 @@ import threading
 import time
 from pathlib import Path
 
-from . import games, thumbnails
+import structlog
+
+from . import games, logs, thumbnails
 from . import retro_metrics as rm
 from .pads import ABS_HAT0Y, Launcher, Volume, is_pad
 
-log = logging.getLogger("brick-retro")
+log = structlog.get_logger("brick-retro")
 HOME = Path.home()
 
 
@@ -145,7 +146,7 @@ def daemon() -> None:
     launcher = Launcher(retroarch_running, start_retroarch, stop_retroarch, redial,
                         idle_exit_seconds=float(env("IDLE_EXIT_SECONDS", "900")), known=set(pads))
     volume = Volume(change_volume)
-    log.info("brick-retro up: %d pad(s) connected", len(pads))
+    log.info("brick-retro up", pads=len(pads))
     while True:
         home = False
         readable, _, _ = select.select(list(pads.values()), [], [], 1.0)
@@ -160,9 +161,9 @@ def daemon() -> None:
                 pass  # it disconnected; the rescan drops it
         current = scan()
         for path in set(pads) - set(current):
-            log.info("controller gone: %s", pads[path].name)
+            log.info("controller gone", pad=pads[path].name)
         for path in set(current) - set(pads):
-            log.info("controller connected: %s", current[path].name)
+            log.info("controller connected", pad=current[path].name)
             rm.CONNECTS.inc()
         for path, d in current.items():
             if path in pads:
@@ -183,19 +184,19 @@ def daemon() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logs.configure("brick-retro")
     if sys.argv[1:] == ["games"]:
         games.link_eboots(EBOOT_DIR, ROM_DIR)
         counts = games.write_playlists(ROM_DIR, PLAYLIST_DIR, CORE_DIR, M3U_DIR, SYSTEM_DIR)
         rm.write_games(counts)
         copied = games.import_saves(ROM_DIR, SAVE_DIR)
-        log.info("playlists: %s; imported %d old save(s)", counts, len(copied))
+        log.info("playlists written", games=counts, saves_imported=len(copied))
         return
     if sys.argv[1:] == ["thumbnails"]:
         counts = thumbnails.sync(PLAYLIST_DIR, THUMB_DIR, THUMB_STATE,
                                  rate=float(env("THUMB_RATE", "1000000")))
         rm.write_thumbnails(counts)
-        log.info("thumbnails: %s", counts)
+        log.info("thumbnails synced", thumbnails=counts)
         return
     daemon()
 

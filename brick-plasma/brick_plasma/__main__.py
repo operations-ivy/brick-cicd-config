@@ -1,16 +1,17 @@
 """brick-plasma: owns brick9000's button lights and takes orders over HTTP."""
 
-import logging
 import os
 import threading
 
-from . import apa102, displays, patterns, renderer, signals, stats, web
+import structlog
 
-log = logging.getLogger("brick_plasma")
+from . import apa102, displays, logs, patterns, renderer, signals, stats, web
+
+log = structlog.get_logger("brick_plasma")
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logs.configure("brick-plasma")
     host = os.environ.get("BRICK_PLASMA_HOST", "0.0.0.0")
     port = int(os.environ.get("BRICK_PLASMA_PORT", "8766"))
     counters = stats.Stats()
@@ -22,8 +23,8 @@ def main() -> None:
     render = renderer.Renderer(board, chain, dark, counters)
     server = web.make_server(host, port, catalog, board, counters)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    log.info("brick-plasma up on %s:%d, %d displays, %d problems", host, port, len(catalog.named),
-             len(catalog.errors))
+    log.info("brick-plasma up", host=host, port=port, displays=len(catalog.named),
+             problems=len(catalog.errors))
     render.run(threading.Event())
 
 

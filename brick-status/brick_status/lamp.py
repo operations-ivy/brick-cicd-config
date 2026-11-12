@@ -10,7 +10,6 @@ the lights then answer amber.
 """
 
 import json
-import logging
 import threading
 import time
 import urllib.error
@@ -20,9 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self
 
+import structlog
 import yaml
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 SINGLE, DOUBLE, LONG = "single", "double", "long"
 UNREACHABLE = "lamp-unreachable"  # the lights' answer when Home Assistant can't be reached
@@ -130,7 +130,7 @@ class HomeAssistant:
         """Call light.<service> on `entity`: (whether Home Assistant took it,
         the entity's new state: "on", "off", or "" when it didn't say)."""
         if not self.token:
-            log.warning("lamp: no BRICK_STATUS_HA_TOKEN; run home-assistant's scripts/setup")
+            log.warning("no BRICK_STATUS_HA_TOKEN; run home-assistant's scripts/setup")
             return False, ""
         body = json.dumps({"entity_id": entity, **data}).encode()
         request = urllib.request.Request(
@@ -140,10 +140,11 @@ class HomeAssistant:
             with urllib.request.urlopen(request, timeout=self.call_timeout) as response:
                 changed = json.loads(response.read() or b"[]")
         except urllib.error.HTTPError as e:
-            log.warning("lamp: Home Assistant answered %d to light.%s", e.code, service)
+            log.warning("Home Assistant refused", service=service, status=e.code)
             return False, ""
         except (OSError, ValueError) as e:
-            log.warning("lamp: couldn't reach Home Assistant (%s)", getattr(e, "reason", type(e).__name__))
+            log.warning("Home Assistant unreachable", service=service,
+                        error=str(getattr(e, "reason", type(e).__name__)))
             return False, ""
         states = changed if isinstance(changed, list) else []
         return True, next((str(s.get("state", "")) for s in states
@@ -160,7 +161,7 @@ class HomeAssistant:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read() or b"{}")
         except (OSError, ValueError) as e:
-            log.warning("lamp: couldn't read %s (%s)", entity, e)
+            log.warning("state unreadable", entity=entity, error=str(e))
             return None
         return data if isinstance(data, dict) else None
 
@@ -227,11 +228,11 @@ class Lamp:
             self._scene = (self._scene + 1) % len(self.config.scenes)
             scene = dict(self.config.scenes[self._scene])
             name = scene.pop("name", str(self._scene + 1))
-            log.info("lamp: scene %s", name)
+            log.info("scene", scene=name)
             ok, _ = self.ha.call("turn_on", entity, **scene)
             return f"lamp-scene-{self._scene + 1}" if ok else UNREACHABLE
         if gesture == LONG:
-            log.info("lamp: night light")
+            log.info("night light")
             ok, _ = self.ha.call("turn_on", entity, **self.config.night)
             return "lamp-night" if ok else UNREACHABLE
         raise ValueError(f"unknown gesture {gesture!r}")
@@ -260,9 +261,8 @@ class LampButton:
             last = self.gestures.last
         if last is not None:
             held, gap, bounce = last
-            log.info("lamp: key held %d ms%s%s", held * 1000,
-                     "" if gap is None or gap > 2 else f", {gap * 1000:.0f} ms after the last release",
-                     " (bounce, ignored)" if bounce else "")
+            gap_ms = round(gap * 1000) if gap is not None and gap <= 2 else None
+            log.info("key held", held_ms=round(held * 1000), gap_ms=gap_ms, bounce=bounce)
         self._dispatch(gesture)
 
     def tick(self) -> None:

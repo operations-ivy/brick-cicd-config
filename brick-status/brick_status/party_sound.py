@@ -17,7 +17,6 @@ Seeded, so it's the same every time.
 """
 
 import array
-import logging
 import math
 import random
 import subprocess
@@ -25,7 +24,9 @@ import threading
 import wave
 from pathlib import Path
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 RATE = 22050
 SECONDS = 20.0  # party.SECONDS
@@ -131,11 +132,11 @@ class Player:
             write_wav(self.path, synth())
             self._ready.set()
         except OSError as e:
-            log.warning("party: couldn't make the sound (%s); the show stays silent", e)
+            log.warning("sound not made; the show stays silent", error=str(e))
 
     def play(self) -> None:
         if not self._ready.is_set():
-            log.info("party: the sound isn't made yet; silent this time")
+            log.info("sound not made yet; silent this time")
             return
         with self._lock:
             if self._playing is not None and self._playing.poll() is None:
@@ -148,4 +149,4 @@ class Player:
                 self._playing = subprocess.Popen([self.command, str(self.path)],
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except OSError as e:
-                log.warning("party: couldn't play the sound (%s)", e)
+                log.warning("sound not played", error=str(e))

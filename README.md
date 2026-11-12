@@ -688,7 +688,11 @@ git clone https://github.com/operations-ivy/brick-cicd-config.git ~/brick-cicd-c
 Settings live in `~/.config/brick-status/env` on brick9000 (created from
 `brick9000/brick-status.env.example`). Logs are in the system journal
 (`journalctl --user` finds nothing on this Pi):
-`journalctl _SYSTEMD_USER_UNIT=brick-status.service -f`.
+`journalctl _SYSTEMD_USER_UNIT=brick-status.service -f`. brick-status, brick-plasma,
+brick-retro and the ROM sync log through structlog (`brick_status/logs.py`, symlinked
+into the other two): one JSON object per line (`timestamp`, `level`, `event`,
+`logger`, `service`, then the facts as fields) because their units set
+`LOG_FORMAT=json`; run by hand, they print structlog's console format.
 
 ### Updates deploy from GitHub
 

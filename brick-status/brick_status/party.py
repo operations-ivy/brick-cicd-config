@@ -13,12 +13,13 @@ quiet hours too (the user, 2026-11-08), but not while a game is open: 1UP is a
 game's button then.
 """
 
-import logging
 import threading
 import time
 from collections.abc import Callable
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 SECONDS = 20.0  # the user, 2026-11-08 (10 was too short, 30 too long); brick-plasma's party display matches
 # The lamp's colours, one every STEP seconds: a rainbow with white in it.
@@ -89,7 +90,7 @@ class LampParty:
     def run(self) -> None:
         before = self.ha.state(self.entity)
         if before is None:
-            log.info("party: the lamp can't be read, so it stays out of the show")
+            log.info("lamp unreadable, so it stays out of the show")
             return
         step = 0
         try:
@@ -100,4 +101,4 @@ class LampParty:
         finally:
             service, data = restore_call(before)
             ok, _ = self.ha.call(service, self.entity, **data)
-            log.info("party: lamp %s after %d colours", "put back" if ok else "NOT put back", step)
+            log.info("lamp restored", put_back=ok, colours=step)

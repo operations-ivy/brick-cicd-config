@@ -9,22 +9,23 @@ pages a phone about problems that need a person (notify.py).
 """
 
 import argparse
-import logging
 import os
 import socket
 import threading
 import time
 from pathlib import Path
 
+import structlog
+
 from . import board_metrics as bm
-from . import (check, checks, host, lamp, lights, notify, party, party_sound, since, units,
-               web)
+from . import (check, checks, host, lamp, lights, logs, notify, party, party_sound, since,
+               units, web)
 from .board import ACTIVE, QUIET, Board
 from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY,
                      KEY_RIGHT, KEY_WAKE, VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
-log = logging.getLogger("brick-status")
+log = structlog.get_logger("brick-status")
 
 
 class Status:
@@ -52,7 +53,7 @@ class Status:
 def ntfy_from(settings: Settings) -> notify.Ntfy | None:
     topic = notify.read_topic(settings.ntfy_topic_file)
     if not topic:
-        log.warning("no ntfy topic in %s: pages are not sent", settings.ntfy_topic_file)
+        log.warning("no ntfy topic: pages are not sent", path=settings.ntfy_topic_file)
         return None
     return notify.Ntfy(settings.ntfy_url, topic, settings.ntfy_click)
 
@@ -73,7 +74,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             try:
                 vitals = checks.cluster_vitals(prom)
             except Exception as e:  # shown as missing rows; the checks report the outage
-                log.warning("vitals query failed: %s", e)
+                log.warning("vitals query failed", error=str(e))
                 vitals = []
             vitals.append(local.read())
             warm.mark(vitals)
@@ -105,7 +106,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             bm.POLLS.inc(result="ok")
         except Exception:
             # Keep polling; a dead poller would leave the board showing stale data.
-            log.exception("poll failed")
+            log.exception("poll failed", seconds=round(time.monotonic() - started, 3))
             bm.POLLS.inc(result="error")
         bm.POLL_SECONDS.set(time.monotonic() - started)
         bm.POLLED_AT.set(time.time())
@@ -139,7 +140,7 @@ def send_test_page(settings: Settings) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logs.configure("brick-status")
     settings = Settings.from_env()
     parser = argparse.ArgumentParser(prog="brick_status")
     sub = parser.add_subparsers(dest="command")
@@ -183,7 +184,7 @@ def main() -> None:
         fresh = show.start()
         plasma.party()
         sound.play()
-        log.info("party: %s", "show on" if fresh else "started again")
+        log.info("party started", fresh=fresh)
         if fresh:
             threading.Thread(target=lamp_party.run, daemon=True).start()
 
@@ -213,16 +214,16 @@ def main() -> None:
             return
         if code == KEY_WAKE:
             if os.path.exists(settings.retro_flag):
-                log.info("side button: ignored, a game is open")
+                log.info("side button", did="ignored", reason="a game is open")
             else:
                 did = board.side_button(now)
                 if did == "asleep":
-                    log.info("side button: asleep until %s",
-                             time.strftime("%a %H:%M", time.localtime(board.asleep_until(now))))
+                    log.info("side button", did="asleep",
+                             until=time.strftime("%a %H:%M", time.localtime(board.asleep_until(now))))
                 elif did == "awake":
-                    log.info("side button: on for %d minutes", settings.wake_seconds // 60)
+                    log.info("side button", did="awake", minutes=settings.wake_seconds // 60)
                 else:
-                    log.info("side button: on until the schedule turns it off")
+                    log.info("side button", did="on until the schedule turns it off")
         elif code == KEY_CHECK:
             if board.mode(now) != QUIET and not os.path.exists(settings.retro_flag):
                 board.wake(now)
@@ -237,9 +238,9 @@ def main() -> None:
             elif i == CRT_BUTTON:
                 # Not while a game is open: it's a game's button then.
                 if os.path.exists(settings.retro_flag):
-                    log.info("CRT button: ignored, a game is open")
+                    log.info("CRT button", crt="ignored", reason="a game is open")
                 elif (full := board.toggle_crt(now)) is not None:
-                    log.info("CRT button: %s", "full screen" if full else "back to its panel")
+                    log.info("CRT button", crt="full screen" if full else "panel")
             else:  # a free button: input, nothing more
                 board.wake(now)
         elif code in (KEY_LEFT, KEY_RIGHT):
@@ -256,8 +257,8 @@ def main() -> None:
     threading.Thread(target=lamp_watch.run, daemon=True).start()
     threading.Thread(target=web.serve, args=(settings, board, status, lamp_watch, show),
                      daemon=True).start()
-    log.info("brick-status up: prometheus=%s board=http://%s:%d",
-             settings.prometheus_url, settings.http_host, settings.http_port)
+    log.info("brick-status up", prometheus=settings.prometheus_url,
+             board=f"http://{settings.http_host}:{settings.http_port}")
 
     while True:
         wake.wait(timeout=1.0)

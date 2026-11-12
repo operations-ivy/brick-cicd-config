@@ -1,11 +1,12 @@
 """The front-panel buttons and the HDMI screen."""
 
-import logging
 import subprocess
 import time
 from collections.abc import Callable, Collection
 
-log = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 
 class Debouncer:
@@ -52,12 +53,12 @@ def watch_buttons(device_name: str, on_key: Callable[[int], None],
             else:
                 d.close()
         if device is None:
-            log.warning("input device %r not found, retrying", device_name)
+            log.warning("input device not found, retrying", device=device_name)
             time.sleep(10)
             continue
         try:
             device.grab()
-            log.info("reading buttons from %s", device.path)
+            log.info("reading buttons", device=device.path)
             for event in device.read_loop():
                 if event.type != evdev.ecodes.EV_KEY:
                     continue
@@ -69,7 +70,7 @@ def watch_buttons(device_name: str, on_key: Callable[[int], None],
                     if on_release is not None:
                         on_release(event.code)
         except OSError as e:
-            log.warning("lost input device: %s", e)
+            log.warning("input device lost", error=str(e))
             time.sleep(5)
 
 
@@ -89,4 +90,4 @@ class Screen:
             self.on = on
         except (OSError, subprocess.SubprocessError) as e:
             # Usually the compositor isn't up yet; the next tick retries.
-            log.warning("wlopm failed: %s", e)
+            log.warning("wlopm failed", error=str(e))

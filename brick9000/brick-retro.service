@@ -8,7 +8,7 @@ After=graphical-session.target
 WorkingDirectory=%h/brick-cicd-config/brick-retro
 ExecStart=/usr/bin/python3 -m brick_retro
 EnvironmentFile=-%h/.config/brick-retro/env
-Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/%U WAYLAND_DISPLAY=wayland-0 PYTHONUNBUFFERED=1 LOG_FORMAT=json
 # Only the daemon: a restart (a deploy) leaves a running game alone.
 KillMode=process
 Restart=always

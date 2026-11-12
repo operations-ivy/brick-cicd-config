@@ -19,16 +19,17 @@ A sleep is saved to `state_path`, so a restart (a deploy) doesn't end it.
 """
 
 import json
-import logging
 import os
 import re
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
+import structlog
+
 IDLE, ACTIVE, QUIET = "idle", "active", "quiet"
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -153,7 +154,7 @@ class Board:
         except FileNotFoundError:
             return None
         except (OSError, ValueError, AttributeError) as e:
-            log.warning("board state %s unreadable, ignored: %s", self.state_path, e)
+            log.warning("board state unreadable, ignored", path=self.state_path, error=str(e))
             return None
         return float(value) if isinstance(value, (int, float)) else None
 
@@ -168,7 +169,7 @@ class Board:
                 json.dump({"asleep_until": self._asleep_until}, f)
             os.replace(tmp, self.state_path)
         except OSError as e:
-            log.warning("couldn't save board state to %s: %s", self.state_path, e)
+            log.warning("board state not saved", path=self.state_path, error=str(e))
 
     def _quiet_at(self, t: float) -> bool:
         return self.quiet.is_quiet(datetime.fromtimestamp(t))
