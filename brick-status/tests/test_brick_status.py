@@ -2377,13 +2377,14 @@ class LampTest(unittest.TestCase):
         from brick_status import lamp
 
         calls = self.calls = []
-        self.status, self.reply = 200, []
+        self.status, self.reply, self.delay = 200, [], 0.0
         test = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 calls.append((self.path, self.headers["Authorization"], body))
+                pytime.sleep(test.delay)  # the bulb's Bluetooth write, or a reconnect
                 data = json.dumps(test.reply).encode()
                 self.send_response(test.status)
                 self.send_header("Content-Length", str(len(data)))
@@ -2452,6 +2453,18 @@ class LampTest(unittest.TestCase):
         self.assertEqual(down.do("long"), "lamp-unreachable")
         none = self.lamp.Lamp(self.config, self.lamp.HomeAssistant("http://127.0.0.1:9", ""))
         self.assertEqual(none.do("single"), "lamp-unreachable")
+
+    def test_a_slow_bluetooth_write_still_counts(self):
+        # Home Assistant answers a call only once the bulb has it: ~10 s after a
+        # dropped link. The call waits call_timeout (12 s), not the read's timeout.
+        self.assertEqual(self.lamp.HomeAssistant("http://ha", "tok").call_timeout, 12.0)
+        self.delay = 0.5
+        self.reply = [{"entity_id": "light.lamp", "state": "on"}]
+        url = f"http://127.0.0.1:{self.server.server_port}"
+        slow = self.lamp.Lamp(self.config, self.lamp.HomeAssistant(url, "tok", timeout=0.2, call_timeout=2))
+        self.assertEqual(slow.do("single"), "lamp-on")
+        hasty = self.lamp.Lamp(self.config, self.lamp.HomeAssistant(url, "tok", timeout=2, call_timeout=0.2))
+        self.assertEqual(hasty.do("single"), "lamp-unreachable")
 
     def test_every_answer_is_a_board_display(self):
         import yaml
