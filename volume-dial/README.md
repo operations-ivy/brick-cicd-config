@@ -18,6 +18,12 @@ Caddy serves just `/api/volume` on that name over HTTP; the page still
 redirects to HTTPS. The screen shows `OFFLINE` in red when it can't reach brick9000,
 and `NO SIGNAL` before it has ever heard from it.
 
+It recovers by itself (`net.h`, #108): after 3 failed requests in a row
+(about 6 s) it drops its HTTP connection and starts a fresh one, which also
+looks the name up again; still offline 10 minutes later, it restarts, once
+per outage. On 2026-10-26 a front-door restart left it `OFFLINE` until it was
+unplugged.
+
 - `dial.yaml`: the ESPHome config.
 - `secrets.yaml`: the Wi-Fi network and password, and the OTA password.
   Gitignored. Copy `secrets.example.yaml` to it and fill it in.
