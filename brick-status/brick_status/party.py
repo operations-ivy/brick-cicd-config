@@ -90,7 +90,7 @@ class LampParty:
     def run(self) -> None:
         before = self.ha.state(self.entity)
         if before is None:
-            log.info("party: the lamp can't be read, so it stays out of the show")
+            log.info("lamp unreadable, so it stays out of the show")
             return
         step = 0
         try:
@@ -101,4 +101,4 @@ class LampParty:
         finally:
             service, data = restore_call(before)
             ok, _ = self.ha.call(service, self.entity, **data)
-            log.info("party: lamp put back" if ok else "party: lamp NOT put back", colours=step)
+            log.info("lamp restored", put_back=ok, colours=step)

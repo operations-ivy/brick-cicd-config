@@ -339,10 +339,10 @@ class PlasmaTest(unittest.TestCase):
 
     def test_the_api_being_down_is_survived(self):
         plasma = lights.Plasma("http://127.0.0.1:9", clock=self.clock)
-        with capture_logs() as logs:
+        with capture_logs() as captured:
             plasma.show("calm")
             plasma.show("calm")
-        self.assertEqual([e["log_level"] for e in logs], ["warning"])  # once, not every second
+        self.assertEqual([e["log_level"] for e in captured], ["warning"])  # once, not every second
         self.assertIsNone(plasma.sent)
 
     def test_buttons_light_each_view_in_its_health_colour(self):
@@ -1734,55 +1734,6 @@ class ActivityTest(unittest.TestCase):
         self.assertFalse(lights.Activity("http://127.0.0.1:1").running())
 
 
-class LogsTest(unittest.TestCase):
-    """logs.configure: the services' journals are JSON lines in the agreed shape."""
-
-    def tearDown(self):
-        structlog.reset_defaults()
-        logging.getLogger().handlers.clear()
-
-    def lines(self, fmt: str, emit) -> list[str]:
-        out = io.StringIO()
-        logs.configure("brick-test", fmt=fmt, stream=out)
-        emit()
-        return out.getvalue().splitlines()
-
-    def test_json_lines_carry_the_standard_fields_and_the_facts(self):
-        (line,) = self.lines("json", lambda: structlog.get_logger("brick_status.check").warning(
-            "Jenkins' webhook refused", job="check-all", status=404))
-        entry = json.loads(line)
-        self.assertEqual({k: entry[k] for k in ("event", "level", "logger", "service", "job", "status")},
-                         {"event": "Jenkins' webhook refused", "level": "warning",
-                          "logger": "brick_status.check", "service": "brick-test",
-                          "job": "check-all", "status": 404})
-        self.assertRegex(entry["timestamp"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$")
-
-    def test_stdlib_loggers_go_through_the_same_renderer(self):
-        (line,) = self.lines("json", lambda: logging.getLogger("urllib3").warning(
-            "retrying %s", "x", extra={"attempt": 2}))
-        entry = json.loads(line)
-        self.assertEqual((entry["event"], entry["logger"], entry["service"], entry["attempt"]),
-                         ("retrying x", "urllib3", "brick-test", 2))
-
-    def test_an_exception_stays_in_the_one_line(self):
-        def emit():
-            try:
-                raise ValueError("boom")
-            except ValueError:
-                structlog.get_logger("brick-status").exception("poll failed")
-        (line,) = self.lines("json", emit)
-        self.assertIn("ValueError: boom", json.loads(line)["exception"])
-
-    def test_info_and_up_only(self):
-        self.assertEqual(self.lines("json", lambda: structlog.get_logger("x").debug("chatter")), [])
-
-    def test_console_without_log_format(self):
-        with mock.patch.dict(os.environ, {"LOG_FORMAT": ""}):
-            (line,) = self.lines(None, lambda: structlog.get_logger("brick-status").info("up", port=8080))
-        self.assertIn("up", line)
-        self.assertIn("port=8080", line)
-        self.assertFalse(line.startswith("{"))
-
 if __name__ == "__main__":
     unittest.main()
 
@@ -2076,25 +2027,25 @@ class CheckButtonTest(unittest.TestCase):
     def test_a_secret_never_reaches_the_log(self):
         from brick_status.check import start_job
         url, _ = self.serve(404, b'{"jobs": null, "message": "Did not find any jobs"}')
-        with capture_logs() as logs:
+        with capture_logs() as captured:
             self.assertFalse(start_job(url, "check-all", self.secret("hunter2")))
-        self.assertNotIn("hunter2", repr(logs))
-        self.assertEqual(logs[0]["status"], 404)
+        self.assertNotIn("hunter2", repr(captured))
+        self.assertEqual(captured[0]["status"], 404)
 
     def test_nothing_started_is_a_failure(self):
         from brick_status.check import start_job
         url, _ = self.serve(200, b'{"jobs": {"check-all": {"triggered": false}}}')
-        with capture_logs() as logs:
+        with capture_logs() as captured:
             self.assertFalse(start_job(url, "check-all", self.secret("x")))
-        self.assertEqual(logs[0]["event"], "Jenkins answered but started nothing")
+        self.assertEqual(captured[0]["event"], "Jenkins answered but started nothing")
 
     def test_no_secret_or_no_jenkins(self):
         from brick_status.check import start_job
-        with capture_logs() as logs:
+        with capture_logs() as captured:
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", "/nonexistent/secret"))
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("  ")))
             self.assertFalse(start_job("http://127.0.0.1:9", "check-all", self.secret("x"), timeout=2))
-        self.assertEqual([e["event"] for e in logs],
+        self.assertEqual([e["event"] for e in captured],
                          ["no webhook secret", "webhook secret file empty", "Jenkins unreachable"])
 
 
@@ -2746,3 +2697,53 @@ class SinceTest(unittest.TestCase):
             with self.subTest(junk):
                 self.file.write_text(junk)
                 self.assertEqual(since.Since(self.file).observe({"x"}, 5.0), {"x": 5.0})
+
+
+class LogsTest(unittest.TestCase):
+    """logs.configure: the services' journals are JSON lines in the agreed shape."""
+
+    def tearDown(self):
+        structlog.reset_defaults()
+        logging.getLogger().handlers.clear()
+
+    def lines(self, fmt: str, emit) -> list[str]:
+        out = io.StringIO()
+        logs.configure("brick-test", fmt=fmt, stream=out)
+        emit()
+        return out.getvalue().splitlines()
+
+    def test_json_lines_carry_the_standard_fields_and_the_facts(self):
+        (line,) = self.lines("json", lambda: structlog.get_logger("brick_status.check").warning(
+            "Jenkins' webhook refused", job="check-all", status=404))
+        entry = json.loads(line)
+        self.assertEqual({k: entry[k] for k in ("event", "level", "logger", "service", "job", "status")},
+                         {"event": "Jenkins' webhook refused", "level": "warning",
+                          "logger": "brick_status.check", "service": "brick-test",
+                          "job": "check-all", "status": 404})
+        self.assertRegex(entry["timestamp"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z$")
+
+    def test_stdlib_loggers_go_through_the_same_renderer(self):
+        (line,) = self.lines("json", lambda: logging.getLogger("urllib3").warning(
+            "retrying %s", "x", extra={"attempt": 2}))
+        entry = json.loads(line)
+        self.assertEqual((entry["event"], entry["logger"], entry["service"], entry["attempt"]),
+                         ("retrying x", "urllib3", "brick-test", 2))
+
+    def test_an_exception_stays_in_the_one_line(self):
+        def emit():
+            try:
+                raise ValueError("boom")
+            except ValueError:
+                structlog.get_logger("brick-status").exception("poll failed")
+        (line,) = self.lines("json", emit)
+        self.assertIn("ValueError: boom", json.loads(line)["exception"])
+
+    def test_info_and_up_only(self):
+        self.assertEqual(self.lines("json", lambda: structlog.get_logger("x").debug("chatter")), [])
+
+    def test_console_without_log_format(self):
+        with mock.patch.dict(os.environ, {"LOG_FORMAT": ""}):
+            (line,) = self.lines(None, lambda: structlog.get_logger("brick-status").info("up", port=8080))
+        self.assertIn("up", line)
+        self.assertIn("port=8080", line)
+        self.assertFalse(line.startswith("{"))

@@ -132,11 +132,11 @@ class Player:
             write_wav(self.path, synth())
             self._ready.set()
         except OSError as e:
-            log.warning("party: sound not made; the show stays silent", error=str(e))
+            log.warning("sound not made; the show stays silent", error=str(e))
 
     def play(self) -> None:
         if not self._ready.is_set():
-            log.info("party: the sound isn't made yet; silent this time")
+            log.info("sound not made yet; silent this time")
             return
         with self._lock:
             if self._playing is not None and self._playing.poll() is None:
@@ -149,4 +149,4 @@ class Player:
                 self._playing = subprocess.Popen([self.command, str(self.path)],
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except OSError as e:
-                log.warning("party: sound not played", error=str(e))
+                log.warning("sound not played", error=str(e))

@@ -130,7 +130,7 @@ class HomeAssistant:
         """Call light.<service> on `entity`: (whether Home Assistant took it,
         the entity's new state: "on", "off", or "" when it didn't say)."""
         if not self.token:
-            log.warning("lamp: no BRICK_STATUS_HA_TOKEN; run home-assistant's scripts/setup")
+            log.warning("no BRICK_STATUS_HA_TOKEN; run home-assistant's scripts/setup")
             return False, ""
         body = json.dumps({"entity_id": entity, **data}).encode()
         request = urllib.request.Request(
@@ -140,10 +140,10 @@ class HomeAssistant:
             with urllib.request.urlopen(request, timeout=self.call_timeout) as response:
                 changed = json.loads(response.read() or b"[]")
         except urllib.error.HTTPError as e:
-            log.warning("lamp: Home Assistant refused", service=f"light.{service}", status=e.code)
+            log.warning("Home Assistant refused", service=service, status=e.code)
             return False, ""
         except (OSError, ValueError) as e:
-            log.warning("lamp: Home Assistant unreachable", service=f"light.{service}",
+            log.warning("Home Assistant unreachable", service=service,
                         error=str(getattr(e, "reason", type(e).__name__)))
             return False, ""
         states = changed if isinstance(changed, list) else []
@@ -161,7 +161,7 @@ class HomeAssistant:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read() or b"{}")
         except (OSError, ValueError) as e:
-            log.warning("lamp: state unreadable", entity=entity, error=str(e))
+            log.warning("state unreadable", entity=entity, error=str(e))
             return None
         return data if isinstance(data, dict) else None
 
@@ -228,11 +228,11 @@ class Lamp:
             self._scene = (self._scene + 1) % len(self.config.scenes)
             scene = dict(self.config.scenes[self._scene])
             name = scene.pop("name", str(self._scene + 1))
-            log.info("lamp: scene", scene=name)
+            log.info("scene", scene=name)
             ok, _ = self.ha.call("turn_on", entity, **scene)
             return f"lamp-scene-{self._scene + 1}" if ok else UNREACHABLE
         if gesture == LONG:
-            log.info("lamp: night light")
+            log.info("night light")
             ok, _ = self.ha.call("turn_on", entity, **self.config.night)
             return "lamp-night" if ok else UNREACHABLE
         raise ValueError(f"unknown gesture {gesture!r}")
@@ -261,8 +261,8 @@ class LampButton:
             last = self.gestures.last
         if last is not None:
             held, gap, bounce = last
-            log.info("lamp: key held", held_ms=round(held * 1000),
-                     gap_ms=None if gap is None or gap > 2 else round(gap * 1000), bounce=bounce)
+            gap_ms = round(gap * 1000) if gap is not None and gap <= 2 else None
+            log.info("key held", held_ms=round(held * 1000), gap_ms=gap_ms, bounce=bounce)
         self._dispatch(gesture)
 
     def tick(self) -> None:

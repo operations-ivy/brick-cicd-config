@@ -184,7 +184,7 @@ def main() -> None:
         fresh = show.start()
         plasma.party()
         sound.play()
-        log.info("party: show on" if fresh else "party: started again")
+        log.info("party started", fresh=fresh)
         if fresh:
             threading.Thread(target=lamp_party.run, daemon=True).start()
 
@@ -214,16 +214,16 @@ def main() -> None:
             return
         if code == KEY_WAKE:
             if os.path.exists(settings.retro_flag):
-                log.info("side button: ignored, a game is open")
+                log.info("side button", did="ignored", reason="a game is open")
             else:
                 did = board.side_button(now)
                 if did == "asleep":
-                    log.info("side button: asleep",
+                    log.info("side button", did="asleep",
                              until=time.strftime("%a %H:%M", time.localtime(board.asleep_until(now))))
                 elif did == "awake":
-                    log.info("side button: on", minutes=settings.wake_seconds // 60)
+                    log.info("side button", did="awake", minutes=settings.wake_seconds // 60)
                 else:
-                    log.info("side button: on until the schedule turns it off")
+                    log.info("side button", did="on until the schedule turns it off")
         elif code == KEY_CHECK:
             if board.mode(now) != QUIET and not os.path.exists(settings.retro_flag):
                 board.wake(now)
@@ -238,7 +238,7 @@ def main() -> None:
             elif i == CRT_BUTTON:
                 # Not while a game is open: it's a game's button then.
                 if os.path.exists(settings.retro_flag):
-                    log.info("CRT button: ignored, a game is open")
+                    log.info("CRT button", crt="ignored", reason="a game is open")
                 elif (full := board.toggle_crt(now)) is not None:
                     log.info("CRT button", crt="full screen" if full else "panel")
             else:  # a free button: input, nothing more
