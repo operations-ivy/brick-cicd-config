@@ -118,10 +118,13 @@ class LampConfig:
 class HomeAssistant:
     """Light service calls on Home Assistant's REST API."""
 
-    def __init__(self, url: str, token: str, timeout: float = 5.0):
+    def __init__(self, url: str, token: str, timeout: float = 5.0, call_timeout: float = 12.0):
         self.url = url.rstrip("/")
         self.token = token
-        self.timeout = timeout
+        self.timeout = timeout  # a state read: Home Assistant's memory
+        # A service call waits for the bulb's Bluetooth write, and a reconnect
+        # takes Home Assistant ~10 s: shorter, and a slow press reads as failed.
+        self.call_timeout = call_timeout
 
     def call(self, service: str, entity: str, **data) -> tuple[bool, str]:
         """Call light.<service> on `entity`: (whether Home Assistant took it,
@@ -134,7 +137,7 @@ class HomeAssistant:
             f"{self.url}/api/services/light/{service}", data=body, method="POST",
             headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=self.call_timeout) as response:
                 changed = json.loads(response.read() or b"[]")
         except urllib.error.HTTPError as e:
             log.warning("lamp: Home Assistant answered %d to light.%s", e.code, service)
