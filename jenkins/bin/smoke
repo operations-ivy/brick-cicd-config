@@ -75,7 +75,7 @@ def main() -> int:
             problems.append(name)
     for host, (needed, units) in SERVICES.items():
         for scope, unit in units:
-            state = ssh(host, " ".join(filter(None, ["jenkins-gate", "is-active", scope, unit]))) or "unreachable"
+            state = ssh(host, f"jenkins-gate is-active {scope} {unit}") or "unreachable"  # the gate splits on spaces
             if state == "active":
                 mark = "ok  "
             elif host in resting:  # in a maintenance window: reported, not failed

@@ -198,7 +198,7 @@ class PowerDown(unittest.TestCase):
         changes = self.changes()
         self.assertEqual(changes[0], "maintenance NODE=brick9000 DURATION=1h END=false")
         self.assertIn("jenkins-gate pause brick-roms.service brick-mirror.service", changes[1])
-        self.assertIn("poweroff", changes[2])
+        self.assertIn("jenkins-gate poweroff", changes[2])
         self.assertFalse(any(c.startswith("kubectl") for c in changes))
 
     def test_without_shutdown_it_only_drains(self):

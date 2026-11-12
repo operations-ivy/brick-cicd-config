@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _load_gate():
     spec = importlib.util.spec_from_file_location("jenkins_gate", ROOT / "jenkins/gate/jenkins_gate.py")
+    assert spec and spec.loader, "jenkins/gate/jenkins_gate.py is missing"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

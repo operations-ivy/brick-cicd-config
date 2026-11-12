@@ -34,20 +34,23 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:/+-]*$")
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@:/+-]*")  # fullmatch: no trailing newline
 # repo -> (env file under $HOME, its variable, the deploy unit)
 DEPLOYS = {
     "brick-cicd-config": (".config/brick-status/env", "BRICK_DEPLOY_BRANCH", "brick-deploy.service"),
     "rpi_lcars": (".config/lcars/env", "LCARS_DEPLOY_BRANCH", "lcars-deploy.service"),
 }
 BOARD_STATE = "http://127.0.0.1:8765/api/state"
+# Through Jenkins' key the commands are found on this PATH only, whatever the
+# environment says.
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 Action = Callable[[Path], int]  # given $HOME, does the work; the exit status
 
 
 class Refused(Exception):
-    pass
+    """A request that isn't on the list."""
 
 
 def names(words: list[str], count: int | None = None) -> list[str]:
@@ -55,7 +58,7 @@ def names(words: list[str], count: int | None = None) -> list[str]:
     if count is not None and len(words) != count:
         raise Refused(f"expected {count} argument(s)")
     for w in words:
-        if not NAME.match(w):
+        if not NAME.fullmatch(w):
             raise Refused(f"not a plain name: {w!r}")
     return words
 
@@ -131,7 +134,9 @@ def set_env(path: Path, var: str, value: str) -> None:
     else:
         lines.append(line)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    tmp = path.with_name(path.name + ".tmp")  # whole or not at all: the deploy reads it
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.replace(path)
 
 
 def deploy(repo: str, branch: str, home: Path) -> int:
@@ -155,6 +160,8 @@ def busy(args: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     original = os.environ.get("SSH_ORIGINAL_COMMAND")
+    if original is not None:  # sshd's forced command: Jenkins' key
+        os.environ["PATH"] = SAFE_PATH
     words = original.split() if original is not None else argv[1:]
     try:
         action = plan(words)

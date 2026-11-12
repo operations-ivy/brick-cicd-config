@@ -96,6 +96,7 @@ def ssh(host: str, command: str, **kwargs) -> subprocess.CompletedProcess:
 
 
 def answers(host: str) -> bool:
+    # Every remote command is a jenkins-gate request: the only thing Jenkins' key may run.
     return ssh(host, "jenkins-gate true", capture_output=True).returncode == 0
 
 
@@ -138,9 +139,8 @@ def maintenance(node: str, duration: str = "1h", end: bool = False) -> None:
 
 def pause(node: str, units: tuple[str, ...]) -> None:
     names = " ".join(units)  # plain names: jenkins-gate refuses anything else
-    # The gate resets failed units too: one stopped mid-run mustn't trip BrickUnitProblem.
-    check([*SSH, node, f"jenkins-gate pause {names}"],
-          f"couldn't stop {names} on {node}")
+    # The gate also resets failed units: one stopped mid-run mustn't trip BrickUnitProblem.
+    check([*SSH, node, f"jenkins-gate pause {names}"], f"couldn't stop {names} on {node}")
 
 
 def drain(node: str, host: Host) -> None:

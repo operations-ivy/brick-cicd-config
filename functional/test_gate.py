@@ -1,16 +1,15 @@
 """jenkins/gate/jenkins_gate.py: what Jenkins' key may run on a host, and
 nothing else (#133)."""
 
-import io
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+import functional.test_power_down as power_down
 from functional.helpers import ROOT, fake_commands, jenkins_gate as gate
 
 GATE = ROOT / "jenkins/gate/jenkins_gate.py"
@@ -52,10 +51,17 @@ class Plan(unittest.TestCase):
                         "docker-rmi --force x", "deploy", "deploy evil main", "deploy brick-cicd-config",
                         "deploy brick-cicd-config -x", "busy", "busy x", "busy proc:", "busy unit:a;id",
                         "sudo cat /etc/rancher/k3s/k3s.yaml", "docker system dial-stdio",
-                        "scp -t /tmp", "rsync --server -e.LsfxC . /"):
+                        "scp -t /tmp", "rsync --server -e.LsfxC . /", "crictl-rmi -a",
+                        "jenkins-gate jenkins-gate true", "deploy brick-cicd-config main$(id)",
+                        "deploy brick-cicd-config ../x;id", "is-active --user --user x"):
             with self.subTest(request):
                 with self.assertRaises(gate.Refused):
                     gate.plan(request.split())
+
+    def test_a_trailing_newline_is_not_a_plain_name(self):
+        for words in (["deploy", "brick-cicd-config", "main\nFOO=1"], ["is-active", "x\n"]):
+            with self.subTest(words), self.assertRaises(gate.Refused):
+                gate.plan(words)
 
     def test_a_failing_step_stops_the_rest(self):
         with mock.patch.object(gate.subprocess, "run", return_value=mock.Mock(returncode=5)) as run:
@@ -83,8 +89,14 @@ class Run(unittest.TestCase):
             env["SSH_ORIGINAL_COMMAND"] = ssh
         return subprocess.run(["python3", str(GATE), *argv], capture_output=True, text=True, env=env)
 
-    def test_sshd_forced_command_reads_the_original_command(self):
-        result = self.gate("ignored", ssh="jenkins-gate is-active --user brick-status")
+    def test_sshd_forced_command_reads_the_original_command_on_a_fixed_path(self):
+        # The fake systemctl on PATH isn't used: sshd's mode runs from SAFE_PATH.
+        result = self.gate("ignored", ssh="jenkins-gate true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_by_hand_runs_the_named_command(self):
+        result = self.gate("jenkins-gate", "is-active", "--user", "brick-status")
         self.assertEqual(result.returncode, 3)
         self.assertEqual(self.log.read_text(), "systemctl --user is-active brick-status\n")
 
@@ -101,7 +113,7 @@ class Run(unittest.TestCase):
         self.assertEqual(self.gate("is-active", "lcars-kiosk").returncode, 3)
 
     def test_busy_prints_a_line_per_reason(self):
-        result = self.gate(ssh="jenkins-gate busy proc:apt proc:dpkg unit:busy.service unit:idle.service")
+        result = self.gate("busy", "proc:apt", "proc:dpkg", "unit:busy.service", "unit:idle.service")
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.splitlines(), ["running: apt", "active: busy.service"])
 
@@ -109,12 +121,12 @@ class Run(unittest.TestCase):
         env = self.tmp / ".config/brick-status/env"
         env.parent.mkdir(parents=True)
         env.write_text("A=1\nBRICK_DEPLOY_BRANCH=main\nB=2\n")
-        self.assertEqual(self.gate(ssh="jenkins-gate deploy brick-cicd-config feature/x").returncode, 0)
+        self.assertEqual(self.gate("deploy", "brick-cicd-config", "feature/x").returncode, 0)
         self.assertEqual(env.read_text(), "A=1\nBRICK_DEPLOY_BRANCH=feature/x\nB=2\n")
         self.assertEqual(self.log.read_text(), "systemctl --user start --no-block brick-deploy.service\n")
 
     def test_deploy_adds_a_missing_line_and_a_missing_file(self):
-        self.assertEqual(self.gate(ssh="jenkins-gate deploy rpi_lcars master").returncode, 0)
+        self.assertEqual(self.gate("deploy", "rpi_lcars", "master").returncode, 0)
         self.assertEqual((self.tmp / ".config/lcars/env").read_text(), "LCARS_DEPLOY_BRANCH=master\n")
         self.assertIn("lcars-deploy.service", self.log.read_text())
 
@@ -162,10 +174,9 @@ class Callers(unittest.TestCase):
     """Every remote command the Jenkins scripts send is one the gate allows."""
 
     def test_power_down_busy_command(self):
-        import functional.test_power_down as t
-        for host in t.pd.HOSTS.values():
+        for host in power_down.pd.HOSTS.values():
             with self.subTest(host=host):
-                gate.plan(t.pd.busy_command(host).split())
+                gate.plan(power_down.pd.busy_command(host).split())
 
 
 if __name__ == "__main__":
