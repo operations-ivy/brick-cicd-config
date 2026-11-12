@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from functional.helpers import StubPrometheus
+from functional.helpers import StubPrometheus, jenkins_gate
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True  # no __pycache__ in jenkins/bin: the image copies it
@@ -20,7 +20,8 @@ loader.exec_module(smoke)
 
 
 def fake_ssh(host, command):
-    """brick1982 is off (no answer); brick9000 is up."""
+    """brick1982 is off (no answer); brick9000 is up. Only what jenkins-gate allows."""
+    jenkins_gate.plan(command.split())  # raises Refused for anything else
     if host == "brick1982":
         return ""
     return "active" if "is-active" in command else "{}"

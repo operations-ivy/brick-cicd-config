@@ -1,6 +1,8 @@
 """Shared bits for the functional tests: a stub Prometheus over real HTTP,
-free ports, and a directory of fake commands to put first on PATH."""
+free ports, a directory of fake commands to put first on PATH, and
+jenkins-gate (jenkins/gate/jenkins_gate.py) as a module."""
 
+import importlib.util
 import json
 import os
 import socket
@@ -11,6 +13,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_gate():
+    spec = importlib.util.spec_from_file_location("jenkins_gate", ROOT / "jenkins/gate/jenkins_gate.py")
+    assert spec and spec.loader, "jenkins/gate/jenkins_gate.py is missing"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+jenkins_gate = _load_gate()
 
 
 def free_port() -> int:

@@ -6,7 +6,7 @@
 
 - every *.brick.nozdormu.cloud name answers through the front door (Caddy on
   the cluster at 192.168.1.221 since 2026-10-17)
-- the LCARS panel's kiosk on brick1982 is running (over SSH)
+- the LCARS panel's kiosk on brick1982 is running (over SSH, through jenkins-gate)
 - a host in a maintenance window (the maintenance-window job) is still
   checked, but shows "mnt" and doesn't fail the run (the user, 2026-11-05)
 - brick9000 (the arcade and the board, no longer anything the homelab
@@ -75,7 +75,7 @@ def main() -> int:
             problems.append(name)
     for host, (needed, units) in SERVICES.items():
         for scope, unit in units:
-            state = ssh(host, f"systemctl {scope} is-active {unit}") or "unreachable"
+            state = ssh(host, f"jenkins-gate is-active {scope} {unit}") or "unreachable"  # the gate splits on spaces
             if state == "active":
                 mark = "ok  "
             elif host in resting:  # in a maintenance window: reported, not failed
@@ -87,7 +87,7 @@ def main() -> int:
     # The board's data: brick-status's own state, read on brick9000 (it only
     # listens on localhost there).
     try:
-        age = time.time() - json.loads(ssh("brick9000", "curl -s --max-time 5 http://127.0.0.1:8765/api/state")).get("updated", 0)
+        age = time.time() - json.loads(ssh("brick9000", "jenkins-gate board-state")).get("updated", 0)
     except ValueError:
         age = float("inf")
     print(f"{'ok  ' if age < 60 else 'warn'} brick9000 board data ({'unreachable' if age == float('inf') else f'{age:.0f}s old'})")

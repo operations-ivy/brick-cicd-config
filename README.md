@@ -107,7 +107,8 @@ script in git that runs from anywhere, not a Jenkins job.
 - **Cluster access.** Jobs act on the cluster as the `jenkins`
   ServiceAccount, with Roles only in the namespaces they touch (`wigle`,
   `chuck`; `extraObjects` in `values.yaml`). They reach the hosts with
-  Jenkins' own SSH key (authorized for `zaphod` on each host).
+  Jenkins' own SSH key, which each host lets run only `jenkins-gate`
+  (below, "Jenkins' SSH key"): no shell, no general `sudo`.
 - **Offline copies of the repos.** `mirror-repos` keeps clones of
   brick-k8s-config, wigle-sync and chucks-wisdom in Jenkins' home every 2
   hours; the other jobs read manifests and scripts from those, so they work
@@ -119,7 +120,7 @@ script in git that runs from anywhere, not a Jenkins job.
 | Job | Does | Webhook parameters |
 | --- | --- | --- |
 | `mirror-repos` | Refreshes the local repo clones (also every 2 hours) | |
-| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, the nodes and brick9000 (its Docker over SSH) (nightly) | `APPLY=false` for a dry run that only lists what would go |
+| `prune-images` | Keeps the newest two versions of each app image on Docker Hub, the nodes and brick9000 (its Docker, through `jenkins-gate`) (nightly) | `APPLY=false` for a dry run that only lists what would go |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
 | `deploy-brick9000` | Points brick9000's deploy at a branch and starts it now instead of at its 2-hourly timer, which then keeps following that branch (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | `BRANCH=<branch>` to try a branch; without it, or empty, `main` |
 | `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |
@@ -153,18 +154,36 @@ delete scope: put one in `dockerhub_token` in that directory and seal again.
 Without it, it prunes the nodes and brick9000, and only lists what it would
 delete on Hub.
 
-To authorize Jenkins' key on each host, from a machine that can already
-reach them:
+### Jenkins' SSH key
+
+Jenkins' key can run one thing on a host: `jenkins-gate`
+(`jenkins/gate/jenkins_gate.py`, installed root-owned as
+`/usr/local/bin/jenkins-gate`), forced in `zaphod`'s `authorized_keys` with
+`command="/usr/local/bin/jenkins-gate",restrict` (#133). The gate allows only
+what the jobs do: `true`, `deploy <repo> <branch>`, `is-active`,
+`board-state`, `busy`, `pause`, `poweroff`, `crictl-images`/`crictl-rmi`
+(the k3s nodes) and `docker-images`/`docker-rmi` (brick9000), each argument a
+plain name; anything else is refused (exit 126). So no shell, no port
+forwarding, no general `sudo`, and k3s' admin kubeconfig isn't reachable with
+it (the jobs use their ServiceAccount). The callers run `jenkins-gate
+<command>`, which also works from the laptop with your own key.
+
+Install the gate and narrow the key, from the laptop (sudo may ask for your
+password on each host; safe to run again, and after any change to the gate):
 
 ```bash
-key=$(ssh-keygen -y -f ~/.config/brick-jenkins/secrets/ssh_key)
-for h in brick420 brick2000 brick666 brick1982 brick9000; do
-    ssh zaphod@$h "grep -qxF '$key' ~/.ssh/authorized_keys || echo '$key' >>~/.ssh/authorized_keys"
-done
+ssh-keygen -y -f ~/.config/brick-jenkins/secrets/ssh_key | sed 's/$/ jenkins@brick/' >/tmp/jenkins.pub
+jenkins/gate/install /tmp/jenkins.pub brick420 brick2000 brick666 brick9000 brick1982
 ```
 
+To rotate the key: make a new one (`ssh-keygen -t ed25519 -N '' -C
+jenkins@brick -f ~/.config/brick-jenkins/secrets/ssh_key`, the old one moved
+aside first), run `install` with its `.pub` (both keys now work), reseal and
+apply the Secret (above) and restart Jenkins, then `install --only` with the
+new `.pub` to drop the old key's line.
+
 When reimaging a host, preload that key for `zaphod` (Raspberry Pi Imager can)
-so Jenkins can reach it again.
+and run `install` for it, so Jenkins can reach it again.
 
 ### Releasing
 

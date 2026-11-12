@@ -5,4 +5,4 @@
 # timer keeps following the branch.
 set -eu
 . "$(dirname "$0")/lib.sh"
-start_deploy "$BRICK1982" .config/lcars/env "${BRANCH:-}" rpi_lcars LCARS_DEPLOY_BRANCH lcars-deploy.service master
+start_deploy "$BRICK1982" "${BRANCH:-}" rpi_lcars master

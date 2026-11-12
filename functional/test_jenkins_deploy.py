@@ -1,6 +1,6 @@
 """jenkins/bin/lib.sh's start_deploy, run for real: ssh is replaced by a
-command that runs the remote side locally (against a scratch HOME), and
-git ls-remote by one that knows a fixed set of branches."""
+command that runs the remote side (jenkins-gate) locally against a scratch
+HOME, and git ls-remote by one that knows a fixed set of branches."""
 
 import os
 import shutil
@@ -20,8 +20,9 @@ class StartDeploy(unittest.TestCase):
         self.env_file = self.home / ".config/brick-status/env"
         self.env_file.write_text("BRICK_STATUS_X=1\nBRICK_DEPLOY_BRANCH=main\nBRICK_STATUS_Y=2\n")
         self.path = fake_commands(self.tmp / "bin", {
-            # ssh <host> sh -s -- <env file> <branch>: run it here, as the host would.
+            # ssh <host> jenkins-gate deploy <repo> <branch>: run it here, as the host would.
             "ssh": f'echo "ssh $1" >> {self.log}; shift; HOME={self.home} exec "$@"\n',
+            "jenkins-gate": f'exec python3 {ROOT}/jenkins/gate/jenkins_gate.py "$@"\n',
             "systemctl": f'echo "systemctl $*" >> {self.log}\n',
             "git": ('if [ "$1" = ls-remote ]; then\n'
                     '  case "$4 $5" in */brick-cicd-config\ main|*/brick-cicd-config\ feature/radar) exit 0 ;;\n'
@@ -32,15 +33,13 @@ class StartDeploy(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def start(self, branch: str, env_file: Path | None = None) -> subprocess.CompletedProcess:
-        rel = (env_file or self.env_file).relative_to(self.home)
-        script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick9000 {rel} "$1"'
+    def start(self, branch: str) -> subprocess.CompletedProcess:
+        script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick9000 "$1"'
         return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
                               env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
 
     def start_lcars(self, branch: str) -> subprocess.CompletedProcess:
-        script = (f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick1982 .config/lcars/env "$1" '
-                  'rpi_lcars LCARS_DEPLOY_BRANCH lcars-deploy.service master')
+        script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick1982 "$1" rpi_lcars master'
         return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
                               env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
 

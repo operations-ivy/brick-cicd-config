@@ -56,12 +56,13 @@ wait_for_job() {  # <namespace> <job>
 }
 
 # Point a host's deploy at a branch and start it: by default brick-cicd-config
-# (brick9000/deploy, BRICK_DEPLOY_BRANCH, brick-deploy.service); the extra
-# arguments name another repo's (rpi_lcars: LCARS_DEPLOY_BRANCH,
-# lcars-deploy.service, master). An empty branch means the default branch.
-start_deploy() {  # <host> <env file on the host> <branch> [repo] [variable] [unit] [default branch]
-    repo=${4:-brick-cicd-config} var=${5:-BRICK_DEPLOY_BRANCH} unit=${6:-brick-deploy.service}
-    branch=${3:-${7:-main}}
+# (brick9000/deploy); rpi_lcars is the LCARS panel's, master by default. An
+# empty branch means the default branch. On the host it's jenkins-gate's
+# `deploy` (jenkins/gate: the only thing Jenkins' key may run there), which
+# knows each repo's env file, variable and unit.
+start_deploy() {  # <host> <branch> [repo] [default branch]
+    repo=${3:-brick-cicd-config}
+    branch=${2:-${4:-main}}
     case $branch in
         -*|*[!A-Za-z0-9._/-]*) echo "not a branch name: $branch" >&2; return 1 ;;
     esac
@@ -69,16 +70,10 @@ start_deploy() {  # <host> <env file on the host> <branch> [repo] [variable] [un
         echo "no branch $branch in $repo on GitHub (push it first)" >&2
         return 1
     fi
-    # Replace the variable's line, or add one.
-    ssh "$1" sh -s -- "$2" "$branch" "$var" "$unit" <<'REMOTE'
-set -eu
-env_file=$HOME/$1
-if grep -q "^$3=" "$env_file"; then
-    sed -i "s|^$3=.*|$3=$2|" "$env_file"
-else
-    echo "$3=$2" >>"$env_file"
-fi
-systemctl --user start --no-block "$4"
-REMOTE
+    ssh "$1" jenkins-gate deploy "$repo" "$branch"
+    case $repo in
+        rpi_lcars) unit=lcars-deploy.service ;;
+        *) unit=brick-deploy.service ;;
+    esac
     echo "Deploying $repo $branch; follow it on the host with: journalctl _SYSTEMD_USER_UNIT=$unit -f"
 }

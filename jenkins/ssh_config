@@ -1,6 +1,7 @@
 # ssh settings for Jenkins' jobs (baked into the image as
-# /etc/ssh/ssh_config.d/brick.conf). The key is Jenkins' own, authorized for
-# zaphod on each host, from the brick-jenkins Secret.
+# /etc/ssh/ssh_config.d/brick.conf). The key is Jenkins' own, from the
+# brick-jenkins Secret, authorized for zaphod on each host only to run
+# jenkins-gate (jenkins/gate, README "Jenkins' SSH key").
 Host *
     User zaphod
     IdentityFile /run/secrets/additional/ssh-key

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Run on a host by jenkins/gate/install (from /tmp, as zaphod):
+#   setup-host <key type> <key> <comment> keep|only
+set -eu
+type=$1 blob=$2 comment=$3 only=$4
+gate=/usr/local/bin/jenkins-gate
+src=${JENKINS_GATE_SRC:-/tmp}  # the tests' scratch directory, otherwise /tmp
+sudo install -o root -g root -m 755 "$src/jenkins_gate.py" "$gate"
+rm -f "$src/jenkins_gate.py"
+
+keys=$HOME/.ssh/authorized_keys
+mkdir -p "$HOME/.ssh"
+touch "$keys"
+{
+    if [ "$only" = only ]; then
+        grep -v -F "$blob" "$keys" | grep -v " jenkins@" || true
+    else
+        grep -v -F "$blob" "$keys" || true
+    fi
+    echo "command=\"$gate\",restrict $type $blob $comment"
+} >"$keys.new"
+chmod 600 "$keys.new"
+mv "$keys.new" "$keys"
+rm -f "$src/setup-host"
+"${JENKINS_GATE_RUN:-$gate}" true
+echo "$(hostname): jenkins-gate installed; $comment can only run it"

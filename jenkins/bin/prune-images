@@ -7,14 +7,15 @@ set -eu
 . "$(dirname "$0")/lib.sh"
 script=$(mirror brick-k8s-config)/scripts/prune_images.py
 # Docker Hub deletes with the account's access token, from the brick-jenkins
-# Secret; "this machine" in prune_images.py is brick9000's Docker, over SSH.
+# Secret; "this machine" in prune_images.py is brick9000's Docker, over SSH
+# through jenkins-gate (PRUNE_DOCKER_SSH; jenkins/gate).
 secrets=/run/secrets/additional
 if [ -s "$secrets/dockerhub-token" ]; then
     DOCKERHUB_USERNAME=$(cat "$secrets/dockerhub-username")
     DOCKERHUB_TOKEN=$(cat "$secrets/dockerhub-token")
     export DOCKERHUB_USERNAME DOCKERHUB_TOKEN
 fi
-export DOCKER_HOST=${DOCKER_HOST:-ssh://zaphod@$BRICK9000}
+export PRUNE_DOCKER_SSH=${PRUNE_DOCKER_SSH:-$BRICK9000}
 if [ "${DEV_ONLY:-false}" = true ]; then
     exec python3 "$script" --apply --dev-only
 fi
