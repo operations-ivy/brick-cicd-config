@@ -1599,6 +1599,16 @@ class JenkinsJobsTest(unittest.TestCase):
         # the checkout's mode, which can be group-writable.
         self.assertIn("COPY --chmod=644 ssh_config /etc/ssh/ssh_config.d/", (JENKINS / "Dockerfile").read_text())
 
+    def test_test_pod_has_the_python_packages(self):
+        # test-brick-cicd-config runs the tests in this image, so every Python
+        # package brick9000 installs must be in it too, except the hardware
+        # ones the tests stub. structlog was missing (test-all #48).
+        hardware = {"python3-evdev", "python3-libgpiod"}
+        installed = set(re.findall(r"python3-[\w-]+", (BRICK9000 / "install.sh").read_text()))
+        dockerfile = (JENKINS / "Dockerfile").read_text()
+        for package in sorted(installed - hardware):
+            self.assertIn(package, dockerfile, f"{package}: brick9000 has it, the test pod doesn't")
+
     def test_secret_keys_are_sealed(self):
         # Every key Jenkins reads from the brick-jenkins Secret is one seal-secrets puts there.
         sealed = set(re.findall(r"--from-file=([\w-]+)", (JENKINS / "seal-secrets").read_text()))
