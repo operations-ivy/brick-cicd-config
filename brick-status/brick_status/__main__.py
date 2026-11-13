@@ -21,7 +21,8 @@ from . import board_metrics as bm
 from . import (check, checks, host, lamp, lights, logs, notify, party, party_sound, since,
                units, web)
 from .board import ACTIVE, QUIET, Board
-from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_LAMP, KEY_LEFT, KEY_PARTY,
+from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_CHECK_SIDE, KEY_LAMP, KEY_LEFT,
+                     KEY_PARTY,
                      KEY_RIGHT, KEY_WAKE, VIEWS, Settings)
 from .hardware import Screen, watch_buttons
 
@@ -113,7 +114,8 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
         time.sleep(settings.poll_seconds)
 
 
-NAMED_KEYS = {KEY_WAKE: "side", KEY_CHECK: "check", KEY_LAMP: "lamp", KEY_PARTY: "party",
+NAMED_KEYS = {KEY_WAKE: "side", KEY_CHECK: "check", KEY_CHECK_SIDE: "check_side", KEY_LAMP: "lamp",
+              KEY_PARTY: "party",
               KEY_LEFT: "left", KEY_RIGHT: "right"}
 
 
@@ -224,7 +226,7 @@ def main() -> None:
                     log.info("side button", did="awake", minutes=settings.wake_seconds // 60)
                 else:
                     log.info("side button", did="on until the schedule turns it off")
-        elif code == KEY_CHECK:
+        elif code in (KEY_CHECK, KEY_CHECK_SIDE):  # either, twice: one DoublePress for both
             if board.mode(now) != QUIET and not os.path.exists(settings.retro_flag):
                 board.wake(now)
                 if check_press.press(now):

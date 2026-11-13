@@ -444,7 +444,7 @@ health fails; a failed last sync warns), and the last four syncs. wigle-sync's
 checks moved to the Services view (and its button's colour), and still feed its
 page, the "uploading" lights and the CRT label. The
 joystick left/right steps through the views. Pressing button 6 (the bottom
-row's right-hand button, `KEY_X`) twice within 1.5 seconds starts the `check-all` Jenkins job
+row's right-hand button, `KEY_X`) or the right side button (Enter, `KEY_ENTER`) twice within 1.5 seconds starts the `check-all` Jenkins job
 (`scripts/smoke`, then `test-all`) through its webhook, with the webhook secret
 from `~/.config/brick-jenkins/secrets/webhook_secret`. One press only arms it
 (a white flash); the lights then answer blue (started) or amber (Jenkins

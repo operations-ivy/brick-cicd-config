@@ -820,6 +820,8 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
+        from brick_status.config import KEY_CHECK_SIDE
+        self.assertEqual(button_name(KEY_CHECK_SIDE), "check_side")
         self.assertEqual(button_name(KEY_LEFT), "left")
         from brick_status.config import KEY_LAMP
         self.assertEqual(button_name(KEY_LAMP), "lamp")
@@ -828,10 +830,12 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(button_name(999), "other")
 
     def test_the_check_and_party_buttons(self):
-        from brick_status.config import BUTTON_KEYS, KEY_CHECK, KEY_LAMP, KEY_PARTY, KEY_WAKE
+        from brick_status.config import BUTTON_KEYS, KEY_CHECK, KEY_CHECK_SIDE, KEY_LAMP, KEY_PARTY, KEY_WAKE
         self.assertEqual(KEY_CHECK, BUTTON_KEYS[5])  # the bottom row's right-hand button
         self.assertEqual(KEY_PARTY, 24)  # 1UP, KEY_O
-        self.assertEqual(len({KEY_CHECK, KEY_LAMP, KEY_PARTY, KEY_WAKE}), 4)
+        self.assertEqual(KEY_CHECK_SIDE, 28)  # the right side, ENT, KEY_ENTER
+        self.assertNotIn(KEY_CHECK_SIDE, BUTTON_KEYS)
+        self.assertEqual(len({KEY_CHECK, KEY_CHECK_SIDE, KEY_LAMP, KEY_PARTY, KEY_WAKE}), 5)
 
     def test_http_paths_are_bounded(self):
         self.assertEqual(board_metrics.http_path("/static/vendor/xterm.js"), "/static/")
