@@ -1606,8 +1606,10 @@ class JenkinsJobsTest(unittest.TestCase):
         hardware = {"python3-evdev", "python3-libgpiod"}
         installed = set(re.findall(r"python3-[\w-]+", (BRICK9000 / "install.sh").read_text()))
         dockerfile = (JENKINS / "Dockerfile").read_text()
+        packages = set(re.findall(r"python3-[\w-]+", dockerfile))
         for package in sorted(installed - hardware):
-            self.assertIn(package, dockerfile, f"{package}: brick9000 has it, the test pod doesn't")
+            with self.subTest(package=package):
+                self.assertIn(package, packages, "brick9000 has it, the test pod doesn't")
 
     def test_secret_keys_are_sealed(self):
         # Every key Jenkins reads from the brick-jenkins Secret is one seal-secrets puts there.
