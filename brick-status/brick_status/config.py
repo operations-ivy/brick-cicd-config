@@ -35,6 +35,9 @@ KEY_WAKE = 1
 # starts Jenkins' check-all job (check.py). It was 1UP's until 2026-11-08,
 # when 1UP became the party button (the user).
 KEY_CHECK = 45
+# The button on the cabinet's right side (ENT, KEY_ENTER): the check button
+# too, pressed twice (the user, 2026-11-12). No game uses it.
+KEY_CHECK_SIDE = 28
 # The cabinet's front-right button (1UP, KEY_O): ten seconds of light show on
 # the buttons, the screen and the lamp (party.py, #152). Checked on the hardware.
 KEY_PARTY = 24

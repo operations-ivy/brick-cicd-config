@@ -1,4 +1,4 @@
-"""The cabinet's check button (button 6, the bottom row's right-hand one): press it twice to check the whole homelab.
+"""The cabinet's check buttons (button 6 and the right side button): press either twice to check the whole homelab.
 
 Two presses within `window` seconds start Jenkins' check-all job
 (jenkins/jobs/check-all.groovy: scripts/smoke, then test-all) through its
