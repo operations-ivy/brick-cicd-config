@@ -18,6 +18,7 @@ PICODRIVE = "/usr/local/lib/libretro/picodrive_libretro.so"
 PPSSPP = "/usr/local/lib/libretro/ppsspp_libretro.so"
 FLYCAST = "/usr/local/lib/libretro/flycast_libretro.so"
 FBNEO = "/usr/local/lib/libretro/fbneo_neogeo_libretro.so"
+DOSBOX_PURE = "/usr/local/lib/libretro/dosbox_pure_libretro.so"
 # FinalBurn Neo's list of the Neo Geo games it runs (its dats/ folder,
 # installed beside the core by install.sh): names the zips, says which are clones.
 FBNEO_NEOGEO_DAT = "/usr/local/lib/libretro/fbneo_neogeo.dat"
@@ -77,6 +78,8 @@ SYSTEMS = (
     # neogeo.zip (MAME 0.78's) fails them: no list until a current one is there.
     System("neogeo", "SNK - Neo Geo", FBNEO, "FinalBurn Neo", (".zip",), arcade_dat=FBNEO_NEOGEO_DAT,
            needs="neogeo.zip"),
+    # One zip per game, its files as installed; DOSBox Pure finds the program.
+    System("dos", "DOS", DOSBOX_PURE, "DOSBox-Pure", (".zip",)),
 )
 
 
