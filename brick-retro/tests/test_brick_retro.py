@@ -149,7 +149,8 @@ class GamesTests(unittest.TestCase):
                     "psx/Final Fantasy VII (USA) (Disc 2).chd", "psx/Final Fantasy VII (USA) (Disc 1).chd",
                     "psx/Tekken 3 (Track 1).bin", "psx/Tekken 3 (Track 2).bin",
                     "psx/Ace Combat 3.bin", "psx/R4.ccd", "psx/R4.img", "psx/SaGa.ccd", "psx/SaGa.img.ecm",
-                    "psx/Lost.cue", "psx/SCPH1001.BIN", "psx/GT2.ccd", "psx/GT2.img"):
+                    "psx/Lost.cue", "psx/SCPH1001.BIN", "psx/GT2.ccd", "psx/GT2.img",
+                    "dos/Commander Keen 4 Secret Of The Oracle (1991).zip", "dos/readme.txt"):
             (roms / rel).parent.mkdir(parents=True, exist_ok=True)
             (roms / rel).write_text("x")
         (roms / "psx/Tekken 3.cue").write_text(
@@ -171,7 +172,10 @@ class GamesTests(unittest.TestCase):
         self.assertEqual(counts, {"nes": 2, "snes": 3, "gb": 1, "gbc": 0, "gba": 1, "megadrive": 1,
                                   "mastersystem": 0, "gamegear": 0, "pcengine": 0, "psx": 6, "segacd": 0,
                                   "sega32x": 0, "psp": 0,
-                                  "Dreamcast": 0, "neogeo": 0})
+                                  "Dreamcast": 0, "neogeo": 0, "dos": 1})
+        dos = json.loads((self.root / "playlists/DOS.lpl").read_text())
+        self.assertEqual([(i["label"], i["core_name"]) for i in dos["items"]],
+                         [("Commander Keen 4 Secret Of The Oracle (1991)", "DOSBox-Pure")])
         nes = json.loads((self.root / "playlists/Nintendo - Nintendo Entertainment System.lpl").read_text())
         self.assertEqual([i["label"] for i in nes["items"]], ["Adventure Island", "Bomberman"])
         self.assertEqual(nes["default_core_path"], "/cores/nestopia_libretro.so")

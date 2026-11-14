@@ -68,7 +68,7 @@ fi
 # (README, "Games").
 sudo apt-get install -y retroarch libretro-nestopia libretro-snes9x libretro-gambatte libretro-mgba \
     libretro-genesisplusgx rsync build-essential git cmake libgl-dev libegl-dev libgles-dev
-# Debian packages no PlayStation, 32X, PSP, Dreamcast, Neo Geo or PC Engine core: build
+# Debian packages no PlayStation, 32X, PSP, Dreamcast, Neo Geo, PC Engine or DOS core: build
 # each from a pinned commit into /usr/local/lib/libretro, once per commit, on
 # two cores (brick9000 has no fan: three held it at 77 °C, 2026-10-16)
 # (the commit is kept beside the core). games.py names the paths.
@@ -112,6 +112,10 @@ core flycast https://github.com/flyinghead/flycast 5aa091fde632fb332c8d8c34e280d
 # games (games.py).
 core fbneo_neogeo https://github.com/libretro/FBNeo 68f0d3e47587f700c221392a0d565e2f9bfd728e \
     src/burner/libretro/fbneo_neogeo_libretro.so make -C src/burner/libretro SUBSET=neogeo REGEN_HEADERS=1 platform=rpi4_64 -j2
+# DOSBox Pure for the DOS games (zips; it finds each game's program itself).
+# libretro's mirror: upstream moved to Codeberg.
+core dosbox_pure https://github.com/libretro/dosbox-pure e39497e7c2a32c67c26e6598dd14f6d58c384bfd \
+    dosbox_pure_libretro.so make -j2
 # Raspberry Pi OS starts every radio blocked (rfkill default_state=0) and
 # NetworkManager only unblocks Wi-Fi; systemd-rfkill keeps this across reboots.
 for r in /sys/class/rfkill/rfkill*; do
