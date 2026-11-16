@@ -16,10 +16,11 @@ progress where a metric for it exists.
 
 import re
 import time
+from collections import defaultdict
 
 import structlog
 
-from .checks import ACTIVE, FAIL, JENKINS_RESULTS, OK, UNKNOWN, WARN, Prometheus, _ago
+from .checks import ACTIVE, FAIL, JENKINS_RESULTS, OK, QUERY_ERRORS, UNKNOWN, WARN, Prometheus, ago
 
 log = structlog.get_logger(__name__)
 
@@ -30,11 +31,11 @@ JOB_SERIES = ('{__name__=~"kube_job_(owner|status_active|status_failed|status_st
               '|status_completion_time)"}')
 
 # Running first, then trouble, then the rest by their next run.
-ORDER = [ACTIVE, FAIL, WARN, UNKNOWN, OK]
+ORDER = {ACTIVE: 0, FAIL: 1, WARN: 2, UNKNOWN: 3, OK: 4}
 
 
 def period_seconds(text: str | int | float) -> float | None:
-    """"24h", "2h", "30m", "1d" or plain seconds; None if it isn't one."""
+    """Seconds in a period such as 24h, 2h, 30m, 1d or a plain number; None if it isn't one."""
     if isinstance(text, (int, float)):
         return float(text)
     m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*", str(text))
@@ -44,12 +45,17 @@ def period_seconds(text: str | int | float) -> float | None:
 
 
 def next_text(next_at: float | None, now: float, busy: bool) -> str:
-    """When it runs next: "in 13m", "due" (past, not started), "busy" (still on the last one)."""
+    """When it runs next: in 13m, due (past, not started), or busy (still on the last one)."""
     if next_at is None:
         return ""
     if next_at < now:
         return "busy" if busy else "due"
-    return f"in {_ago(next_at - now)}"
+    return f"in {ago(next_at - now)}"
+
+
+def _ms(value: float | None) -> float:
+    """Seconds from Jenkins' milliseconds."""
+    return (value or 0) / 1000
 
 
 def _value(prom: Prometheus, promql: str) -> float | None:
@@ -63,7 +69,7 @@ def progress(prom: Prometheus, spec: dict) -> dict | None:
     try:
         done = _value(prom, spec["done"])
         total = _value(prom, spec["total"]) if spec.get("total") else None
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as e:
+    except (*QUERY_ERRORS, TypeError) as e:
         log.warning("night shift progress query failed", error=str(e))
         return None
     if done is None:
@@ -72,70 +78,88 @@ def progress(prom: Prometheus, spec: dict) -> dict | None:
     return {"label": str(spec.get("label", "")), "done": done, "total": total, "pct": pct}
 
 
-def _row(name: str, kind: str, state: str, last: str, at: float | None, took: float | None,
-         next_at: float | None, now: float, busy: bool = False) -> dict:
+def _row(name: str, kind: str, state: str, *, last: str, at: float | None = None, took: float | None = None,
+         next_at: float | None = None, now: float, busy: bool = False) -> dict:
     return {"name": name, "kind": kind, "state": state, "last": last, "at": at,
-            "took": "" if took is None else _ago(took), "next": next_text(next_at, now, busy),
+            "took": "" if took is None else ago(took), "next": next_text(next_at, now, busy),
             "next_at": next_at, "progress": None}
+
+
+def _cronjob_series(prom: Prometheus) -> dict[tuple[str, str], dict[str, float]]:
+    """(namespace, cronjob) -> its kube_cronjob_* values, by the name after the prefix."""
+    cronjobs: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    for m, v in prom.query(CRONJOB_SERIES):
+        if m.get("cronjob"):
+            cronjobs[(m.get("namespace", ""), m["cronjob"])][m["__name__"].removeprefix("kube_cronjob_")] = v
+    return cronjobs
+
+
+def _job_series(prom: Prometheus) -> dict[tuple[str, str], list[dict[str, float]]]:
+    """(namespace, cronjob) -> each of its Jobs' kube_job_status_* values."""
+    owners: dict[tuple[str, str], str] = {}  # (namespace, job) -> the CronJob that made it
+    values: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    for m, v in prom.query(JOB_SERIES):
+        if not m.get("job_name"):
+            continue
+        key = (m.get("namespace", ""), m["job_name"])
+        if m["__name__"] == "kube_job_owner":
+            if m.get("owner_kind") == "CronJob" and m.get("owner_name"):
+                owners[key] = m["owner_name"]
+        else:
+            values[key][m["__name__"].removeprefix("kube_job_status_")] = v
+    by_cronjob: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
+    for (ns, job), owner in owners.items():
+        if "start_time" in values[(ns, job)]:
+            by_cronjob[(ns, owner)].append(values[(ns, job)])
+    return by_cronjob
+
+
+def _classify(c: dict[str, float], jobs: list[dict[str, float]], now: float) -> dict:
+    """A CronJob's state, last run, when, how long it took, and whether it's running."""
+    last_sched = c.get("status_last_schedule_time")
+    last_ok = c.get("status_last_successful_time")
+    newest = max(jobs, key=lambda j: j["start_time"], default=None)
+    # The newest Job is the last run unless a later one has been and gone (a TTL).
+    if newest and last_sched and newest["start_time"] < last_sched - 60:
+        newest = None
+    if c.get("status_active", 0) > 0:
+        start = max((j["start_time"] for j in jobs if j.get("active", 0) > 0), default=last_sched or now)
+        return {"state": ACTIVE, "last": f"run {ago(now - start)}", "at": start, "took": None, "busy": True}
+    if newest and newest.get("failed", 0) > 0 and not newest.get("completion_time"):
+        return {"state": FAIL, "last": f"failed {ago(now - newest['start_time'])}", "at": newest["start_time"],
+                "took": None, "busy": False}
+    if newest and newest.get("completion_time"):
+        at = newest["completion_time"]
+        return {"state": OK, "last": f"{ago(now - at)} ago", "at": at, "took": at - newest["start_time"],
+                "busy": False}
+    if last_ok and (not last_sched or last_ok >= last_sched):
+        return {"state": OK, "last": f"{ago(now - last_ok)} ago", "at": last_ok, "took": None, "busy": False}
+    if last_sched:
+        # Run, not running, and no success since: its Job failed and is gone.
+        return {"state": WARN, "last": f"no ok {ago(now - last_sched)}", "at": last_sched, "took": None,
+                "busy": False}
+    return {"state": OK, "last": "not yet", "at": None, "took": None, "busy": False}
 
 
 def cronjob_rows(prom: Prometheus, extras: dict | None = None, now: float | None = None) -> list[dict]:
     """One row per CronJob that isn't suspended."""
     now = time.time() if now is None else now
     extras = extras or {}
-    cronjobs: dict[tuple[str, str], dict[str, float]] = {}
-    for m, v in prom.query(CRONJOB_SERIES):
-        if m.get("cronjob"):
-            key = (m.get("namespace", ""), m["cronjob"])
-            cronjobs.setdefault(key, {})[m["__name__"].removeprefix("kube_cronjob_")] = v
-    jobs: dict[tuple[str, str], dict] = {}
-    for m, v in prom.query(JOB_SERIES):
-        if not m.get("job_name"):
-            continue
-        job = jobs.setdefault((m.get("namespace", ""), m["job_name"]), {})
-        if m["__name__"] == "kube_job_owner":
-            if m.get("owner_kind") == "CronJob":
-                job["owner"] = m.get("owner_name")
-        else:
-            job[m["__name__"].removeprefix("kube_job_status_")] = v
-
+    jobs = _job_series(prom)
     rows = []
-    for (ns, name), c in sorted(cronjobs.items(), key=lambda item: item[0][1]):
+    for (ns, name), c in _cronjob_series(prom).items():
         if c.get("spec_suspend") == 1:
             continue
-        own = [j for (jns, _), j in jobs.items() if jns == ns and j.get("owner") == name and "start_time" in j]
-        newest = max(own, key=lambda j: j["start_time"], default=None)
-        last_sched = c.get("status_last_schedule_time")
-        last_ok = c.get("status_last_successful_time")
-        next_at = c.get("next_schedule_time")
-        # The newest Job is the last run unless a later one has been and gone (a TTL).
-        if newest and last_sched and newest["start_time"] < last_sched - 60:
-            newest = None
-        busy = c.get("status_active", 0) > 0
-        took = None
-        if busy:
-            running = [j["start_time"] for j in own if j.get("active", 0) > 0]
-            start = max(running, default=last_sched or now)
-            state, last, at = ACTIVE, f"run {_ago(now - start)}", start
-        elif newest and newest.get("failed", 0) > 0 and not newest.get("completion_time"):
-            state, last, at = FAIL, f"failed {_ago(now - newest['start_time'])}", newest["start_time"]
-        elif newest and newest.get("completion_time"):
-            at = newest["completion_time"]
-            state, last, took = OK, f"{_ago(now - at)} ago", at - newest["start_time"]
-        elif last_ok and (not last_sched or last_ok >= last_sched):
-            state, last, at = OK, f"{_ago(now - last_ok)} ago", last_ok
-        elif last_sched:
-            # Run, not running, and no success since: its Job failed and is gone.
-            state, last, at = WARN, f"no ok {_ago(now - last_sched)}", last_sched
-        else:
-            state, last, at = OK, "not yet", None
+        run = _classify(c, jobs.get((ns, name), []), now)
         extra = extras.get(name) or {}
-        if took is None and not busy and extra.get("took"):
+        took = run["took"]
+        if took is None and not run["busy"] and extra.get("took"):
             try:
                 took = _value(prom, extra["took"])
-            except (OSError, RuntimeError, ValueError) as e:
+            except QUERY_ERRORS as e:
                 log.warning("night shift took query failed", cronjob=name, error=str(e))
-        row = _row(name, "cronjob", state, last, at, took, next_at, now, busy)
+        row = _row(name, "cronjob", run["state"], last=run["last"], at=run["at"], took=took,
+                   next_at=c.get("next_schedule_time"), now=now, busy=run["busy"])
         if extra.get("progress"):
             row["progress"] = progress(prom, extra["progress"])
         rows.append(row)
@@ -148,27 +172,28 @@ def jenkins_rows(jobs: list[dict] | None, timers: dict | None, now: float | None
     if not timers:
         return []
     if jobs is None:
-        return [_row("jenkins", "jenkins", UNKNOWN, "no data", None, None, None, now)]
+        return [_row("jenkins", "jenkins", UNKNOWN, last="no data", now=now)]
     by_name = {j["name"]: j for j in jobs}
     rows = []
     for name, every in timers.items():
         builds = (by_name.get(name) or {}).get("builds") or []
-        period = period_seconds(every)
         if not builds:
-            rows.append(_row(name, "jenkins", OK, "not yet", None, None, None, now))
+            rows.append(_row(name, "jenkins", OK, last="not yet", now=now))
             continue
         first = builds[0]
-        started = first.get("timestamp", 0) / 1000
+        started = _ms(first.get("timestamp"))
+        period = period_seconds(every)
         next_at = started + period if period else None
         if first.get("building"):
-            rows.append(_row(name, "jenkins", ACTIVE, f"run {_ago(now - started)}", started, None,
-                             next_at, now, busy=True))
+            rows.append(_row(name, "jenkins", ACTIVE, last=f"run {ago(now - started)}", at=started,
+                             next_at=next_at, now=now, busy=True))
             continue
         done = next((b for b in builds if not b.get("building")), first)
-        at = done.get("timestamp", 0) / 1000
+        at = _ms(done.get("timestamp"))
         state, word = JENKINS_RESULTS.get(done.get("result"), (UNKNOWN, str(done.get("result")).lower()))
-        last = f"{_ago(now - at)} ago" if state == OK else f"{word} {_ago(now - at)}"
-        rows.append(_row(name, "jenkins", state, last, at, (done.get("duration") or 0) / 1000, next_at, now))
+        last = f"{ago(now - at)} ago" if state == OK else f"{word} {ago(now - at)}"
+        rows.append(_row(name, "jenkins", state, last=last, at=at, took=_ms(done.get("duration")),
+                         next_at=next_at, now=now))
     return rows
 
 
@@ -179,10 +204,10 @@ def rows(prom: Prometheus, jobs: list[dict] | None, config: dict | None, now: fl
     config = config or {}
     try:
         out = cronjob_rows(prom, config.get("cronjobs"), now)
-    except (OSError, RuntimeError, ValueError, KeyError) as e:
+    except QUERY_ERRORS as e:
         log.warning("night shift cronjobs unavailable", error=str(e))
-        out = [_row("cronjobs", "cronjob", UNKNOWN, "no data", None, None, None, now)]
+        out = [_row("cronjobs", "cronjob", UNKNOWN, last="no data", now=now)]
     out += jenkins_rows(jobs, config.get("jenkins"), now)
     far = float("inf")
-    return sorted(out, key=lambda r: (ORDER.index(r["state"]) if r["state"] in ORDER else len(ORDER),
-                                      r["next_at"] if r["next_at"] is not None else far, r["name"]))
+    return sorted(out, key=lambda r: (ORDER.get(r["state"], len(ORDER)),
+                                      far if r["next_at"] is None else r["next_at"], r["name"]))

@@ -24,16 +24,25 @@ GREEN, AMBER, RED, GREY = [0, 255, 0], [255, 140, 0], [255, 0, 0], [90, 90, 110]
 STATE_COLOURS = {OK: GREEN, WARN: AMBER, FAIL: RED, ACTIVE: GREEN, UNKNOWN: GREY}
 
 
+# The groups the Cluster screen lists (index.html's cluster view), whose worst
+# state its button shows.
+CLUSTER_GROUPS = ("cluster", "argocd", "services", "wigle")
+
+
 def view_states(summary: dict) -> dict[str, str]:
     """Each view's state, for its button's light: the overview is everything,
-    the cluster screen its four groups (as its frame), the night shift its rows."""
+    the cluster screen its groups (as its frame), the night shift its rows."""
     groups = summary.get("groups", {})
     states = {g: v["state"] for g, v in groups.items()}
     states["overview"] = summary.get("overall", UNKNOWN)
-    cluster = [groups[g]["state"] for g in ("cluster", "argocd", "services", "wigle") if g in groups]
-    states["cluster"] = worst(cluster)
+    states["cluster"] = worst([groups[g]["state"] for g in CLUSTER_GROUPS if g in groups])
     shift = summary.get("nightshift")
-    states["nightshift"] = UNKNOWN if shift is None else worst([r["state"] for r in shift]) if shift else OK
+    if shift is None:  # couldn't be gathered
+        states["nightshift"] = UNKNOWN
+    elif shift:
+        states["nightshift"] = worst([r["state"] for r in shift])
+    else:  # nothing scheduled is fine, not unknown (worst([]) would say unknown)
+        states["nightshift"] = OK
     return states
 
 

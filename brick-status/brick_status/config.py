@@ -21,7 +21,8 @@ VIEWS = ["overview", "cluster", "nightshift", "anomalies"]
 # a screen, and the first of the bottom row the anomalies' own page (the user,
 # 2026-11-07). The fifth enlarges the CRT to the whole screen and back
 # (CRT_BUTTON; the user, 2026-11-09). The sixth is the check button (KEY_CHECK).
-BUTTON_ACTIONS = ["overview", "cluster", "nightshift", "anomalies"]  # shorter than BUTTON_KEYS: the rest do other things
+# Shorter than BUTTON_KEYS: the rest do other things.
+BUTTON_ACTIONS = list(VIEWS)
 CRT_BUTTON = 4  # BUTTON_KEYS index: the CRT full screen and back
 
 # Linux key codes the picade overlay's gpio_keys device sends for the six

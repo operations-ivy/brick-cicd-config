@@ -690,6 +690,7 @@ function render(s) {
     setState("main-panel", s.recent ? (g.builds?.state || "unknown") : "unknown");
   } else if (view === "cluster") {
     document.getElementById("main-title").textContent = "CLUSTER";
+    // The same groups as lights.CLUSTER_GROUPS, whose worst state lights button 2.
     setHTML("main-list", detail(s, [["NODES & WORKLOADS", "cluster"], ["ARGO CD", "argocd"], ["UNITS", "services"], ["WIGLE", "wigle"]]));
     setState("main-panel", worst(["cluster", "argocd", "services", "wigle"].map(n => g[n]?.state || "unknown")));
   } else {

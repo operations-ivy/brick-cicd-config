@@ -20,11 +20,12 @@ covered: neither leaves a timestamp these sources can read.
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
 
-from .checks import ARGO_LAST_SYNCS, OK, WARN, Prometheus, _ago, build_label
+from .checks import ARGO_LAST_SYNCS, OK, QUERY_ERRORS, WARN, Prometheus, ago, build_label
 
 log = structlog.get_logger(__name__)
 
@@ -59,41 +60,61 @@ def _common_name(names: list[str]) -> str:
     return "-".join(shared)
 
 
-def rollouts(prom: Prometheus) -> list[dict]:
-    """The newest rollout of each Deployment, releases of one image as one row."""
-    newest: dict[tuple[str, str], tuple[float, str]] = {}  # (namespace, deployment) -> (created, replicaset)
+def _newest_replicasets(prom: Prometheus) -> dict[tuple[str, str], tuple[float, str]]:
+    """(namespace, deployment) -> (created, replicaset) of each Deployment's newest ReplicaSet."""
+    newest: dict[tuple[str, str], tuple[float, str]] = {}
     for m, created in prom.query(ROLLOUTS):
         key = (m.get("namespace", ""), m.get("owner_name", ""))
         if key[1] and (key not in newest or created > newest[key][0]):
             newest[key] = (created, m.get("replicaset", ""))
-    images: dict[tuple[str, str], dict[str, str]] = {}  # (namespace, replicaset) -> container -> image
+    return newest
+
+
+def _pod_images(prom: Prometheus) -> dict[tuple[str, str], dict[str, str]]:
+    """(namespace, replicaset) -> container -> image its pods run."""
+    images: dict[tuple[str, str], dict[str, str]] = {}
     for m, _ in prom.query(POD_IMAGES):
         spec = m.get("image_spec") or m.get("image", "")
         if m.get("owner_name") and spec:
             images.setdefault((m.get("namespace", ""), m["owner_name"]), {})[m.get("container", "")] = spec
+    return images
 
+
+def _same_release(group: dict, rollout: dict) -> bool:
+    """One image, in one namespace, rolled out to both within TOGETHER_SECONDS."""
+    return (bool(rollout["image"])
+            and (group["namespace"], group["image"], group["version"])
+            == (rollout["namespace"], rollout["image"], rollout["version"])
+            and abs(group["at"] - rollout["at"]) <= TOGETHER_SECONDS)
+
+
+def _group_rollouts(found: list[dict]) -> list[dict]:
+    """Rollouts (name, namespace, image, version, at), newest first, releases of
+    one image as one row named by what the Deployments' names share."""
+    groups: list[dict] = []
+    for r in sorted(found, key=lambda r: r["at"], reverse=True):
+        group = next((g for g in groups if _same_release(g, r)), None)
+        if group:
+            group["names"].append(r["name"])
+            group["name"] = _common_name(group["names"]) or r["namespace"]
+        else:
+            groups.append({**r, "names": [r["name"]]})
+    return [{"name": g["name"], "version": g["version"], "at": g["at"], "kind": "rollout", "state": OK}
+            for g in groups]
+
+
+def rollouts(prom: Prometheus) -> list[dict]:
+    """The newest rollout of each Deployment, releases of one image as one row."""
+    images = _pod_images(prom)
     found = []
-    for (ns, deployment), (created, replicaset) in newest.items():
+    for (ns, deployment), (created, replicaset) in _newest_replicasets(prom).items():
         containers = images.get((ns, replicaset), {})
         # The main container: the one the Deployment is named after, else the first.
         # No pods (scaled to zero): no version.
         main = next((c for c in sorted(containers) if c and c in deployment), None) or min(containers, default=None)
         image, tag = image_tag(containers[main]) if main is not None else ("", "")
         found.append({"name": deployment, "namespace": ns, "image": image, "version": tag, "at": created})
-
-    found.sort(key=lambda r: r["at"], reverse=True)
-    rows: list[dict] = []
-    for r in found:
-        same = next((g for g in rows if g["namespace"] == r["namespace"] and g["image"] == r["image"]
-                     and g["version"] == r["version"] and r["image"]
-                     and abs(g["at"] - r["at"]) <= TOGETHER_SECONDS), None)
-        if same:
-            same["names"].append(r["name"])
-            same["name"] = _common_name(same["names"]) or r["namespace"]
-        else:
-            rows.append({**r, "names": [r["name"]], "kind": "rollout"})
-    return [{"name": r["name"], "version": r["version"], "at": r["at"], "kind": "rollout", "state": OK}
-            for r in rows]
+    return _group_rollouts(found)
 
 
 def argo_syncs(prom: Prometheus) -> list[dict]:
@@ -112,7 +133,9 @@ def device_deploys(jobs: list[dict] | None) -> list[dict]:
     rows = []
     for job in jobs or []:
         host = DEVICE_JOBS.get(job.get("name"))
-        build = next((b for b in job.get("builds") or [] if b.get("result") == "SUCCESS"), None) if host else None
+        if not host:
+            continue
+        build = next((b for b in job.get("builds") or [] if b.get("result") == "SUCCESS"), None)
         if build:
             rows.append({"name": host, "version": build_label(build.get("displayName")) or f"#{build.get('number')}",
                          "at": build.get("timestamp", 0) / 1000, "kind": "device", "state": OK})
@@ -128,13 +151,26 @@ def self_deploy(repo: Path = REPO, host: str = "brick9000") -> dict | None:
     except (OSError, subprocess.SubprocessError) as e:
         log.warning("own deploy unknown", error=str(e))
         return None
-    commit, _, rest = out.partition("\t")
-    moved, _, committed = rest.partition("\t")
-    at = re.search(r"\{(\d+)\}", moved)
-    when = float(at[1]) if at else float(committed) if committed.isdigit() else None
-    if not commit or when is None:
+    fields = out.split("\t")
+    if len(fields) != 3 or not fields[0]:
+        return None
+    commit, moved, committed = fields
+    if at := re.search(r"\{(\d+)\}", moved):  # HEAD@{<unix time>}: when HEAD moved here
+        when = float(at[1])
+    elif committed.isdigit():  # no reflog: the commit's own time
+        when = float(committed)
+    else:
         return None
     return {"name": host, "version": commit, "at": when, "kind": "device", "state": OK}
+
+
+def _safely(label: str, fn: Callable[..., list[dict]], *args) -> list[dict]:
+    """fn's rows, or none (logged) when its source can't be read."""
+    try:
+        return fn(*args)
+    except QUERY_ERRORS as e:
+        log.warning("shipped source unavailable", source=label, error=str(e))
+        return []
 
 
 def shipped(prom: Prometheus, jobs: list[dict] | None, own: dict | None = None, now: float | None = None,
@@ -142,18 +178,12 @@ def shipped(prom: Prometheus, jobs: list[dict] | None, own: dict | None = None, 
     """The newest `limit` arrivals from every source, each with its age. A
     source that can't be read is left out (the other tiles say why)."""
     now = time.time() if now is None else now
-    rows: list[dict] = []
-    try:
-        rows += rollouts(prom)
-    except (OSError, RuntimeError, ValueError, KeyError) as e:
-        log.warning("shipped rollouts unavailable", error=str(e))
-    try:
-        rolled = [r["at"] for r in rows]
-        rows += [s for s in argo_syncs(prom) if not any(abs(s["at"] - at) <= SYNC_NEAR_SECONDS for at in rolled)]
-    except (OSError, RuntimeError, ValueError, KeyError) as e:
-        log.warning("shipped syncs unavailable", error=str(e))
+    rows = _safely("rollouts", rollouts, prom)
+    rollout_times = [r["at"] for r in rows]
+    rows += [s for s in _safely("syncs", argo_syncs, prom)
+             if not any(abs(s["at"] - at) <= SYNC_NEAR_SECONDS for at in rollout_times)]
     rows += device_deploys(jobs)
     if own:
         rows.append(dict(own))
     rows.sort(key=lambda r: r["at"], reverse=True)
-    return [{**r, "age": _ago(now - r["at"])} for r in rows[:limit]]
+    return [{**r, "age": ago(now - r["at"])} for r in rows[:limit]]
