@@ -14,6 +14,7 @@ from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import structlog
 import yaml
@@ -68,6 +69,11 @@ class Prometheus:
         if body.get("status") != "success":
             raise RuntimeError(body.get("error", "query failed"))
         return [(r["metric"], float(r["value"][1])) for r in body["data"]["result"]]
+
+
+# What a Prometheus query can raise: no answer (URLError is an OSError), an error
+# answer, or one shaped otherwise. The board's newer screens skip a source on these.
+QUERY_ERRORS = (OSError, RuntimeError, ValueError, KeyError)
 
 
 # Maintenance windows (jenkins/bin/maintenance, the maintenance-window job): one
@@ -171,7 +177,8 @@ class Jenkins:
     user) rather than Prometheus, which only has build results by the minute."""
 
     TREE = "jobs[name,lastBuild[number,displayName,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
-    # Each job's last ten builds, for the board's recent-builds screen.
+    # Each job's last ten builds: the night shift's Jenkins timers, brick1982's
+    # deploys for the shipped tile, and the recent builds (recent_jobs).
     RECENT_TREE = ("jobs[name,builds[number,result,timestamp,duration,building,"
                    "displayName,description]{0,10}]")
 
@@ -212,26 +219,41 @@ POLLERS = {"build-branches"}
 BOARD_FILE = Path(__file__).resolve().parent.parent / "board.yaml"
 
 
-def hidden_jobs(path: str | Path | None = None) -> set[str]:
-    """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
+def board_config(path: str | Path | None = None) -> dict[str, Any]:
+    """board.yaml (the checked-in one when path is None or "", BRICK_STATUS_BOARD_FILE
+    unset), or {} if it can't be read or isn't a mapping."""
     try:
-        data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}  # "" (unset) is the default too
+        data = yaml.safe_load(Path(path or BOARD_FILE).read_text())
     except (OSError, yaml.YAMLError) as e:
         log.warning("board file unreadable", error=str(e))
-        return set()
-    return {str(j) for j in data.get("hidden_jobs") or []}
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def recent_builds(jenkins: Jenkins, hidden: Collection[str] = frozenset(), limit: int = 15,
+def hidden_jobs(path: str | Path | None = None) -> set[str]:
+    """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
+    return {str(j) for j in board_config(path).get("hidden_jobs") or []}
+
+
+def recent_jobs(jenkins: Jenkins) -> list[dict] | None:
+    """Every job with its last ten builds (Jenkins.RECENT_TREE), asked once a poll
+    for the recent builds, the night shift and the shipped tile. None when
+    Jenkins can't be asked (the builds group already says so)."""
+    try:
+        return jenkins.jobs(Jenkins.RECENT_TREE)
+    except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
+        log.warning("recent builds unavailable", error=str(e))
+        return None
+
+
+def recent_builds(jobs: list[dict] | None, hidden: Collection[str] = frozenset(), limit: int = 15,
                   now: float | None = None) -> list[dict] | None:
     """The newest `limit` builds of every job but the hidden ones, newest first:
     job, number, state, what happened and when, how long it took. None when
-    Jenkins can't be asked (the builds group already says so)."""
+    Jenkins couldn't be asked (recent_jobs). No longer on a button (#173): kept
+    in /api/state for the page's recentPage, which is unused for now."""
     now = time.time() if now is None else now
-    try:
-        jobs = jenkins.jobs(Jenkins.RECENT_TREE)
-    except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
-        log.warning("recent builds unavailable", error=str(e))
+    if jobs is None:
         return None
     builds = [(job["name"], b) for job in jobs if job["name"] not in hidden for b in job.get("builds") or []]
     builds.sort(key=lambda jb: jb[1].get("timestamp", 0), reverse=True)
@@ -239,15 +261,15 @@ def recent_builds(jenkins: Jenkins, hidden: Collection[str] = frozenset(), limit
     for name, b in builds[:limit]:
         started = b.get("timestamp", 0) / 1000
         if b.get("building"):
-            state, what = ACTIVE, f"running {_ago(now - started)}"
+            state, what = ACTIVE, f"running {ago(now - started)}"
             stage = plasma_stage(b.get("description"))
             if stage:
                 what += f", {stage}"
         else:
             state, word = JENKINS_RESULTS.get(b.get("result"), (UNKNOWN, str(b.get("result")).lower()))
-            what = f"{word} {_ago(now - started)} ago"
+            what = f"{word} {ago(now - started)} ago"
         out.append({"job": name, "number": b.get("number"), "state": state, "what": what,
-                    "took": "" if b.get("building") else _ago((b.get("duration") or 0) / 1000),
+                    "took": "" if b.get("building") else ago((b.get("duration") or 0) / 1000),
                     "label": build_label(b.get("displayName"))})
     return out
 
@@ -269,7 +291,7 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
             stage = plasma_stage(last.get("description"))
             label = build_label(last.get("displayName"))
             detail = [label] if label else []
-            detail.append(f"running {_ago(now - last['timestamp'] / 1000)}")
+            detail.append(f"running {ago(now - last['timestamp'] / 1000)}")
             if stage:
                 detail.append(stage)
             checks.append(Check("builds", job["name"], ACTIVE, ", ".join(detail), stage))
@@ -278,7 +300,7 @@ def build_checks(jenkins: Jenkins, now: float | None = None) -> list[Check]:
         else:
             state, word = JENKINS_RESULTS.get(done.get("result"), (UNKNOWN, str(done.get("result"))))
             checks.append(Check("builds", job["name"], state,
-                                f"{word} {_ago(now - done['timestamp'] / 1000)} ago"))
+                                f"{word} {ago(now - done['timestamp'] / 1000)} ago"))
     if not checks:
         checks.append(Check("builds", "jenkins", OK, "up, no jobs yet"))
     return checks
@@ -295,7 +317,7 @@ def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
     failed = v.get("last_sync_files_failed", v.get("files_failed", 0))
     deferred = v.get("last_sync_files_deferred", 0)
     last_at = v.get("last_pi_online_timestamp_seconds")
-    when = f"{_ago(now - last_at)} ago" if last_at else ""
+    when = f"{ago(now - last_at)} ago" if last_at else ""
 
     running = prom.query('sum(kube_job_status_active{namespace="wigle"})')
     # files_failed is 0 on runs where the Pi is away or the internet is down, so
@@ -388,7 +410,7 @@ def argocd_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
             continue
         detail = f"{sync}, {health}" + (f" for {ARGO_OUT_OF_SYNC_MINUTES}m+" if name in stuck else "")
         if name in last:
-            detail += f", last sync {last[name][1].lower()} {_ago(now - last[name][0])} ago"
+            detail += f", last sync {last[name][1].lower()} {ago(now - last[name][0])} ago"
         checks.append(Check("argocd", name, state, detail))
 
     good = sum(1 for sync, health in apps.values() if sync == "Synced" and ARGO_HEALTH.get(health) == OK)
@@ -396,7 +418,7 @@ def argocd_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
                     f"{good}/{len(apps)} synced and healthy")
     recent = sorted(last.items(), key=lambda item: -item[1][0])[:ARGO_RECENT_SYNCS]
     updates = [Check("argocd", f"synced {name}", WARN if result in ("Failed", "Error") else OK,
-                     f"{result.lower() or 'done'}, {_ago(now - ts)} ago") for name, (ts, result) in recent]
+                     f"{result.lower() or 'done'}, {ago(now - ts)} ago") for name, (ts, result) in recent]
     return [summary, *checks, *updates]
 
 
@@ -423,7 +445,7 @@ def summarize(checks: list[Check]) -> dict:
     }
 
 
-def _ago(seconds: float) -> str:
+def ago(seconds: float) -> str:
     seconds = max(0, int(seconds))
     if seconds < 120:
         return f"{seconds}s"

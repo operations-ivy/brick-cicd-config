@@ -24,7 +24,7 @@ import structlog
 from structlog.testing import capture_logs
 
 from brick_status import (board_metrics, jobs, checks, logs, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
-                          party, party_sound, units, volume, web)
+                          night_shift, party, party_sound, shipped, units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -346,14 +346,14 @@ class PlasmaTest(unittest.TestCase):
         self.assertIsNone(plasma.sent)
 
     def test_buttons_light_each_view_in_its_health_colour(self):
-        self.plasma.buttons({"builds": "fail", "wigle": "active"}, VIEWS, [2, 1, 0, 3], selected_view=1)
+        self.plasma.buttons({"cluster": "fail", "nightshift": "active"}, VIEWS, [2, 1, 0, 3], selected_view=1)
         path, body = self.calls[0]
         self.assertEqual(body["priority"], lights.PRIORITY_ACTIVE)
         buttons = body["buttons"]
         self.assertEqual(buttons["selected"], 1)
-        self.assertEqual(buttons["colors"]["1"], lights.RED)  # builds, the second view
+        self.assertEqual(buttons["colors"]["1"], lights.RED)  # cluster, the second view
         self.assertEqual(buttons["colors"]["2"], lights.GREEN)  # the overview is well by default
-        self.assertEqual(buttons["busy"], [slot for slot, view in zip([2, 1, 0, 3], VIEWS) if view == "wigle"])
+        self.assertEqual(buttons["busy"], [0])  # the night shift, the third view
 
 
 class FakeProm:
@@ -816,7 +816,9 @@ class MetricsTest(unittest.TestCase):
         from brick_status.config import BUTTON_KEYS, KEY_LEFT, KEY_WAKE
         # The sixth is the check button (since 2026-11-08), named for that.
         self.assertEqual([button_name(k) for k in BUTTON_KEYS],
-                         ["overview", "builds", "cluster", "anomalies", "crt", "check"])
+                         ["overview", "cluster", "nightshift", "anomalies", "crt", "check"])
+        # #173: button 2 is the cluster screen, button 3 the night shift; the recent builds left.
+        self.assertEqual(VIEWS, ["overview", "cluster", "nightshift", "anomalies"])
         self.assertEqual(button_name(KEY_WAKE), "side")
         from brick_status.config import KEY_CHECK
         self.assertEqual(button_name(KEY_CHECK), "check")
@@ -2606,7 +2608,7 @@ class LampReadTest(unittest.TestCase):
 
 
 class RecentBuildsTest(unittest.TestCase):
-    """checks.recent_builds: the board's recent-builds screen (button 2)."""
+    """checks.recent_builds: the recent-builds screen (off the buttons since #173)."""
 
     NOW = 1_800_000_000.0
 
@@ -2631,7 +2633,8 @@ class RecentBuildsTest(unittest.TestCase):
             {"name": "build-image", "builds": [self.build(91, 300, name="#91 overwatch:0.8.7"), self.build(90, 900)]},
             {"name": "check-all", "builds": [self.build(12, 60, result="FAILURE", seconds=362)]},
         ]
-        recent = checks.recent_builds(self.jenkins(jobs), {"build-branches", "maintenance-refresh"}, now=self.NOW)
+        recent = checks.recent_builds(checks.recent_jobs(self.jenkins(jobs)), {"build-branches", "maintenance-refresh"},
+                                      now=self.NOW)
         self.assertEqual([(r["job"], r["number"]) for r in recent],
                          [("check-all", 12), ("build-image", 91), ("build-image", 90)])
         self.assertEqual(recent[0]["state"], checks.FAIL)
@@ -2640,11 +2643,11 @@ class RecentBuildsTest(unittest.TestCase):
 
     def test_at_most_fifteen(self):  # the page shows as many as fit
         jobs = [{"name": f"job{i}", "builds": [self.build(1, i)]} for i in range(20)]
-        self.assertEqual(len(checks.recent_builds(self.jenkins(jobs), now=self.NOW)), 15)
+        self.assertEqual(len(checks.recent_builds(jobs, now=self.NOW)), 15)
 
     def test_a_running_build_says_so(self):
         jobs = [{"name": "test-all", "builds": [self.build(7, 3, building=True)]}]
-        r = checks.recent_builds(self.jenkins(jobs), now=self.NOW)[0]
+        r = checks.recent_builds(jobs, now=self.NOW)[0]
         self.assertEqual(r["state"], checks.ACTIVE)
         self.assertIn("running", r["what"])
         self.assertEqual(r["took"], "")
@@ -2658,7 +2661,8 @@ class RecentBuildsTest(unittest.TestCase):
         self.assertTrue({"build-branches", "maintenance-refresh"} <= checks.hidden_jobs())
 
     def test_jenkins_down_is_none(self):
-        self.assertIsNone(checks.recent_builds(self.jenkins(fails=True), now=self.NOW))
+        self.assertIsNone(checks.recent_jobs(self.jenkins(fails=True)))
+        self.assertIsNone(checks.recent_builds(None, now=self.NOW))
 
 
 class SinceTest(unittest.TestCase):
@@ -2764,3 +2768,255 @@ class LogsTest(unittest.TestCase):
         self.assertIn("up", line)
         self.assertIn("port=8080", line)
         self.assertFalse(line.startswith("{"))
+
+
+class NightShiftTest(unittest.TestCase):
+    """night_shift.py: button 3's scheduled work (#173)."""
+
+    NOW = 1_800_000_000.0
+
+    def cronjob(self, name, ns="media", suspend=0, active=0, last=None, ok=None, nxt=None):
+        series = [("spec_suspend", suspend), ("status_active", active), ("status_last_schedule_time", last),
+                  ("status_last_successful_time", ok), ("next_schedule_time", nxt)]
+        return [({"__name__": f"kube_cronjob_{k}", "namespace": ns, "cronjob": name}, v)
+                for k, v in series if v is not None]
+
+    def job(self, name, owner, ns="media", start=None, done=None, failed=0, active=0):
+        out = [({"__name__": "kube_job_owner", "namespace": ns, "job_name": name, "owner_kind": "CronJob",
+                 "owner_name": owner}, 1),
+               ({"__name__": "kube_job_status_failed", "namespace": ns, "job_name": name}, failed),
+               ({"__name__": "kube_job_status_active", "namespace": ns, "job_name": name}, active)]
+        if start is not None:
+            out.append(({"__name__": "kube_job_status_start_time", "namespace": ns, "job_name": name}, start))
+        if done is not None:
+            out.append(({"__name__": "kube_job_status_completion_time", "namespace": ns, "job_name": name}, done))
+        return out
+
+    def rows(self, cronjobs, jobs=(), extra=None, config=None):
+        prom = FakeProm({**(extra or {}), "kube_cronjob_": list(cronjobs), "kube_job_": list(jobs)})
+        return night_shift.rows(prom, None, config or {}, now=self.NOW)
+
+    def test_a_finished_run_says_when_how_long_and_next(self):
+        [r] = self.rows(self.cronjob("wigle-sync", "wigle", last=self.NOW - 1200, ok=self.NOW - 1192,
+                                     nxt=self.NOW + 2400),
+                        self.job("wigle-sync-1", "wigle-sync", "wigle", start=self.NOW - 1200, done=self.NOW - 1192))
+        self.assertEqual((r["name"], r["state"], r["last"], r["took"], r["next"]),
+                         ("wigle-sync", "ok", "19m ago", "8s", "in 40m"))
+
+    def test_running_long_is_busy_not_a_missed_next(self):
+        # movies-480p: Forbid, one Job working through the backlog for a day.
+        [r] = self.rows(self.cronjob("movies-480p", active=1, last=self.NOW - 86400, nxt=self.NOW - 84600),
+                        self.job("movies-480p-2", "movies-480p", start=self.NOW - 86400, active=1))
+        self.assertEqual((r["state"], r["last"], r["took"], r["next"]), ("active", "run 24h", "", "busy"))
+
+    def test_a_failed_job(self):
+        [r] = self.rows(self.cronjob("scan", last=self.NOW - 600, nxt=self.NOW + 3600),
+                        self.job("scan-1", "scan", start=self.NOW - 600, failed=1))
+        self.assertEqual((r["state"], r["last"]), ("fail", "failed 10m"))
+
+    def test_jobs_a_ttl_removed_fall_back_on_the_cronjob(self):
+        ok = self.rows(self.cronjob("brick-games-scan", "games", last=self.NOW - 7200, ok=self.NOW - 7000,
+                                    nxt=self.NOW + 3600),
+                       extra={'job_duration_seconds{job="brick-games-scan"}': [({}, 124.0)]},
+                       config={"cronjobs": {"brick-games-scan": {"took": 'job_duration_seconds{job="brick-games-scan"}'}}})
+        [scan] = ok
+        self.assertEqual((scan["state"], scan["last"], scan["took"]), ("ok", "116m ago", "2m"))
+        # Scheduled since its last success, not running, nothing left: it failed.
+        [missed] = self.rows(self.cronjob("brick-games-scan", "games", last=self.NOW - 3600, ok=self.NOW - 90000,
+                                          nxt=self.NOW + 80000))
+        self.assertEqual((missed["state"], missed["last"]), ("warn", "no ok 60m"))
+
+    def test_an_old_job_doesnt_stand_for_a_newer_run(self):
+        [r] = self.rows(self.cronjob("scan", last=self.NOW - 600, ok=self.NOW - 500, nxt=self.NOW + 3600),
+                        self.job("scan-0", "scan", start=self.NOW - 90000, failed=1))
+        self.assertEqual((r["state"], r["last"]), ("ok", "8m ago"))
+
+    def test_suspended_cronjobs_are_left_out(self):
+        self.assertEqual(self.rows(self.cronjob("importer", "chuck", suspend=1)), [])
+
+    def test_progress_with_and_without_a_total(self):
+        config = {"cronjobs": {
+            "brick-games-scan": {"progress": {"label": "box art", "done": "sum(games_catalog_with_box_art)",
+                                              "total": "sum(games_catalog_games)"}},
+            "timeline-feed": {"progress": {"label": "slides", "done": "timeline_feed_slides"}}}}
+        got = {r["name"]: r["progress"] for r in self.rows(
+            self.cronjob("brick-games-scan", "games", last=1, ok=2) + self.cronjob("timeline-feed", "front-door", last=1, ok=2),
+            extra={"games_catalog_with_box_art": [({"system": "nes"}, 600.0), ({"system": "gb"}, 250.0)],
+                   "games_catalog_games": [({"system": "nes"}, 700.0), ({"system": "gb"}, 300.0)],
+                   "timeline_feed_slides": [({}, 53.0)]},
+            config=config)}
+        self.assertEqual(got["brick-games-scan"], {"label": "box art", "done": 850.0, "total": 1000.0, "pct": 85})
+        self.assertEqual(got["timeline-feed"], {"label": "slides", "done": 53.0, "total": None, "pct": None})
+
+    def test_jenkins_timers_next_run_is_the_last_start_plus_the_period(self):
+        def ms(seconds):
+            return seconds * 1000
+
+        jobs = [{"name": "prune-images", "builds": [
+                    {"number": 4, "result": "SUCCESS", "building": False, "timestamp": ms(self.NOW - 3600),
+                     "duration": ms(95)}]},
+                {"name": "test-all", "builds": [
+                    {"number": 9, "result": None, "building": True, "timestamp": ms(self.NOW - 300), "duration": 0},
+                    {"number": 8, "result": "FAILURE", "building": False, "timestamp": ms(self.NOW - 86700),
+                     "duration": ms(400)}]},
+                {"name": "verify-images", "builds": [
+                    {"number": 2, "result": "FAILURE", "building": False, "timestamp": ms(self.NOW - 7200),
+                     "duration": ms(30)}]}]
+        got = {r["name"]: r for r in night_shift.jenkins_rows(
+            jobs, {"prune-images": "24h", "test-all": "24h", "verify-images": "1d", "mirror-repos": "2h"}, now=self.NOW)}
+        prune, tests, verify = got["prune-images"], got["test-all"], got["verify-images"]
+        self.assertEqual((prune["state"], prune["last"], prune["took"], prune["next"]), ("ok", "60m ago", "95s", "in 23h"))
+        self.assertEqual((tests["state"], tests["last"]), ("active", "run 5m"))
+        self.assertEqual((verify["state"], verify["last"]), ("fail", "failed 2h"))
+        self.assertEqual(got["mirror-repos"]["last"], "not yet")
+
+    def test_order_running_failing_then_next_run(self):
+        prom = FakeProm({"kube_cronjob_": self.cronjob("late", ok=1, last=1, nxt=self.NOW + 9000)
+                         + self.cronjob("soon", ok=1, last=1, nxt=self.NOW + 60)
+                         + self.cronjob("busy", active=1, last=self.NOW - 60, nxt=self.NOW + 9999),
+                         "kube_job_": []})
+        jobs = [{"name": "verify-images", "builds": [{"result": "FAILURE", "timestamp": 0, "duration": 0}]}]
+        got = night_shift.rows(prom, jobs, {"jenkins": {"verify-images": "24h"}}, now=self.NOW)
+        self.assertEqual([r["name"] for r in got], ["busy", "verify-images", "soon", "late"])
+
+    def test_outages_are_unknown_rows(self):
+        class Down:
+            def query(self, promql):
+                raise OSError("down")
+        got = night_shift.rows(Down(), None, {"jenkins": {"test-all": "24h"}}, now=self.NOW)
+        self.assertEqual({(r["name"], r["state"]) for r in got}, {("cronjobs", "unknown"), ("jenkins", "unknown")})
+
+    def test_periods(self):
+        for text, seconds in [("24h", 86400), ("2h", 7200), ("30m", 1800), ("1d", 86400), (90, 90), ("bad", None)]:
+            with self.subTest(text=text):
+                self.assertEqual(night_shift.period_seconds(text), seconds)
+
+
+class BoardYamlTimersTest(unittest.TestCase):
+    """board.yaml's night_shift.jenkins matches the Jenkins jobs that run on a timer."""
+
+    def test_every_listed_timer_is_a_cron_job_with_a_period(self):
+        timers = checks.board_config().get("night_shift", {}).get("jenkins", {})
+        self.assertIn("test-all", timers)
+        jobs_dir = Path(__file__).resolve().parents[2] / "jenkins" / "jobs"
+        for name, every in timers.items():
+            with self.subTest(job=name):
+                self.assertIn("// cron ", (jobs_dir / f"{name}.groovy").read_text())
+                self.assertIsNotNone(night_shift.period_seconds(every))
+
+
+class ShippedTest(unittest.TestCase):
+    """shipped.py: Home's SHIPPED tile (#173)."""
+
+    NOW = 1_800_000_000.0
+
+    def prom(self, rollouts=(), pods=(), syncs=()):
+        return FakeProm({
+            "kube_replicaset_created": [({"namespace": ns, "owner_name": d, "replicaset": rs}, at)
+                                        for ns, d, rs, at in rollouts],
+            "kube_pod_container_info": [({"namespace": ns, "owner_name": rs, "container": c, "image_spec": img}, 1)
+                                        for ns, rs, c, img in pods],
+            "argocd_app_sync_total": [({"name": n, "phase": ph}, at) for n, ph, at in syncs],
+        })
+
+    def test_image_tags(self):
+        for spec, expected in [("docker.io/whitepatrick/overwatch:0.8.7", ("overwatch", "0.8.7")),
+                               ("whitepatrick/brick-proxy:2.11.4-porkbun0.3.1@sha256:bac9",
+                                ("brick-proxy", "2.11.4-porkbun0.3.1")),
+                               ("postgres", ("postgres", "latest")),
+                               ("registry:5000/team/app:1.2", ("app", "1.2"))]:
+            with self.subTest(spec=spec):
+                self.assertEqual(shipped.image_tag(spec), expected)
+
+    def test_grouping_without_prometheus(self):
+        def rollout(name, at, image="overwatch", version="0.8.7", ns="overwatch"):
+            return {"name": name, "namespace": ns, "image": image, "version": version, "at": at}
+
+        got = shipped._group_rollouts([
+            rollout("overwatch-web", self.NOW - 600), rollout("overwatch-upnp", self.NOW - 500),
+            rollout("overwatch-scanner", self.NOW - 90000),  # same image, a day earlier: its own release
+            rollout("worker", self.NOW - 550, image="", version="", ns="media"),  # no pods: never grouped
+            rollout("worker-two", self.NOW - 540, image="", version="", ns="media")])
+        self.assertEqual([(r["name"], r["kind"]) for r in got],
+                         [("overwatch", "rollout"), ("worker-two", "rollout"), ("worker", "rollout"),
+                          ("overwatch-scanner", "rollout")])
+
+    def test_newest_rollout_per_deployment_with_its_version(self):
+        prom = self.prom(
+            rollouts=[("games", "brick-games-web", "web-old", self.NOW - 90000),
+                      ("games", "brick-games-web", "web-new", self.NOW - 3600),
+                      ("monitoring", "grafana", "grafana-1", self.NOW - 7200)],
+            pods=[("games", "web-new", "web", "whitepatrick/brick-games:0.1.2"),
+                  ("monitoring", "grafana-1", "grafana-sc-dashboard", "kiwigrid/k8s-sidecar:2.11.2"),
+                  ("monitoring", "grafana-1", "grafana", "grafana/grafana:13.2.2")])
+        got = shipped.shipped(prom, None, now=self.NOW)
+        self.assertEqual([(r["name"], r["version"], r["age"]) for r in got],
+                         [("brick-games-web", "0.1.2", "60m"), ("grafana", "13.2.2", "2h")])
+
+    def test_one_image_rolled_out_together_is_one_row(self):
+        prom = self.prom(
+            rollouts=[("overwatch", "overwatch-web", "w", self.NOW - 600),
+                      ("overwatch", "overwatch-scanner", "s", self.NOW - 590),
+                      ("overwatch", "overwatch-upnp", "u", self.NOW - 580)],
+            pods=[("overwatch", rs, c, "whitepatrick/overwatch:0.8.7")
+                  for rs, c in (("w", "web"), ("s", "scanner"), ("u", "upnp"))])
+        [row] = shipped.shipped(prom, None, now=self.NOW)
+        self.assertEqual((row["name"], row["version"]), ("overwatch", "0.8.7"))
+
+    def test_scaled_to_zero_has_no_version(self):
+        [row] = shipped.shipped(self.prom(rollouts=[("media", "worker", "w-1", self.NOW - 60)]), None, now=self.NOW)
+        self.assertEqual(row["version"], "")
+
+    def test_argo_syncs_without_a_rollout_and_devices(self):
+        prom = self.prom(rollouts=[("media", "media-samba", "m", self.NOW - 7200)],
+                         pods=[("media", "m", "samba", "ghcr.io/servercontainers/samba:a3.24")],
+                         syncs=[("cluster-manifests", "Succeeded", self.NOW - 7000),  # the rollout's own
+                                ("brick-games", "Succeeded", self.NOW - 3000),
+                                ("secrets", "Failed", self.NOW - 100)])
+        jobs = [{"name": "deploy-brick1982", "builds": [
+                    {"number": 7, "result": "FAILURE", "timestamp": (self.NOW - 50) * 1000, "displayName": "#7"},
+                    {"number": 6, "result": "SUCCESS", "timestamp": (self.NOW - 5000) * 1000, "displayName": "#6"}]}]
+        own = {"name": "brick9000", "version": "fef05ae", "at": self.NOW - 400, "kind": "device", "state": "ok"}
+        got = shipped.shipped(prom, jobs, own, now=self.NOW)
+        self.assertEqual([(r["name"], r["version"], r["kind"], r["state"]) for r in got],
+                         [("secrets", "sync", "sync", "warn"), ("brick9000", "fef05ae", "device", "ok"),
+                          ("brick-games", "sync", "sync", "ok"), ("brick1982", "#6", "device", "ok"),
+                          ("media-samba", "a3.24", "rollout", "ok")])
+
+    def test_at_most_five_and_a_dead_source_is_left_out(self):
+        class Down:
+            def query(self, promql):
+                raise OSError("down")
+        own = {"name": "brick9000", "version": "abc1234", "at": self.NOW - 60, "kind": "device", "state": "ok"}
+        self.assertEqual([r["name"] for r in shipped.shipped(Down(), None, own, now=self.NOW)], ["brick9000"])
+        many = self.prom(rollouts=[("ns", f"app{i}", f"rs{i}", self.NOW - i * 3600) for i in range(9)])
+        self.assertEqual(len(shipped.shipped(many, None, now=self.NOW)), 5)
+
+    def test_own_deploy_from_the_reflog(self):
+        repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+
+        git("init", "-q")
+        git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "one")
+        got = shipped.self_deploy(repo, "brick9000")
+        head = git("rev-parse", "--short", "HEAD").stdout.strip()
+        self.assertEqual((got["name"], got["version"], got["kind"]), ("brick9000", head, "device"))
+        self.assertLess(abs(got["at"] - pytime.time()), 120)
+        self.assertIsNone(shipped.self_deploy(repo / "nowhere"))
+
+
+class ViewStatesTest(unittest.TestCase):
+    """lights.view_states: each view button's colour (#173)."""
+
+    def test_each_view_in_its_screens_colour(self):
+        summary = {"overall": "warn", "groups": {g: {"state": s} for g, s in
+                                                  [("cluster", "ok"), ("argocd", "warn"), ("wigle", "active"),
+                                                   ("builds", "fail")]},
+                   "nightshift": [{"state": "ok"}, {"state": "active"}]}
+        got = lights.view_states(summary)
+        self.assertEqual((got["overview"], got["cluster"], got["nightshift"]), ("warn", "warn", "active"))
+        unknown = lights.view_states({"overall": "ok", "groups": {}, "nightshift": None})
+        quiet = lights.view_states({"overall": "ok", "groups": {}, "nightshift": []})
+        self.assertEqual(unknown["nightshift"], "unknown")
+        self.assertEqual(quiet["nightshift"], "ok")

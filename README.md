@@ -88,7 +88,7 @@ script in git that runs from anywhere, not a Jenkins job.
   `steps { script { plasma('test') { ... } } }` tells
   [the plasma API](#the-plasma-api) what the build is doing for the block's
   length, at once, and marks the build's description `plasma:test` for the
-  board's Builds view. Kinds:
+  board's CRT and lights. Kinds:
   `checkout`, `install`, `test`, `verify`, `build`, `push`, `deploy`.
 - **Reproducible images.** `build-image` and `verify-images` share one recipe
   (`lib/build.groovy`): rootless BuildKit pinned by digest,
@@ -334,7 +334,7 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
 - Every 15s it asks Jenkins, on the cluster, for each job's state (as the
   read-only `brick-status` user, `BRICK_STATUS_JENKINS_PASSWORD` in the env
   file). A passing build shows green, a running one amber, a failed one red.
-  When Jenkins can't be reached the Builds view shows no data (grey) rather
+  When Jenkins can't be reached its rows show no data (grey) rather
   than a failure: the Cluster view says why. The Builds tile shows
   the pixel-art Jenkins, or the horned one in flames when a job has failed
   (artwork from [jenkins.io](https://jenkins.io/), CC BY-SA 3.0, credited on the
@@ -435,15 +435,45 @@ The board has three modes:
 | active | a button was pressed | the chosen view | each view's button in its area's health colour; the selected one pulses, and so does any area with a build or upload running (green) |
 | quiet | the quiet schedule (below), or put to sleep by the side button | off | off; only the side button does anything (below) |
 
-The six buttons are two rows of three. The top row picks Overview, Builds and
-Cluster; the bottom row picks Argo CD and Services; the last one is free for now.
-Argo CD's tile and view come from its metrics in Prometheus (`argocd_checks`):
+The six buttons are two rows of three. The top row picks Home (button 1),
+Cluster (2) and Night Shift (3); the bottom row's first picks Anomalies (4),
+the second puts the CRT on the whole screen (5), and the third is the check
+button (6, below). Since #173 (2026-11-16, after a week of presses: Builds was
+pressed once) the recent-builds screen is off the buttons; its page code and
+`recent` in `/api/state` stay, unused, in case it's missed.
+
+- **Home**'s big tile is **SHIPPED** (`shipped.py`): what reached the homelab
+  lately, the newest five. Deployment rollouts come from kube-state-metrics
+  (each Deployment's newest ReplicaSet, `kube_replicaset_created` joined to
+  `kube_replicaset_owner{owner_kind="Deployment"}`, with the image tag its pods
+  run from `kube_pod_container_info`'s `image_spec`; one image rolled out to
+  several Deployments together is one row). Argo CD syncs of the last day
+  (`argocd_app_sync_total`, as below) add merges that changed no image; a sync
+  within 10 minutes of a rollout is that rollout. brick9000's own deploy is its
+  checkout's commit and reflog time, brick1982's the `deploy-brick1982` job's
+  last success. Above them, a band for anything deploying (amber) or failing
+  (red) now: the Jenkins work jobs and Argo CD apps that aren't synced and
+  healthy. Below, one line: the test jobs as pips, Argo CD's count, and the
+  housekeeping jobs.
+- **Cluster** lists every check of the cluster, Argo CD, units and wigle-sync
+  groups; its button's colour is the worst of the four.
+- **Night Shift** (`night_shift.py`) is the scheduled work: every CronJob that
+  isn't suspended (from kube-state-metrics: `kube_cronjob_*` for the last and
+  next schedule and last success, `kube_job_*` for the newest Job's start,
+  end and failures) and the Jenkins jobs on a timer that `board.yaml` lists
+  (the next run is the last start plus the period given there). Each row has
+  its last run, how long it took, and the next; running first, then failures,
+  then by next run. `board.yaml` can add a `took` query for a CronJob whose Jobs
+  a TTL removes, and a `progress` (brick-games-scan's box art, from its
+  Pushgateway series).
+- **Anomalies** is everything that isn't fine, worst first.
+
+Argo CD's checks come from its metrics in Prometheus (`argocd_checks`):
 how many apps are synced and healthy, each app that isn't (out of sync is
 "syncing" until it has lasted 15 minutes, then a failure; Degraded or Missing
 health fails; a failed last sync warns), and the last four syncs. wigle-sync's
-checks moved to the Services view (and its button's colour), and still feed its
-page, the "uploading" lights and the CRT label. The
-joystick left/right steps through the views. Pressing button 6 (the bottom
+checks feed the Cluster screen (and its button's colour), the "uploading"
+lights and the CRT label. The joystick left/right steps through the views. Pressing button 6 (the bottom
 row's right-hand button, `KEY_X`) or the right side button (Enter, `KEY_ENTER`) twice within 1.5 seconds starts the `check-all` Jenkins job
 (`scripts/smoke`, then `test-all`) through its webhook, with the webhook secret
 from `~/.config/brick-jenkins/secrets/webhook_secret`. One press only arms it

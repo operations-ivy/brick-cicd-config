@@ -18,8 +18,8 @@ from pathlib import Path
 import structlog
 
 from . import board_metrics as bm
-from . import (check, checks, host, lamp, lights, logs, notify, party, party_sound, since,
-               units, web)
+from . import (check, checks, host, lamp, lights, logs, night_shift, notify, party, party_sound, shipped,
+               since, units, web)
 from .board import ACTIVE, QUIET, Board
 from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_CHECK_SIDE, KEY_LAMP, KEY_LEFT,
                      KEY_PARTY,
@@ -69,6 +69,7 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
     ntfy = ntfy_from(settings)
     clock = since.Since(state / "anomalies-since.json")
     warm = since.TempWarnings()
+    own_deploy = shipped.self_deploy(host=hostname.split(".")[0])  # every deploy restarts brick-status
     while True:
         started = time.monotonic()
         try:
@@ -83,8 +84,12 @@ def poll(settings: Settings, status: Status, wake: threading.Event) -> None:
             summary = checks.summarize(checks.collect(prom, jenkins, internet)
                                        + units.board_checks(prom, hostname))
             hidden = checks.hidden_jobs(settings.board_file)
-            summary["recent"] = checks.recent_builds(jenkins, hidden)
+            jobs = checks.recent_jobs(jenkins)
+            summary["recent"] = checks.recent_builds(jobs, hidden)
             summary["hidden_jobs"] = sorted(hidden)
+            summary["nightshift"] = night_shift.rows(
+                prom, jobs, checks.board_config(settings.board_file).get("night_shift"))
+            summary["shipped"] = shipped.shipped(prom, jobs, own_deploy)
             sshd = host.sshd_running()
             host_state = {"sshd": sshd, "internet": internet}
             summary["since"] = clock.observe(
@@ -282,11 +287,7 @@ def main() -> None:
         if mode == QUIET:
             plasma.off()
         elif mode == ACTIVE:
-            states = {g: v["state"] for g, v in summary["groups"].items()}
-            states["overview"] = summary["overall"]
-            # The Services view shows wigle-sync's checks too, so its button does.
-            states["services"] = checks.worst([s for s in (states.get("services"), states.get("wigle")) if s])
-            plasma.buttons(states, VIEWS, settings.button_slots, board.view(now))
+            plasma.buttons(lights.view_states(summary), VIEWS, settings.button_slots, board.view(now))
         else:  # idle: the lights show the most important event
             all_checks = [c for g in summary["groups"].values() for c in g["checks"]]
             plasma.show(lights.idle_pattern(all_checks))

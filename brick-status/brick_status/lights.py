@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import structlog
 
-from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
+from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN, worst
 
 log = structlog.get_logger(__name__)
 
@@ -22,6 +22,28 @@ PRIORITY_ACTIVE = 70
 
 GREEN, AMBER, RED, GREY = [0, 255, 0], [255, 140, 0], [255, 0, 0], [90, 90, 110]
 STATE_COLOURS = {OK: GREEN, WARN: AMBER, FAIL: RED, ACTIVE: GREEN, UNKNOWN: GREY}
+
+
+# The groups the Cluster screen lists (index.html's cluster view), whose worst
+# state its button shows.
+CLUSTER_GROUPS = ("cluster", "argocd", "services", "wigle")
+
+
+def view_states(summary: dict) -> dict[str, str]:
+    """Each view's state, for its button's light: the overview is everything,
+    the cluster screen its groups (as its frame), the night shift its rows."""
+    groups = summary.get("groups", {})
+    states = {g: v["state"] for g, v in groups.items()}
+    states["overview"] = summary.get("overall", UNKNOWN)
+    states["cluster"] = worst([groups[g]["state"] for g in CLUSTER_GROUPS if g in groups])
+    shift = summary.get("nightshift")
+    if shift is None:  # couldn't be gathered
+        states["nightshift"] = UNKNOWN
+    elif shift:
+        states["nightshift"] = worst([r["state"] for r in shift])
+    else:  # nothing scheduled is fine, not unknown (worst([]) would say unknown)
+        states["nightshift"] = OK
+    return states
 
 
 def idle_pattern(checks: list[dict]) -> str:

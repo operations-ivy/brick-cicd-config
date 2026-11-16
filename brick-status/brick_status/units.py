@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 import time
 
-from .checks import OK, UNKNOWN, WARN, Check, _ago
+from .checks import OK, UNKNOWN, WARN, Check, ago
 
 GROUP = "services"
 # A timer whose next run is this far in the past isn't firing.
@@ -84,7 +84,7 @@ def problems(data: dict, now: float) -> list[tuple[str, str, str]]:
             if t.get("enabled") and not t.get("running"):
                 found.append((t["unit"], "stopped", "enabled, not scheduled"))
         elif now - nxt > OVERDUE_SECONDS:
-            found.append((t["unit"], "overdue", f"overdue by {_ago(now - nxt)}"))
+            found.append((t["unit"], "overdue", f"overdue by {ago(now - nxt)}"))
     return found
 
 
@@ -133,7 +133,7 @@ def remote_checks(prom, skip_host: str, now: float | None = None) -> list[Check]
         add(m, m["unit"], {"overdue": "overdue", "stopped": "enabled, not scheduled"}.get(m["problem"], "failed"))
     for m, v in prom.query("brick_systemd_report_timestamp_seconds"):
         if now - v > REPORT_STALE_SECONDS:
-            add(m, "brick-units.timer", f"user units unreported for {_ago(now - v)}")
+            add(m, "brick-units.timer", f"user units unreported for {ago(now - v)}")
 
     return [c for host in sorted(found) for c in with_ok(host, found[host])]
 

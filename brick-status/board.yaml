@@ -8,3 +8,32 @@
 hidden_jobs:
   - build-branches
   - maintenance-refresh
+
+# The night shift (button 3, night_shift.py): the cluster's CronJobs come from
+# kube-state-metrics by themselves (suspended ones are left out). Here, the
+# extras a CronJob's own Job objects can't give, as PromQL: `took` for one
+# whose Jobs a TTL removes, and `progress` (`done`, optional `total`, `label`).
+night_shift:
+  cronjobs:
+    brick-games-scan:
+      took: job_duration_seconds{job="brick-games-scan"}
+      progress:
+        label: box art
+        done: sum(games_catalog_with_box_art{job="brick-games-scan"})
+        total: sum(games_catalog_games{job="brick-games-scan"})
+    wigle-sync:
+      progress:
+        label: files up
+        done: wigle_sync_last_sync_files_uploaded
+    timeline-feed:
+      progress:
+        label: slides
+        done: timeline_feed_slides
+  # Jenkins jobs on a timer (their `// cron` lines in jenkins/jobs/), and how
+  # often each runs: the next run is the last one's start plus this.
+  jenkins:
+    test-all: 24h
+    verify-images: 24h
+    prune-images: 24h
+    prune-dev-images: 24h
+    mirror-repos: 2h
