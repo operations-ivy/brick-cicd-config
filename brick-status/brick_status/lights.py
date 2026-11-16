@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import structlog
 
-from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN
+from .checks import ACTIVE, FAIL, OK, UNKNOWN, WARN, worst
 
 log = structlog.get_logger(__name__)
 
@@ -22,6 +22,19 @@ PRIORITY_ACTIVE = 70
 
 GREEN, AMBER, RED, GREY = [0, 255, 0], [255, 140, 0], [255, 0, 0], [90, 90, 110]
 STATE_COLOURS = {OK: GREEN, WARN: AMBER, FAIL: RED, ACTIVE: GREEN, UNKNOWN: GREY}
+
+
+def view_states(summary: dict) -> dict[str, str]:
+    """Each view's state, for its button's light: the overview is everything,
+    the cluster screen its four groups (as its frame), the night shift its rows."""
+    groups = summary.get("groups", {})
+    states = {g: v["state"] for g, v in groups.items()}
+    states["overview"] = summary.get("overall", UNKNOWN)
+    cluster = [groups[g]["state"] for g in ("cluster", "argocd", "services", "wigle") if g in groups]
+    states["cluster"] = worst(cluster)
+    shift = summary.get("nightshift")
+    states["nightshift"] = UNKNOWN if shift is None else worst([r["state"] for r in shift]) if shift else OK
+    return states
 
 
 def idle_pattern(checks: list[dict]) -> str:

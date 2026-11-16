@@ -171,7 +171,8 @@ class Jenkins:
     user) rather than Prometheus, which only has build results by the minute."""
 
     TREE = "jobs[name,lastBuild[number,displayName,building,timestamp,description],lastCompletedBuild[result,timestamp]]"
-    # Each job's last ten builds, for the board's recent-builds screen.
+    # Each job's last ten builds: the night shift's Jenkins timers, brick1982's
+    # deploys for the shipped tile, and the recent builds (recent_jobs).
     RECENT_TREE = ("jobs[name,builds[number,result,timestamp,duration,building,"
                    "displayName,description]{0,10}]")
 
@@ -212,26 +213,40 @@ POLLERS = {"build-branches"}
 BOARD_FILE = Path(__file__).resolve().parent.parent / "board.yaml"
 
 
-def hidden_jobs(path: str | Path | None = None) -> set[str]:
-    """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
+def board_config(path: str | Path | None = None) -> dict:
+    """board.yaml, or {} if it can't be read."""
     try:
         data = yaml.safe_load(Path(path or BOARD_FILE).read_text()) or {}  # "" (unset) is the default too
     except (OSError, yaml.YAMLError) as e:
         log.warning("board file unreadable", error=str(e))
-        return set()
-    return {str(j) for j in data.get("hidden_jobs") or []}
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def recent_builds(jenkins: Jenkins, hidden: Collection[str] = frozenset(), limit: int = 15,
+def hidden_jobs(path: str | Path | None = None) -> set[str]:
+    """The Jenkins jobs board.yaml hides from the board (none if it can't be read)."""
+    return {str(j) for j in board_config(path).get("hidden_jobs") or []}
+
+
+def recent_jobs(jenkins: Jenkins) -> list[dict] | None:
+    """Every job with its last ten builds (Jenkins.RECENT_TREE), asked once a poll
+    for the recent builds, the night shift and the shipped tile. None when
+    Jenkins can't be asked (the builds group already says so)."""
+    try:
+        return jenkins.jobs(Jenkins.RECENT_TREE)
+    except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
+        log.warning("recent builds unavailable", error=str(e))
+        return None
+
+
+def recent_builds(jobs: list[dict] | None, hidden: Collection[str] = frozenset(), limit: int = 15,
                   now: float | None = None) -> list[dict] | None:
     """The newest `limit` builds of every job but the hidden ones, newest first:
     job, number, state, what happened and when, how long it took. None when
-    Jenkins can't be asked (the builds group already says so)."""
+    Jenkins couldn't be asked (recent_jobs). No longer on a button (#173): kept
+    in /api/state for the page's recentPage, which is unused for now."""
     now = time.time() if now is None else now
-    try:
-        jobs = jenkins.jobs(Jenkins.RECENT_TREE)
-    except (OSError, ValueError, KeyError) as e:  # URLError is an OSError
-        log.warning("recent builds unavailable", error=str(e))
+    if jobs is None:
         return None
     builds = [(job["name"], b) for job in jobs if job["name"] not in hidden for b in job.get("builds") or []]
     builds.sort(key=lambda jb: jb[1].get("timestamp", 0), reverse=True)
