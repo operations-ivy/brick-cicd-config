@@ -29,6 +29,7 @@ must be a plain name; nothing reaches a shell.
 
 import os
 import re
+import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -126,8 +127,16 @@ def plan(words: list[str]) -> Action:
 
 
 def set_env(path: Path, var: str, value: str) -> None:
-    """Replace the variable's line in an env file, or add one."""
-    lines = path.read_text().splitlines() if path.exists() else []
+    """Replace the variable's line in an env file, or add one.
+
+    The file keeps its mode (a new one is 600): env files hold tokens, and a
+    temp file made with the default umask would leave them 664 after the rename.
+    """
+    if path.exists():
+        lines = path.read_text().splitlines()
+        mode = stat.S_IMODE(path.stat().st_mode)
+    else:
+        lines, mode = [], 0o600
     line = f"{var}={value}"
     if any(old.startswith(f"{var}=") for old in lines):
         lines = [line if old.startswith(f"{var}=") else old for old in lines]
@@ -135,7 +144,10 @@ def set_env(path: Path, var: str, value: str) -> None:
         lines.append(line)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")  # whole or not at all: the deploy reads it
-    tmp.write_text("\n".join(lines) + "\n")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        os.fchmod(f.fileno(), mode)  # also for a .tmp left over with another mode
+        f.write("\n".join(lines) + "\n")
     tmp.replace(path)
 
 

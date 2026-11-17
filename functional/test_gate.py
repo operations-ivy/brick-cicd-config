@@ -3,6 +3,7 @@ nothing else (#133)."""
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -129,6 +130,21 @@ class Run(unittest.TestCase):
         self.assertEqual(self.gate("deploy", "rpi_lcars", "master").returncode, 0)
         self.assertEqual((self.tmp / ".config/lcars/env").read_text(), "LCARS_DEPLOY_BRANCH=master\n")
         self.assertIn("lcars-deploy.service", self.log.read_text())
+
+    def test_deploy_keeps_the_env_files_mode(self):
+        env = self.tmp / ".config/lcars/env"
+        env.parent.mkdir(parents=True)
+        env.write_text("LCARS_HA_TOKEN=x\nLCARS_DEPLOY_BRANCH=feature/x\n")
+        env.chmod(0o600)
+        (env.parent / "env.tmp").write_text("left over\n")
+        (env.parent / "env.tmp").chmod(0o666)
+        self.assertEqual(self.gate("deploy", "rpi_lcars", "master").returncode, 0)
+        self.assertEqual(stat.S_IMODE(env.stat().st_mode), 0o600)
+        self.assertEqual(env.read_text(), "LCARS_HA_TOKEN=x\nLCARS_DEPLOY_BRANCH=master\n")
+
+    def test_deploy_makes_a_new_env_file_600(self):
+        self.assertEqual(self.gate("deploy", "rpi_lcars", "master").returncode, 0)
+        self.assertEqual(stat.S_IMODE((self.tmp / ".config/lcars/env").stat().st_mode), 0o600)
 
 
 class SetupHost(unittest.TestCase):
