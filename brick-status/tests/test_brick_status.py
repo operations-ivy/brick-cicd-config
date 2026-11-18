@@ -503,6 +503,23 @@ class ChecksTest(unittest.TestCase):
         prom = self.wigle_prom({"last_pi_online_timestamp_seconds": 100}, running=[({}, 1)])
         self.assertEqual(checks.wigle_checks(prom, 200)[0].state, "active")
 
+    def test_ratings_failure_is_amber_no_key_hidden_nothing_pushed_no_rows(self):
+        def prom(results):
+            return FakeProm({"games_ratings_fetches": [({"source": s, "result": r}, v) for (s, r), v in results.items()]})
+
+        failed = prom({("igdb", "fetched"): 0, ("igdb", "cached"): 18, ("igdb", "error"): 3, ("igdb", "no_key"): 0,
+                       ("rawg", "fetched"): 0, ("rawg", "cached"): 0, ("rawg", "error"): 0, ("rawg", "no_key"): 10})
+        self.assertEqual([(c.name, c.state, c.detail) for c in checks.ratings_checks(failed)],
+                         [("igdb ratings", "warn", "failed at the last scan, 3 systems on old lists")])
+        fine = prom({("igdb", "fetched"): 21, ("igdb", "error"): 0})
+        self.assertEqual([(c.name, c.state) for c in checks.ratings_checks(fine)], [("igdb ratings", "ok")])
+        self.assertEqual(checks.ratings_checks(FakeProm({})), [])
+
+    def test_ratings_failure_never_pages(self):
+        summary = checks.summarize([checks.Check("cluster", "igdb ratings", "warn", "failed at the last scan")])
+        found, _ = notify.find_problems(summary, internet=True, vitals=[])
+        self.assertEqual(found, [])
+
     def test_wigle_fails_only_on_errors_persisting_2h(self):
         metrics = {"last_pi_online_timestamp_seconds": 100, "last_sync_files_failed": 3}
         stuck = self.wigle_prom(metrics, stuck=[({}, 1)])
