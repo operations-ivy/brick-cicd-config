@@ -344,6 +344,25 @@ def wigle_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
     return checks
 
 
+def ratings_checks(prom: Prometheus) -> list[Check]:
+    """One row per ratings source of brick-games' last scan
+    (games_ratings_fetches{source,result}, counts of systems). A source that
+    failed is amber: the scan kept last week's list and finished, so it's
+    worth a look but never a page (the user, 2026-11-18). A source with no key
+    isn't shown; nothing pushed yet, no rows."""
+    counts: dict[str, dict[str, float]] = {}
+    for m, v in prom.query("games_ratings_fetches"):
+        counts.setdefault(m.get("source", "?"), {})[m.get("result", "?")] = v
+    rows = []
+    for source, c in sorted(counts.items()):
+        name = f"{source} ratings"
+        if c.get("error", 0) > 0:
+            rows.append(Check("cluster", name, WARN, f"failed at the last scan, {int(c['error'])} systems on old lists"))
+        elif c.get("fetched", 0) + c.get("cached", 0) > 0:
+            rows.append(Check("cluster", name, OK, "OK at the last scan"))
+    return rows
+
+
 def upnp_checks(prom: Prometheus) -> list[Check]:
     """The router's UPnP port forwards, from overwatch's UPnP watch: a forward
     that isn't on overwatch's allowed list means something on the LAN opened a
@@ -425,7 +444,7 @@ def argocd_checks(prom: Prometheus, now: float | None = None) -> list[Check]:
 def collect(prom: Prometheus, jenkins: Jenkins, internet: bool = True) -> list[Check]:
     """Run every check. A group whose Prometheus queries fail becomes one unknown check."""
     checks = build_checks(jenkins)
-    for group, fn in [("cluster", lambda p: cluster_checks(p, internet) + upnp_checks(p)),
+    for group, fn in [("cluster", lambda p: cluster_checks(p, internet) + upnp_checks(p) + ratings_checks(p)),
                       ("wigle", wigle_checks), ("argocd", argocd_checks)]:
         try:
             checks.extend(fn(prom))

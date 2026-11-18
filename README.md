@@ -352,6 +352,10 @@ Logs: `journalctl CONTAINER_NAME=brick-proxy`.
   with the Pi went (OK, failed, or waiting for internet), how many files it
   uploaded, and when the next one runs. It only alerts when every run for 2
   hours has had errors; the pwnagotchi being away and syncs pausing are normal.
+  The cluster view also has a row per brick-games ratings source ("igdb
+  ratings", from the scan's pushed `games_ratings_fetches`): amber when the
+  last nightly scan couldn't reach it (the scan kept last week's list and
+  finished). It never pages (the user, 2026-11-18).
 - **Services:** failed systemd units and timers that stopped firing, on
   every host (`brick_status/units.py`). brick9000's own system and user
   units are read straight from `systemctl`, so they still show when the
