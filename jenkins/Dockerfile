@@ -59,6 +59,7 @@ USER root
 RUN test -n "$BRICK_JENKINS_TAG" \
     && sed -i "s/@BRICK_JENKINS_TAG@/$BRICK_JENKINS_TAG/g" \
         /usr/share/brick-jenkins/lib/build.groovy \
+        /usr/share/brick-jenkins/jobs/build-bruce.groovy \
         /usr/share/brick-jenkins/jobs/test-brick-cicd-config.groovy \
     && ! grep -rq '@BRICK_JENKINS_TAG@' /usr/share/brick-jenkins
 USER jenkins

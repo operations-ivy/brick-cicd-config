@@ -1517,7 +1517,8 @@ class JenkinsJobsTest(unittest.TestCase):
         # a stale copy can't run old tools (hub-image-info, scripts/test's).
         values = (JENKINS / "values.yaml").read_text()
         self.assertRegex(values, r'(?m)^    tag: ".+"$', "no controller image tag in values.yaml")
-        groovy = [JENKINS / "jobs" / "test-brick-cicd-config.groovy", JENKINS / "lib" / "build.groovy"]
+        groovy = [JENKINS / "jobs" / "test-brick-cicd-config.groovy", JENKINS / "jobs" / "build-bruce.groovy",
+                  JENKINS / "lib" / "build.groovy"]
         for f in groovy:
             text = f.read_text()
             self.assertIn("image: docker.io/whitepatrick/brick-jenkins:@BRICK_JENKINS_TAG@", text, f.name)

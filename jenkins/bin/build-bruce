@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Build Bruce firmware (github.com/BruceDevices/firmware) for one board, with
+optional extra build flags, and put the images in an output directory.
+
+    build-bruce OUT_DIR
+
+Settings come from the environment (the build-bruce job's parameters), never
+from a shell command line, and are checked strictly: webhooks can set them.
+
+    VERSION        Bruce release tag, e.g. 1.17 (empty: the latest release)
+    BOARD          Bruce's PlatformIO environment, e.g. CYD-2432S028
+    INVERSION_OFF  true: build with -DTFT_INVERSION_ON, which makes Bruce turn
+                   the panel's colour inversion off at boot instead of forcing
+                   it on (CYD panels that show white for black)
+    EXTRA_FLAGS    More -D flags, space-separated: -DNAME or -DNAME=value
+
+Needs git and PlatformIO's `pio` on PATH. OUT_DIR gets:
+
+    Bruce-<version>-<board>[-<variant>].bin      full image, flash at 0x0
+    Bruce-<version>-<board>[-<variant>].app.bin  the app alone, flash at the
+                                                 offset in BUILD-INFO.txt
+                                                 (keeps settings and touch
+                                                 calibration)
+    BUILD-INFO.txt, SHA256SUMS
+"""
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+REPO = "https://github.com/BruceDevices/firmware"
+LATEST = "https://api.github.com/repos/BruceDevices/firmware/releases/latest"
+DEFAULT_BOARD = "CYD-2432S028"
+INVERSION_FLAG = "-DTFT_INVERSION_ON"
+
+VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]{0,40}")
+BOARD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,60}")
+FLAG_RE = re.compile(r"-D[A-Za-z_][A-Za-z0-9_]{0,60}(=[A-Za-z0-9_.-]{1,60})?")
+
+
+class BuildError(Exception):
+    pass
+
+
+def check(value: str, pattern: re.Pattern, what: str) -> str:
+    if not pattern.fullmatch(value):
+        raise BuildError(f"{what} {value!r} isn't allowed (must match {pattern.pattern})")
+    return value
+
+
+def settings(env: dict[str, str]) -> dict:
+    """The build's settings from the environment, checked."""
+    flags = [check(f, FLAG_RE, "EXTRA_FLAGS entry") for f in env.get("EXTRA_FLAGS", "").split()]
+    inversion_off = env.get("INVERSION_OFF", "false").strip().lower() == "true"
+    if inversion_off and INVERSION_FLAG not in flags:
+        flags.insert(0, INVERSION_FLAG)
+    version = env.get("VERSION", "").strip()
+    return {
+        "version": check(version, VERSION_RE, "VERSION") if version else "",
+        "board": check(env.get("BOARD", "").strip() or DEFAULT_BOARD, BOARD_RE, "BOARD"),
+        "flags": flags,
+        "inversion_off": inversion_off,
+    }
+
+
+def latest_version() -> str:
+    with urllib.request.urlopen(LATEST, timeout=30) as r:
+        return check(json.load(r)["tag_name"], VERSION_RE, "latest release tag")
+
+
+def variant(s: dict) -> str:
+    parts = ["invoff"] if s["inversion_off"] else []
+    if [f for f in s["flags"] if f != INVERSION_FLAG]:
+        parts.append("flags")
+    return "-".join(parts)
+
+
+def run(*cmd: str, cwd: Path | None = None) -> str:
+    print("+", " ".join(cmd), flush=True)
+    done = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, text=True)
+    if done.returncode:
+        raise BuildError(f"{cmd[0]} failed (exit {done.returncode})")
+    return done.stdout
+
+
+def environments(src: Path) -> set[str]:
+    config = json.loads(run("pio", "project", "config", "--json-output", cwd=src))
+    return {name[4:] for name, _ in config if name.startswith("env:")}
+
+
+def add_environment(src: Path, board: str, flags: list[str]) -> str:
+    """Append an environment that extends the board's with the extra flags."""
+    if not flags:
+        return board
+    name = f"{board}-local"
+    lines = [f"\n; Added by build-bruce.\n[env:{name}]", f"extends = env:{board}",
+             "build_flags =", f"\t${{env:{board}.build_flags}}", *(f"\t{f}" for f in flags)]
+    with (src / "platformio.ini").open("a") as f:
+        f.write("\n".join(lines) + "\n")
+    return name
+
+
+def app_offset(partitions: bytes) -> int:
+    """Offset of the first app partition in an ESP32 partition table."""
+    for i in range(0, len(partitions), 32):
+        entry = partitions[i:i + 32]
+        if entry[:2] != b"\xaa\x50":
+            break
+        kind, _subtype, offset = struct.unpack("<BBI", entry[2:8])
+        if kind == 0:
+            return offset
+    raise BuildError("no app partition in partitions.bin")
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build(s: dict, work: Path, out: Path) -> list[Path]:
+    version = s["version"] or latest_version()
+    src = work / "bruce"
+    if src.exists():
+        shutil.rmtree(src)
+    run("git", "clone", "--quiet", "--depth", "1", "--branch", version, "--recurse-submodules",
+        "--shallow-submodules", REPO, str(src))
+    commit = run("git", "rev-parse", "HEAD", cwd=src).strip()
+
+    if s["board"] not in environments(src):
+        raise BuildError(f"Bruce {version} has no board (PlatformIO environment) {s['board']!r}")
+    env = add_environment(src, s["board"], s["flags"])
+    run("pio", "run", "--environment", env, cwd=src)
+
+    built = src / ".pio" / "build" / env
+    merged = src / f"Bruce-{env}.bin"
+    for path in (built / "firmware.bin", built / "partitions.bin", merged):
+        if not path.is_file():
+            raise BuildError(f"the build didn't produce {path.relative_to(src)}")
+
+    out.mkdir(parents=True, exist_ok=True)
+    stem = "-".join(p for p in ("Bruce", version, s["board"], variant(s)) if p)
+    full, app = out / f"{stem}.bin", out / f"{stem}.app.bin"
+    shutil.copyfile(merged, full)
+    shutil.copyfile(built / "firmware.bin", app)
+    offset = app_offset((built / "partitions.bin").read_bytes())
+
+    pio_version = run("pio", "--version").strip()
+    info = out / "BUILD-INFO.txt"
+    info.write_text("\n".join([
+        f"Bruce {version} ({REPO}/commit/{commit})",
+        f"board: {s['board']}",
+        f"extra flags: {' '.join(s['flags']) or 'none'}",
+        f"built with: {pio_version}",
+        "",
+        f"{full.name}: full image, flash at 0x0 (erases settings and calibration)",
+        f"{app.name}: the app alone, flash at {offset:#x} (keeps settings and calibration)",
+        "",
+        f"  esptool --port /dev/ttyUSB0 --baud 921600 write-flash 0x0 {full.name}",
+        f"  esptool --port /dev/ttyUSB0 --baud 921600 write-flash {offset:#x} {app.name}",
+        "",
+    ]))
+    (out / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.name}\n" for p in (full, app)))
+    return [full, app, info, out / "SHA256SUMS"]
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__, file=sys.stderr)
+        return 2
+    out = Path(sys.argv[1]).resolve()
+    try:
+        s = settings(dict(os.environ))
+        for path in build(s, out.parent / "work", out):
+            print(f"build-bruce: {path.name}")
+    except BuildError as e:
+        print(f"build-bruce: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
