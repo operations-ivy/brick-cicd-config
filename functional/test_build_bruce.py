@@ -4,7 +4,9 @@ that extends the board's, and the outputs are named and summed."""
 
 import hashlib
 import importlib.machinery
+import json
 import importlib.util
+import shutil
 import struct
 import sys
 import tempfile
@@ -45,7 +47,7 @@ class FakeBruce:
             case ("pio", "project", "config", "--json-output"):
                 ini = (self.src / "platformio.ini").read_text()
                 local = [line[5:-1] for line in ini.splitlines() if line.startswith("[env:")]
-                return str([[f"env:{b}", []] for b in [*self.boards, *local]]).replace("'", '"')
+                return json.dumps([[f"env:{b}", []] for b in [*self.boards, *local]])
             case ("pio", "run", "--environment", env):
                 built = self.src / ".pio" / "build" / env
                 built.mkdir(parents=True)
@@ -58,9 +60,10 @@ class FakeBruce:
         raise AssertionError(f"unexpected command: {cmd}")
 
 
-def build(env: dict, fake: FakeBruce | None = None) -> tuple[FakeBruce, Path]:
+def build(test: unittest.TestCase, env: dict, fake: FakeBruce | None = None) -> tuple[FakeBruce, Path]:
     fake = fake or FakeBruce()
     tmp = Path(tempfile.mkdtemp())
+    test.addCleanup(shutil.rmtree, tmp)
     with (mock.patch.object(bb, "run", side_effect=fake.run),
           mock.patch.object(bb, "latest_version", return_value="1.18")):
         bb.build(bb.settings(env), tmp / "work", tmp / "out")
@@ -69,13 +72,12 @@ def build(env: dict, fake: FakeBruce | None = None) -> tuple[FakeBruce, Path]:
 
 class Settings(unittest.TestCase):
     def test_defaults(self):
-        s = bb.settings({})
-        self.assertEqual((s["version"], s["board"], s["flags"], s["inversion_off"]), ("", "CYD-2432S028", [], False))
+        self.assertEqual(bb.settings({}), bb.Settings("", "CYD-2432S028", (), False))
 
     def test_inversion_off_adds_the_flag_once(self):
-        self.assertEqual(bb.settings({"INVERSION_OFF": "true"})["flags"], ["-DTFT_INVERSION_ON"])
+        self.assertEqual(bb.settings({"INVERSION_OFF": "true"}).flags, ("-DTFT_INVERSION_ON",))
         s = bb.settings({"INVERSION_OFF": "true", "EXTRA_FLAGS": "-DTFT_INVERSION_ON -DX=1"})
-        self.assertEqual(s["flags"], ["-DTFT_INVERSION_ON", "-DX=1"])
+        self.assertEqual(s.flags, ("-DTFT_INVERSION_ON", "-DX=1"))
 
     def test_anything_that_isnt_a_plain_value_is_refused(self):
         for env in ({"VERSION": "1.17; rm -rf /"}, {"VERSION": "../x"}, {"BOARD": "CYD $(id)"},
@@ -87,7 +89,7 @@ class Settings(unittest.TestCase):
 
 class Build(unittest.TestCase):
     def test_inversion_off_builds_a_local_environment_extending_the_board(self):
-        fake, out = build({"VERSION": "1.17", "INVERSION_OFF": "true"})
+        fake, out = build(self, {"VERSION": "1.17", "INVERSION_OFF": "true"})
         ini = (fake.src / "platformio.ini").read_text()
         self.assertIn("[env:CYD-2432S028-local]\nextends = env:CYD-2432S028\n", ini)
         self.assertIn("\t${env:CYD-2432S028.build_flags}\n\t-DTFT_INVERSION_ON\n", ini)
@@ -106,17 +108,17 @@ class Build(unittest.TestCase):
         self.assertIn(f"write-flash 0x0 {full.name}", info)
 
     def test_no_flags_builds_the_board_as_released(self):
-        fake, out = build({"VERSION": "1.17", "BOARD": "CYD-2USB"})
+        fake, out = build(self, {"VERSION": "1.17", "BOARD": "CYD-2USB"})
         self.assertNotIn("[env:", (fake.src / "platformio.ini").read_text())
         self.assertIn(("pio", "run", "--environment", "CYD-2USB"), fake.calls)
         self.assertTrue((out / "Bruce-1.17-CYD-2USB.bin").is_file())
 
     def test_extra_flags_are_marked_in_the_name(self):
-        _, out = build({"VERSION": "1.17", "INVERSION_OFF": "true", "EXTRA_FLAGS": "-DFOO=1"})
+        _, out = build(self, {"VERSION": "1.17", "INVERSION_OFF": "true", "EXTRA_FLAGS": "-DFOO=1"})
         self.assertTrue((out / "Bruce-1.17-CYD-2432S028-invoff-flags.bin").is_file())
 
     def test_empty_version_builds_the_latest_release(self):
-        fake, out = build({})
+        fake, out = build(self, {})
         clone = next(c for c in fake.calls if c[:2] == ("git", "clone"))
         self.assertEqual(clone[clone.index("--branch") + 1], "1.18")
         self.assertTrue((out / "Bruce-1.18-CYD-2432S028.bin").is_file())
@@ -124,7 +126,7 @@ class Build(unittest.TestCase):
     def test_a_board_bruce_doesnt_have_stops_before_building(self):
         fake = FakeBruce()
         with self.assertRaisesRegex(bb.BuildError, "no board"):
-            build({"VERSION": "1.17", "BOARD": "CYD-9999"}, fake)
+            build(self, {"VERSION": "1.17", "BOARD": "CYD-9999"}, fake)
         self.assertFalse(any(c[:2] == ("pio", "run") for c in fake.calls))
 
 

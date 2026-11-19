@@ -33,6 +33,8 @@ import struct
 import subprocess
 import sys
 import urllib.request
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = "https://github.com/BruceDevices/firmware"
@@ -55,19 +57,27 @@ def check(value: str, pattern: re.Pattern, what: str) -> str:
     return value
 
 
-def settings(env: dict[str, str]) -> dict:
+@dataclass(frozen=True)
+class Settings:
+    version: str  # empty: the latest release
+    board: str
+    flags: tuple[str, ...]
+    inversion_off: bool
+
+
+def settings(env: Mapping[str, str]) -> Settings:
     """The build's settings from the environment, checked."""
     flags = [check(f, FLAG_RE, "EXTRA_FLAGS entry") for f in env.get("EXTRA_FLAGS", "").split()]
     inversion_off = env.get("INVERSION_OFF", "false").strip().lower() == "true"
     if inversion_off and INVERSION_FLAG not in flags:
         flags.insert(0, INVERSION_FLAG)
     version = env.get("VERSION", "").strip()
-    return {
-        "version": check(version, VERSION_RE, "VERSION") if version else "",
-        "board": check(env.get("BOARD", "").strip() or DEFAULT_BOARD, BOARD_RE, "BOARD"),
-        "flags": flags,
-        "inversion_off": inversion_off,
-    }
+    return Settings(
+        version=check(version, VERSION_RE, "VERSION") if version else "",
+        board=check(env.get("BOARD", "").strip() or DEFAULT_BOARD, BOARD_RE, "BOARD"),
+        flags=tuple(flags),
+        inversion_off=inversion_off,
+    )
 
 
 def latest_version() -> str:
@@ -75,19 +85,19 @@ def latest_version() -> str:
         return check(json.load(r)["tag_name"], VERSION_RE, "latest release tag")
 
 
-def variant(s: dict) -> str:
-    parts = ["invoff"] if s["inversion_off"] else []
-    if [f for f in s["flags"] if f != INVERSION_FLAG]:
+def variant(s: Settings) -> str:
+    parts = ["invoff"] if s.inversion_off else []
+    if any(f != INVERSION_FLAG for f in s.flags):
         parts.append("flags")
     return "-".join(parts)
 
 
 def run(*cmd: str, cwd: Path | None = None) -> str:
     print("+", " ".join(cmd), flush=True)
-    done = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, text=True)
-    if done.returncode:
-        raise BuildError(f"{cmd[0]} failed (exit {done.returncode})")
-    return done.stdout
+    try:
+        return subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, text=True, check=True).stdout
+    except subprocess.CalledProcessError as e:
+        raise BuildError(f"{cmd[0]} failed (exit {e.returncode})") from e
 
 
 def environments(src: Path) -> set[str]:
@@ -95,7 +105,7 @@ def environments(src: Path) -> set[str]:
     return {name[4:] for name, _ in config if name.startswith("env:")}
 
 
-def add_environment(src: Path, board: str, flags: list[str]) -> str:
+def add_environment(src: Path, board: str, flags: tuple[str, ...]) -> str:
     """Append an environment that extends the board's with the extra flags."""
     if not flags:
         return board
@@ -123,8 +133,8 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(s: dict, work: Path, out: Path) -> list[Path]:
-    version = s["version"] or latest_version()
+def build(s: Settings, work: Path, out: Path) -> list[Path]:
+    version = s.version or latest_version()
     src = work / "bruce"
     if src.exists():
         shutil.rmtree(src)
@@ -132,9 +142,9 @@ def build(s: dict, work: Path, out: Path) -> list[Path]:
         "--shallow-submodules", REPO, str(src))
     commit = run("git", "rev-parse", "HEAD", cwd=src).strip()
 
-    if s["board"] not in environments(src):
-        raise BuildError(f"Bruce {version} has no board (PlatformIO environment) {s['board']!r}")
-    env = add_environment(src, s["board"], s["flags"])
+    if s.board not in environments(src):
+        raise BuildError(f"Bruce {version} has no board (PlatformIO environment) {s.board!r}")
+    env = add_environment(src, s.board, s.flags)
     run("pio", "run", "--environment", env, cwd=src)
 
     built = src / ".pio" / "build" / env
@@ -144,7 +154,7 @@ def build(s: dict, work: Path, out: Path) -> list[Path]:
             raise BuildError(f"the build didn't produce {path.relative_to(src)}")
 
     out.mkdir(parents=True, exist_ok=True)
-    stem = "-".join(p for p in ("Bruce", version, s["board"], variant(s)) if p)
+    stem = "-".join(p for p in ("Bruce", version, s.board, variant(s)) if p)
     full, app = out / f"{stem}.bin", out / f"{stem}.app.bin"
     shutil.copyfile(merged, full)
     shutil.copyfile(built / "firmware.bin", app)
@@ -154,8 +164,8 @@ def build(s: dict, work: Path, out: Path) -> list[Path]:
     info = out / "BUILD-INFO.txt"
     info.write_text("\n".join([
         f"Bruce {version} ({REPO}/commit/{commit})",
-        f"board: {s['board']}",
-        f"extra flags: {' '.join(s['flags']) or 'none'}",
+        f"board: {s.board}",
+        f"extra flags: {' '.join(s.flags) or 'none'}",
         f"built with: {pio_version}",
         "",
         f"{full.name}: full image, flash at 0x0 (erases settings and calibration)",
@@ -175,7 +185,7 @@ def main() -> int:
         return 2
     out = Path(sys.argv[1]).resolve()
     try:
-        s = settings(dict(os.environ))
+        s = settings(os.environ)
         for path in build(s, out.parent / "work", out):
             print(f"build-bruce: {path.name}")
     except BuildError as e:
