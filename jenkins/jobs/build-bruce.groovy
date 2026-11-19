@@ -13,6 +13,7 @@ pipeline {
         kubernetes {
             defaultContainer 'build'
             // build: PlatformIO and its ESP32 toolchain (downloaded each run, about 1 GB).
+            // A 1.17 build on brick2000: about 15 minutes, 3.1 GB peak (with page cache).
             // tools: this Jenkins image, for jenkins/bin/build-bruce.
             // No service-account token (values.yaml): the build can't touch the cluster.
             yaml '''
@@ -26,7 +27,7 @@ spec:
       args: [infinity]
       resources:
         requests: {cpu: "1", memory: 1Gi}
-        limits: {cpu: "4", memory: 3Gi}
+        limits: {cpu: "4", memory: 4Gi}
     - name: tools
       image: docker.io/whitepatrick/brick-jenkins:@BRICK_JENKINS_TAG@
       command: [sleep]
