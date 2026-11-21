@@ -46,6 +46,7 @@ topic=~/.config/brick-status/ntfy_topic
 cp "$here/brick-status.service" "$here/brick-plasma.service" "$here/brick-deploy.service" "$here/brick-deploy.timer" \
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
+    "$here/brick-saves.service" "$here/brick-saves.timer" \
     "$here/brick-wifi-watchdog.service" "$here/brick-wifi-watchdog.timer" \
     ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
@@ -178,7 +179,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-plasma brick-status
 systemctl --user restart brick-plasma brick-status
-systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer brick-wifi-watchdog.timer
+systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer brick-saves.timer \
+    brick-wifi-watchdog.timer
 systemctl --user enable brick-retro
 systemctl --user restart brick-retro
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."

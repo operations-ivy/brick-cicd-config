@@ -1,0 +1,13 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+# Syncs brick9000's game saves with brick-games' save sync (brick-games#19):
+# the agent is fetched from the saves service each run, so it's always the
+# one that service expects (brick-games brick_games/saves_agent.py).
+[Unit]
+Description=Sync game saves with games.brick.nozdormu.cloud
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'curl -fsS --max-time 60 -o "%t/brick-saves-agent.py" https://games.brick.nozdormu.cloud/api/saves/agent.py && exec python3 "%t/brick-saves-agent.py" --device brick9000'
+# How the run went, for Prometheus (brick_status/jobs.py); '-': never fails the run.
+ExecStopPost=-/usr/bin/env PYTHONPATH=%h/brick-cicd-config/brick-status python3 -m brick_status.jobs brick-saves
