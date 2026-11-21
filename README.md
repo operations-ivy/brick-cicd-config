@@ -870,6 +870,13 @@ also wouldn't fit beside the rest on the SD card.
   only read `/extra/games` (`rrsync -ro`); `install.sh` prints the line to
   authorize. A game in two folders (brick2000's SNES folder has many both
   at the top and in an A-Z subfolder) is one entry.
+- **Saves:** `brick-saves.timer` (every 10 minutes) syncs
+  `~/games/saves` with brick-games' save sync (brick-games#19): it fetches
+  the agent from `https://games.brick.nozdormu.cloud/api/saves/agent.py`
+  and runs it as `--device brick9000`. Changed saves go up; the current
+  version of a game comes down only over a save brick9000 hasn't changed
+  since; when devices disagree, nothing is overwritten until the user picks
+  a version in the game's details on the page.
 - **Names:** the list shows clean names ("7th Saga, The (U) [!]" is "7th
   Saga, The"; `games.label()`): region, language, revision and date tags
   and GoodTools' dump marks go; (Beta), (Proto), (Disc 2), a multicart's
@@ -988,7 +995,7 @@ format, and brick-retro imports it from the same checkout.
 | brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the cluster's front door to brick9000:8765) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
 | The LCARS panel (rpi_lcars) | `brick1982:8767/metrics` | `lcars_*`: Home Assistant link and requests, codes entered, relocks, changes sent, taps, screen, backlight, frame time |
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
-| Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
+| Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-saves`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
 | brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
 | brick9000's Wi-Fi watchdog (`brick9000/wifi-watchdog`, every 5 minutes) | textfile collector | `brick_wifi_watchdog_*`: seconds since `wlan0` last received a broadcast, re-activations (brcmfmac loses the group key: unicast works, broadcasts and so ARP requests don't, 2026-11-07), NetworkManager restarts |
 | brick1982 itself | node-exporter on `:9100` (`brick1982/install.sh`; systemd units too) | `node_*` |
