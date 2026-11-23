@@ -76,6 +76,31 @@ def start_retroarch() -> None:
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def retroarch_pids() -> list[str]:
+    return subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True, text=True).stdout.split()
+
+
+def _open_paths(pid_dir: Path):
+    """The paths a process has open (raises OSError if it has gone)."""
+    for fd in (pid_dir / "fd").iterdir():
+        try:
+            yield fd.readlink()
+        except OSError:
+            continue  # closed meanwhile
+
+
+def video_playing(mount: Path = MOVIES_MOUNT, proc: Path = Path("/proc")) -> bool:
+    """Whether RetroArch has a file on the movies share open: its video player
+    (the builtin ffmpeg core) keeps the film open while it's loaded."""
+    for pid in retroarch_pids():
+        try:
+            if any(p.is_relative_to(mount) for p in _open_paths(proc / pid)):
+                return True
+        except OSError:
+            continue  # it quit meanwhile
+    return False
+
+
 def stop_retroarch() -> None:
     log.info("no controller for a while: closing RetroArch (it saves a state first)")
     rm.CLOSES.inc(reason="idle")
@@ -149,7 +174,9 @@ def daemon() -> None:
 
     pads = scan()
     launcher = Launcher(retroarch_running, start_retroarch, stop_retroarch, redial,
-                        idle_exit_seconds=float(env("IDLE_EXIT_SECONDS", "900")), known=set(pads))
+                        idle_exit_seconds=float(env("IDLE_EXIT_SECONDS", "900")), known=set(pads),
+                        watching=video_playing,
+                        video_exit_seconds=float(env("VIDEO_EXIT_SECONDS", str(4 * 3600))))
     volume = Volume(change_volume)
     log.info("brick-retro up", pads=len(pads))
     while True:

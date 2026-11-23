@@ -8,6 +8,7 @@ import zlib
 from unittest import mock
 from pathlib import Path
 
+from brick_retro import __main__ as brick_main
 from brick_retro import games, retro_metrics, thumbnails, videos
 from brick_retro.pads import BTN_DPAD_DOWN, BTN_DPAD_UP, BTN_GAMEPAD, BTN_JOYSTICK, BTN_MODE, Launcher, Volume, is_pad
 
@@ -101,6 +102,43 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(ra.up)
         launcher.tick(set(), now=10 + 900)
         self.assertEqual((ra.up, ra.stops), (False, 1))
+
+    def test_a_video_outlasts_the_pad_sleeping(self):
+        ra = FakeRetroArch()
+        launcher = ra.launcher(watching=lambda: True, video_exit_seconds=4 * 3600)
+        launcher.tick({"p"}, now=0)
+        launcher.tick({"p"}, now=3)
+        launcher.tick(set(), now=10)  # the pad sleeps mid-film
+        launcher.tick(set(), now=10 + 3600)
+        self.assertTrue(ra.up)
+        launcher.tick(set(), now=10 + 4 * 3600)
+        self.assertEqual((ra.up, ra.stops), (False, 1))
+
+    def test_after_the_video_the_usual_fifteen_minutes(self):
+        ra, watching = FakeRetroArch(), [True]
+        launcher = ra.launcher(watching=lambda: watching[0])
+        launcher.tick({"p"}, now=0)
+        launcher.tick({"p"}, now=3)
+        launcher.tick(set(), now=10)
+        launcher.tick(set(), now=10 + 1000)
+        self.assertTrue(ra.up)
+        watching[0] = False  # back in the menu: the film closed
+        launcher.tick(set(), now=10 + 1001)
+        self.assertEqual(ra.stops, 1)
+
+
+class VideoPlayingTests(unittest.TestCase):
+    def test_a_file_on_the_share_open_in_retroarch(self):
+        with tempfile.TemporaryDirectory() as d:
+            mount, proc = Path(d, "movies"), Path(d, "proc")
+            fds = proc / "42" / "fd"
+            mount.mkdir()
+            fds.mkdir(parents=True)
+            (fds / "3").symlink_to(Path(d, "retroarch.log"))
+            with mock.patch.object(brick_main, "retroarch_pids", return_value=["42"]):
+                self.assertFalse(brick_main.video_playing(mount, proc))
+                (fds / "4").symlink_to(mount / "480p" / "movies" / "Film.mp4")
+                self.assertTrue(brick_main.video_playing(mount, proc))
 
 
 class VolumeTests(unittest.TestCase):

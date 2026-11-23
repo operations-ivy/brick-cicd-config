@@ -140,6 +140,9 @@ fi
 mkdir -p ~/games/roms ~/games/system ~/games/saves ~/games/states ~/.config/retroarch/autoconfig ~/.config/brick-retro
 # Core options brick-retro's RetroArch uses (retroarch.cfg points at this copy).
 cp "$here/retroarch/core-options.cfg" ~/.config/retroarch/brick-core-options.cfg
+# Per-core overrides: the video player plays on when the pad sleeps.
+mkdir -p ~/.config/retroarch/config/FFmpeg
+cp "$here/retroarch/config/FFmpeg/FFmpeg.cfg" ~/.config/retroarch/config/FFmpeg/
 for f in "$here"/retroarch/autoconfig/*.cfg; do
     [ -f "$f" ] && cp "$f" ~/.config/retroarch/autoconfig/
 done
