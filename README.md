@@ -521,7 +521,7 @@ it's on weekday evenings, 16:00 to midnight, and all weekend from Friday 16:00
 to Monday 00:01: off Monday 00:01-16:00 and Tuesday to Friday 00:00-16:00. While it's quiet the cabinet keys do nothing except the side button
 (`KEY_ESC`), which toggles the board:
 
-- **On** (the schedule's on hours, or a wake): it goes to sleep until the
+- **On** (the schedule's on hours, or a wake), pressed: on release, it goes to sleep until the
   schedule next turns it on, so a sleep at 6 PM Monday lasts until 4 PM
   Tuesday. A sleep ends by 08:00 at the latest (`BRICK_STATUS_SLEEP_MORNING`),
   so one on a Friday evening doesn't last the weekend, when nothing is quiet;
@@ -533,6 +533,11 @@ to Monday 00:01: off Monday 00:01-16:00 and Tuesday to Friday 00:00-16:00. While
 - **Off in quiet hours:** it turns everything on for 30 minutes
   (`BRICK_STATUS_WAKE_SECONDS`), and the header shows "Awake until ..." until
   then.
+- **On, held for 0.8 s** (`BRICK_STATUS_SIDE_LONG_SECONDS`): it stays on for
+  12 hours from then instead (`BRICK_STATUS_LONG_WAKE_SECONDS`), through any
+  quiet hours, never shortening a longer wake. It fires while still held. The
+  press that wakes the board from off doesn't count as a hold. Wakes are saved
+  in `board.json` too.
 
 Idle light patterns, highest priority first:
 

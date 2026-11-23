@@ -78,6 +78,11 @@ class Settings:
     quiet: QuietSchedule = field(default_factory=lambda: QuietSchedule.parse(DEFAULT_QUIET))
     # How long the side button turns everything on for, while it's quiet.
     wake_seconds: float = 1800.0
+    # How long holding the side button keeps it on, when it's on already
+    # (the user, 2026-11-23: 12 hours instead of the 30 minutes).
+    long_wake_seconds: float = 12 * 3600.0
+    # How long the side button is held before it counts as a hold.
+    side_long_seconds: float = 0.8
     # A side-button sleep ends by this time of day at the latest, so one on a
     # Friday evening doesn't last the weekend (nothing is quiet then).
     sleep_morning: time = time(8, 0)
@@ -153,6 +158,8 @@ class Settings:
             # The older daily-only settings.
             s.quiet = QuietSchedule.parse(f'{env("BRICK_STATUS_QUIET_START")}-{env("BRICK_STATUS_QUIET_END")}')
         s.wake_seconds = float(env("BRICK_STATUS_WAKE_SECONDS", s.wake_seconds))
+        s.long_wake_seconds = float(env("BRICK_STATUS_LONG_WAKE_SECONDS", s.long_wake_seconds))
+        s.side_long_seconds = float(env("BRICK_STATUS_SIDE_LONG_SECONDS", s.side_long_seconds))
         s.check_job = env("BRICK_STATUS_CHECK_JOB", s.check_job)
         s.ha_url = env("BRICK_STATUS_HA_URL", s.ha_url).rstrip("/")
         s.ha_token = env("BRICK_STATUS_HA_TOKEN", s.ha_token)

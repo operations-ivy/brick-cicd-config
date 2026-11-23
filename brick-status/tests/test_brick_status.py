@@ -24,7 +24,7 @@ import structlog
 from structlog.testing import capture_logs
 
 from brick_status import (board_metrics, jobs, checks, logs, crt_activity, crt_gallery, host, lights, matrix, metrics, notify,
-                          night_shift, party, party_sound, shipped, units, volume, web)
+                          night_shift, party, party_sound, shipped, side, units, volume, web)
 from brick_status.__main__ import button_name
 from brick_status.board import ACTIVE, IDLE, QUIET, Board, QuietSchedule, in_quiet_hours
 from brick_status.config import VIEWS, Settings
@@ -229,6 +229,28 @@ class BoardTest(unittest.TestCase):
             self.assertEqual(again.side_button(ts(19)), "on")
             self.assertEqual(Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"),
                                    state_path=path).mode(ts(19, 1)), IDLE)
+
+    def test_stay_awake_keeps_it_on_through_quiet_hours(self):
+        self.board.side_button(ts(3))  # a 30-minute wake
+        self.assertEqual(self.board.stay_awake(ts(3, 5), 12 * 3600), self.day(26, 15, 5))
+        self.assertEqual(self.board.mode(ts(5, 59)), IDLE)  # past 06:00 the schedule is on anyway
+        self.assertEqual(self.board.awake_until(ts(4)), self.day(26, 15, 5))
+
+    def test_stay_awake_never_shortens_and_ends_a_sleep(self):
+        self.board.stay_awake(ts(3), 3600)
+        self.assertEqual(self.board.stay_awake(ts(3, 1), 60), ts(4))
+        self.board.side_button(ts(18))
+        self.board.stay_awake(ts(18, 1), 60)
+        self.assertIsNone(self.board.asleep_until(ts(18, 2)))
+
+    def test_a_wake_survives_a_restart(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/board.json"
+            Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), state_path=path).stay_awake(ts(1), 3 * 3600)
+            again = Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), state_path=path)
+            self.assertEqual(again.mode(ts(3, 59)), IDLE)
+            self.assertEqual(again.mode(self.day(27, 1)), QUIET)
 
     def test_unreadable_state_is_ignored(self):
         import tempfile
@@ -2343,6 +2365,45 @@ class MaintenanceTest(unittest.TestCase):
         found, seen = notify.find_problems(summary, True, vitals)
         self.assertEqual({p.key for p in found}, {"node:brick666", "disk:brick9000"})
         self.assertIn("disk:brick2000", seen)  # seen and fine: an open disk page for it clears
+
+
+class SideButtonTest(unittest.TestCase):
+    """The side button against a Board quiet 00:00-06:00 (ts() is a Saturday)."""
+
+    def setUp(self):
+        self.board = Board(VIEWS, 120, QuietSchedule.parse("00:00-06:00"), 1800)
+        self.mono, self.now = 0.0, ts(3)
+        self.button = side.SideButton(self.board, 12 * 3600, 0.8,
+                                      clock=lambda: self.mono, wall=lambda: self.now)
+
+    def hold(self, seconds):
+        self.button.press()
+        for _ in range(int(seconds / 0.02)):
+            self.mono += 0.02
+            self.button.tick()
+        self.button.release()
+        self.mono += 0.02
+        self.button.tick()
+
+    def test_a_press_wakes_it_at_once_and_a_hold_does_not_stretch_that(self):
+        self.hold(2)
+        self.assertEqual(self.board.awake_until(self.now), ts(3, 30))
+
+    def test_a_press_while_on_sleeps_it(self):
+        self.hold(0.1)
+        self.hold(0.1)
+        self.assertTrue(self.board.asleep(self.now))
+
+    def test_a_hold_while_on_stays_awake_12_hours(self):
+        self.hold(0.1)  # woken: 30 minutes
+        self.hold(1)
+        self.assertFalse(self.board.asleep(self.now))
+        self.assertEqual(self.board.awake_until(self.now), ts(15))
+
+    def test_a_hold_in_the_on_hours_keeps_it_on_past_the_schedule(self):
+        self.now = ts(20)
+        self.hold(1)
+        self.assertEqual(self.board.mode(datetime(2026, 9, 27, 7, 59).timestamp()), IDLE)
 
 
 class LampGesturesTest(unittest.TestCase):
