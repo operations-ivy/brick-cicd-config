@@ -2993,13 +2993,15 @@ class ShippedTest(unittest.TestCase):
                                 ("secrets", "Failed", self.NOW - 100)])
         jobs = [{"name": "deploy-brick1982", "builds": [
                     {"number": 7, "result": "FAILURE", "timestamp": (self.NOW - 50) * 1000, "displayName": "#7"},
-                    {"number": 6, "result": "SUCCESS", "timestamp": (self.NOW - 5000) * 1000, "displayName": "#6"}]}]
+                    {"number": 6, "result": "SUCCESS", "timestamp": (self.NOW - 5000) * 1000, "displayName": "#6"}]},
+                {"name": "deploy-brick-panel", "builds": [
+                    {"number": 2, "result": "SUCCESS", "timestamp": (self.NOW - 6000) * 1000, "displayName": "#2"}]}]
         own = {"name": "brick9000", "version": "fef05ae", "at": self.NOW - 400, "kind": "device", "state": "ok"}
         got = shipped.shipped(prom, jobs, own, now=self.NOW)
         self.assertEqual([(r["name"], r["version"], r["kind"], r["state"]) for r in got],
                          [("secrets", "sync", "sync", "warn"), ("brick9000", "fef05ae", "device", "ok"),
-                          ("brick-games", "sync", "sync", "ok"), ("brick1982", "#6", "device", "ok"),
-                          ("media-samba", "a3.24", "rollout", "ok")])
+                          ("brick-games", "sync", "sync", "ok"), ("brick1982 lcars", "#6", "device", "ok"),
+                          ("brick1982 neon", "#2", "device", "ok")])  # media-samba: the sixth
 
     def test_at_most_five_and_a_dead_source_is_left_out(self):
         class Down:

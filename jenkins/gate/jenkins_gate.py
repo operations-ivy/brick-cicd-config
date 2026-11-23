@@ -40,6 +40,7 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@:/+-]*")  # fullmatch: no trailing n
 DEPLOYS = {
     "brick-cicd-config": (".config/brick-status/env", "BRICK_DEPLOY_BRANCH", "brick-deploy.service"),
     "rpi_lcars": (".config/lcars/env", "LCARS_DEPLOY_BRANCH", "lcars-deploy.service"),
+    "brick-panel": (".config/brick-panel/env", "BRICK_PANEL_DEPLOY_BRANCH", "brick-panel-deploy.service"),
 }
 BOARD_STATE = "http://127.0.0.1:8765/api/state"
 # Through Jenkins' key the commands are found on this PATH only, whatever the

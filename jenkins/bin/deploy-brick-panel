@@ -1,0 +1,9 @@
+#!/bin/sh
+# Point brick1982's neon panel (operations-ivy/brick-panel, its deploy/deploy)
+# at BRANCH (empty: main) and deploy it now, instead of at its 2-hourly
+# timer. Its result is in brick1982's journal, not in this build's log. The
+# timer keeps following the branch. The deploy restarts the panel only if
+# it's the one on the screen (panel-select).
+set -eu
+. "$(dirname "$0")/lib.sh"
+start_deploy "$BRICK1982" "${BRANCH:-}" brick-panel main

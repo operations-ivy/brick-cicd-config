@@ -33,9 +33,12 @@ NAMES = {"status": {200, 302}, "radar": {200}, "wigle": {200}, "reader": {200}, 
          "homeassistant": {200, 302}, "grafana": {200, 302}, "prometheus": {200, 302}, "jenkins": {200, 403},
          "argocd": {200}, "dashboard": {200}, "games": {200}}
 PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090")
-# host -> (needed by the homelab?, units)
-SERVICES = {"brick1982": (True, [("", "lcars-kiosk"), ("--user", "lcars-deploy.timer")]),
-            "brick9000": (False, [("--user", "brick-status")])}
+# host -> (needed by the homelab?, the sets of units that each mean it's up).
+# brick1982 runs one of two panels (brick-panel's panel-select): the neon one
+# or LCARS, either is fine.
+SERVICES = {"brick1982": (True, [[("", "brick-panel-kiosk"), ("", "brick-panel"), ("--user", "brick-panel-deploy.timer")],
+                                 [("", "lcars-kiosk"), ("--user", "lcars-deploy.timer")]]),
+            "brick9000": (False, [[("--user", "brick-status")]])}
 
 
 def status(url: str) -> int:
@@ -66,6 +69,18 @@ def ssh(host: str, command: str) -> str:
     return out.stdout.strip()
 
 
+def host_units(host: str, choices: list[list[tuple[str, str]]]) -> list[tuple[str, str, str]]:
+    """(scope, unit, state) for the set of units the host runs: the first set
+    all active, else the first whose first unit is (half up: what's down
+    shows), else the first set."""
+    found = [[(scope, unit, ssh(host, f"jenkins-gate is-active {scope} {unit}") or "unreachable")  # the gate splits on spaces
+              for scope, unit in units] for units in choices]
+    for units in found:
+        if all(state == "active" for _, _, state in units):
+            return units
+    return next((units for units in found if units[0][2] == "active"), found[0])
+
+
 def main() -> int:
     problems, warnings, resting = [], [], in_maintenance()
     for name, ok in NAMES.items():
@@ -73,9 +88,8 @@ def main() -> int:
         print(f"{'ok  ' if code in ok else 'DOWN'} {name}.brick.nozdormu.cloud ({code or 'no answer'})")
         if code not in ok:
             problems.append(name)
-    for host, (needed, units) in SERVICES.items():
-        for scope, unit in units:
-            state = ssh(host, f"jenkins-gate is-active {scope} {unit}") or "unreachable"  # the gate splits on spaces
+    for host, (needed, choices) in SERVICES.items():
+        for scope, unit, state in host_units(host, choices):
             if state == "active":
                 mark = "ok  "
             elif host in resting:  # in a maintenance window: reported, not failed

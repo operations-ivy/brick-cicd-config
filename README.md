@@ -17,7 +17,7 @@ shows how that's going.
 | `brick9000` (Docker) | Caddy on ports 80 and 443: every app at `https://<name>.brick.nozdormu.cloud` | The front door for the whole homelab; the board stays reachable when the cluster is down |
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
-| `brick1982` (host) | 7" touchscreen: the LCARS panel (operations-ivy/rpi_lcars); host tooling from here | Needs the screen; left the cluster 2026-10-14 to become a wall display |
+| `brick1982` (host) | 7" touchscreen: the neon panel (operations-ivy/brick-panel) or LCARS (operations-ivy/rpi_lcars); host tooling from here | Needs the screen; left the cluster 2026-10-14 to become a wall display |
 
 ### brick9000 is not a cluster node
 
@@ -123,7 +123,8 @@ script in git that runs from anywhere, not a Jenkins job.
 | `prune-images` | Keeps the newest two versions of each app image on Docker Hub, the nodes and brick9000 (its Docker, through `jenkins-gate`) (nightly) | `APPLY=false` for a dry run that only lists what would go |
 | `wigle-sync-now` | Runs wigle-sync from its CronJob now | |
 | `deploy-brick9000` | Points brick9000's deploy at a branch and starts it now instead of at its 2-hourly timer, which then keeps following that branch (returns at once; the deploy logs to `journalctl _SYSTEMD_USER_UNIT=brick-deploy.service` on brick9000) | `BRANCH=<branch>` to try a branch; without it, or empty, `main` |
-| `deploy-brick1982` | The same for brick1982's deploy | `BRANCH=<branch>`; without it, `main` |
+| `deploy-brick1982` | The same for brick1982's LCARS panel (rpi_lcars; `lcars-deploy.service`) | `BRANCH=<branch>`; without it, `master` |
+| `deploy-brick-panel` | The same for brick1982's neon panel (brick-panel; `brick-panel-deploy.service`). It restarts the panel only if it's the one on the screen | `BRANCH=<branch>`; without it, `main` |
 | `maintenance-window` | Puts a brick in maintenance for 1h/4h/12h/24h/indefinite (a `brick_maintenance_until_seconds` series in the Pushgateway, `bin/maintenance`), or takes it out (`END`). While it's in, the board shows the node and everything on it calm and nothing pages for it; the window ends by itself. The node dropdown lists every brick seen in the last 7 days, online or off (a node being moved is off), and any in maintenance, never brick420 | `NODE`, `DURATION`, `END=true` |
 | `maintenance-refresh` | Every 5 minutes: deletes ended windows and refreshes `maintenance-window`'s node list (`$JENKINS_HOME/choices/maintenance-nodes`, re-running the seed when it changes; seed `// choice NAME=@list` lines) | |
 | `power-down` | Takes a brick out of service before it's powered down, and puts it back (`bin/power-down`). `down`: refuses while it's busy (apt, a game or a deploy on it, a Jenkins build on the node), opens a maintenance window, stops what resumes on its own (brick9000's ROM sync and mirrors), cordons a k3s node, restarts its single-copy Deployments so they move before the drain (not those pinned to its hardware, like overwatch's scanner), drains it and checks only DaemonSet pods are left (listing what's Pending), then powers it off and waits for it to leave the network. `up`: waits for SSH, uncordons, ends the window, runs smoke. `DRY_RUN` (default) prints the plan only. brick666, brick9000 and brick1982; brick2000 (Jenkins, every volume) and brick420 (the control plane) are refused with the steps to do by hand. Its ClusterRole, `jenkins-power-down`, is in `values.yaml` | `NODE`, `ACTION=down/up`, `DURATION`, `SHUTDOWN`, `DRY_RUN` |
@@ -959,6 +960,15 @@ which carries its kiosk unit, deploy timer and `install.sh` (`deploy/`).
 The Jenkins job `deploy-brick1982` deploys that panel from a branch of
 rpi_lcars (empty: `master`).
 
+Its successor is the **neon panel**,
+[operations-ivy/brick-panel](https://github.com/operations-ivy/brick-panel):
+portrait, Chromium and a server on the Pi. `panel-select neon` or
+`panel-select lcars` (brick-panel's `deploy/panel-select`) picks which one
+is on the screen, one at a time, and only that panel's deploy timer runs.
+`deploy-brick-panel` deploys it from a branch (empty: `main`); neither
+panel's deploy takes the screen from the other. `smoke` counts brick1982 up
+with either panel's units all active.
+
 brick-arena, the Chromium kiosk that was here before (pixel planets, the pod
 arena, packet weather, and `arena.brick.nozdormu.cloud`), was retired for it
 on 2026-10-15; it's in this repo's history.
@@ -993,7 +1003,7 @@ format, and brick-retro imports it from the same checkout.
 | What | Where Prometheus gets it | Metrics |
 | --- | --- | --- |
 | brick-status | `https://status.brick.nozdormu.cloud/metrics` (through the cluster's front door to brick9000:8765) | `brick_status_*`: each view's and check's state, polls, mode, view, lights, buttons, pages, CRT programs, kiosk browser last seen, requests |
-| The LCARS panel (rpi_lcars) | `brick1982:8767/metrics` | `lcars_*`: Home Assistant link and requests, codes entered, relocks, changes sent, taps, screen, backlight, frame time |
+| The panel on brick1982 (one at a time, the same port) | `brick1982:8767/metrics` | The neon panel's `panel_*` (brick-panel's README: screen changes, real user monitoring, Home Assistant, the lock, night) or LCARS' `lcars_*`: Home Assistant link and requests, codes entered, relocks, changes sent, taps, screen, backlight, frame time |
 | brick-retro | node-exporter's textfile collector on brick9000 | `brick_retro_*`: RetroArch open, controllers, launches, closes, games per system |
 | Oneshot user units (`brick-deploy` on both hosts, `lcars-deploy`, `brick-roms`, `brick-saves`, `brick-mirror`) | textfile collector (`ExecStopPost`: `brick_status/jobs.py`) | `brick_job_*{unit}`: last run, result, duration, last success; the deploys' branch and commit |
 | brick9000 itself | node-exporter on `:9100` (install.sh; systemd units too) | `node_*` |
