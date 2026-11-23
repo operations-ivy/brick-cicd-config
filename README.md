@@ -863,7 +863,8 @@ also wouldn't fit beside the rest on the SD card.
 - **Bluetooth drops:** the game pauses, and brick-retro asks the controller to
   reconnect every 30 seconds. Battery saves are written every 10 seconds, and
   a state is saved on quit and loaded on start. After 15 minutes with no
-  controller, RetroArch closes so the board isn't hidden behind a dead game.
+  controller, RetroArch closes so the board isn't hidden behind a dead game
+  (4 hours while a video plays; see Movies and TV).
 - **The board:** while RetroArch is open, brick-status keeps the screen on
   whatever the quiet schedule says (brick-retro's flag file). The cabinet's
   own buttons stay brick-status's.
@@ -978,6 +979,12 @@ copies (devices.yaml tag `video_480p`; a Pi 4 decodes them in software).
   (`python3 -m brick_retro videos`). If presto can't be reached they stay as
   they were, and the unit still succeeds, so a cluster outage doesn't turn
   the board red. The thumbnail sync skips these two playlists.
+- **The pad sleeps during a film** (an 8BitDo powers down after 15-20 idle
+  minutes). A video plays on: the video player has its own RetroArch
+  override (`retroarch/config/FFmpeg/FFmpeg.cfg`: no `pause_on_disconnect`),
+  and while RetroArch has a file on the movies share open, brick-retro waits
+  4 hours without a pad (`BRICK_RETRO_VIDEO_EXIT_SECONDS`) instead of 15
+  minutes before closing it. Wake the pad (Home) to use the menu again.
 
 ## brick1982 (the touchscreen)
 

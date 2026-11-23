@@ -70,13 +70,17 @@ class Launcher:
       the game); every redial_seconds the trusted pads are asked to reconnect.
     - No pad for idle_exit_seconds: RetroArch is told to quit (it saves a
       state on the way out), so the board isn't hidden behind a dead game.
+      While a video plays (`watching`), video_exit_seconds instead: nobody
+      touches the pad during a film, and it sleeps (the user, 2026-11-23).
     """
 
     def __init__(self, running: Callable[[], bool], start: Callable[[], None], stop: Callable[[], None],
                  redial: Callable[[], None], idle_exit_seconds: float = 900, redial_seconds: float = 30,
-                 known: set[str] | None = None, settle_seconds: float = 3):
+                 known: set[str] | None = None, settle_seconds: float = 3,
+                 watching: Callable[[], bool] = lambda: False, video_exit_seconds: float = 4 * 3600):
         self.running, self.start, self.stop, self.redial = running, start, stop, redial
         self.idle_exit_seconds, self.redial_seconds = idle_exit_seconds, redial_seconds
+        self.watching, self.video_exit_seconds = watching, video_exit_seconds
         self.known = set(known or ())  # pads already there at startup don't launch anything
         self.settle_seconds = settle_seconds
         self.lost_since: float | None = None
@@ -105,7 +109,8 @@ class Launcher:
             return
         if self.lost_since is None:
             self.lost_since = now
-        if now - self.lost_since >= self.idle_exit_seconds:
+        limit = self.video_exit_seconds if self.watching() else self.idle_exit_seconds
+        if now - self.lost_since >= limit:
             self.stop()
             self.lost_since = None
         elif now - self.last_redial >= self.redial_seconds:
