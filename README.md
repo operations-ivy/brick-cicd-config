@@ -949,6 +949,31 @@ bluetoothctl
   connect <MAC>
 ```
 
+### Movies and TV
+
+RetroArch also has two video playlists, **Movies** and **TV** (each show's
+episodes in order), played in RetroArch's built-in video player (the
+`ffmpeg` core compiled into Debian's RetroArch): pick one with the
+controller like a game. They're the videos picked on presto's picker
+(`presto.brick.nozdormu.cloud/media/devices`, one list for every device),
+as presto's `GET /api/media/sync?device=brick9000` lists them: the 480p
+copies (devices.yaml tag `video_480p`; a Pi 4 decodes them in software).
+
+- **The files stay on brick2000** and play off its `movies` Samba share,
+  mounted read-only at `/mnt/brick/movies` on first use (install.sh's
+  fstab line: an automount, `nofail`, a 15 s mount timeout, so the board
+  never waits on it). 480p is ~2 Mbit/s; brick9000 pulls ~56 Mbit/s from
+  brick2000 over Wi-Fi.
+- **The share's account** is the read-only `media` one, in
+  `/etc/brick-media-shares/media.cred` (root, mode 600; `username=media`,
+  `password=...`), put there by hand; install.sh says so when it's missing.
+  `BRICK_MOVIES_SHARE` in `~/.config/brick-retro/env` is the share's
+  address: an IPv4 one here, since `brick2000` resolves to IPv6 only.
+- **brick-videos.timer** rewrites the playlists every 15 minutes
+  (`python3 -m brick_retro videos`). If presto can't be reached they stay as
+  they were, and the unit still succeeds, so a cluster outage doesn't turn
+  the board red. The thumbnail sync skips these two playlists.
+
 ## brick1982 (the touchscreen)
 
 `brick1982` (192.168.1.222, static lease) is a Raspberry Pi 4 8GB with the

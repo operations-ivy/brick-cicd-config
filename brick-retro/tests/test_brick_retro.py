@@ -8,7 +8,7 @@ import zlib
 from unittest import mock
 from pathlib import Path
 
-from brick_retro import games, retro_metrics, thumbnails
+from brick_retro import games, retro_metrics, thumbnails, videos
 from brick_retro.pads import BTN_DPAD_DOWN, BTN_DPAD_UP, BTN_GAMEPAD, BTN_JOYSTICK, BTN_MODE, Launcher, Volume, is_pad
 
 
@@ -632,3 +632,55 @@ class LabelTests(unittest.TestCase):
                                      index_fn=lambda *a: self.fail("asked the server"))
             self.assertEqual(counts["S"]["Named_Boxarts"], 1)
             self.assertTrue((d / "th" / "S" / "Named_Boxarts" / "7th Saga, The.png").is_file())
+
+
+class VideosTests(unittest.TestCase):
+    """brick9000's Movies and TV playlists, from presto's manifest (videos.py)."""
+
+    MANIFEST = {"files": [
+        {"share": "movies", "path": "480p/tv/Kite/Kite - 02.mp4", "bytes": 1},
+        {"share": "movies", "path": "480p/movies/Akira (1988).mp4", "bytes": 1},
+        {"share": "movies", "path": "480p/tv/Samurai Pizza Cats/Samurai Pizza Cats - 01.mp4", "bytes": 1},
+        {"share": "movies", "path": "480p/tv/Kite/Kite - 01.mp4", "bytes": 1},
+        {"share": "movies", "path": "480p/tv/Robotech/Season 1/Episode 3.mp4", "bytes": 1},
+        {"share": "music", "path": "library/a.mp3", "bytes": 1},
+        {"share": "movies", "path": "480p/odd.mp4", "bytes": 1},
+    ]}
+
+    def test_labels(self):
+        self.assertEqual(videos.entry("480p/movies/Akira (1988).mp4"), ("Movies", "Akira (1988)"))
+        self.assertEqual(videos.entry("480p/tv/Kite/Kite - 01.mp4"), ("TV", "Kite - 01"))
+        self.assertEqual(videos.entry("480p/tv/Robotech/Season 1/Episode 3.mp4"), ("TV", "Robotech - Episode 3"))
+        self.assertIsNone(videos.entry("480p/odd.mp4"))
+        self.assertIsNone(videos.entry("480p/tv/loose.mp4"))
+
+    def test_playlists_play_off_the_share_in_retroarchs_player(self):
+        docs = videos.playlists(self.MANIFEST, Path("/mnt/brick/movies"))
+        self.assertEqual(set(docs), {"Movies", "TV"})
+        [movie] = docs["Movies"]["items"]
+        self.assertEqual(movie, {"path": "/mnt/brick/movies/480p/movies/Akira (1988).mp4", "label": "Akira (1988)",
+                                 "core_path": "builtin", "core_name": "ffmpeg", "crc32": "DETECT",
+                                 "db_name": "Movies.lpl"})
+        # Each show's episodes in order, and RetroArch told not to re-sort them.
+        self.assertEqual([i["label"] for i in docs["TV"]["items"]],
+                         ["Kite - 01", "Kite - 02", "Robotech - Episode 3", "Samurai Pizza Cats - 01"])
+        self.assertEqual(docs["TV"]["sort_mode"], videos.SORT_OFF)
+
+    def test_write_replaces_and_drops_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "Movies.lpl").write_text("old")
+            counts = videos.write(videos.playlists({"files": self.MANIFEST["files"][:1]}, Path("/m")), d)
+            self.assertEqual(counts, {"Movies": 0, "TV": 1})
+            self.assertFalse((d / "Movies.lpl").exists())
+            self.assertEqual(json.loads((d / "TV.lpl").read_text())["items"][0]["label"], "Kite - 02")
+
+    def test_thumbnails_skip_the_video_playlists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            videos.write(videos.playlists(self.MANIFEST, Path("/m")), d / "playlists")
+            asked = []
+            counts = thumbnails.sync(d / "playlists", d / "thumbs", d / "state.json",
+                                     index_fn=lambda *a: asked.append(a) or {}, fetch_fn=lambda *a: None)
+            self.assertEqual(counts, {})
+            self.assertEqual(asked, [])

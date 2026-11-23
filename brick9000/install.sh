@@ -47,6 +47,7 @@ cp "$here/brick-status.service" "$here/brick-plasma.service" "$here/brick-deploy
     "$here/brick-mirror.service" "$here/brick-mirror.timer" "$here/mdns-alias@.service" \
     "$here/brick-retro.service" "$here/brick-roms.service" "$here/brick-roms.timer" \
     "$here/brick-saves.service" "$here/brick-saves.timer" \
+    "$here/brick-videos.service" "$here/brick-videos.timer" \
     "$here/brick-wifi-watchdog.service" "$here/brick-wifi-watchdog.timer" \
     ~/.config/systemd/user/
 cp "$here/labwc-autostart" ~/.config/labwc/autostart
@@ -161,6 +162,28 @@ if ! rsync --list-only -e "ssh -i $HOME/.ssh/brick-roms -o BatchMode=yes" "zapho
     echo "  command=\"rrsync -ro /extra/games\",restrict $(cat ~/.ssh/brick-roms.pub)"
 fi
 
+# Movies and shows (brick-videos, brick_retro/videos.py): presto's picks for
+# brick9000 play off brick2000's movies share, mounted read-only on first use.
+# nofail and the automount's timeout: the board never waits on the share.
+dpkg -s cifs-utils >/dev/null 2>&1 || sudo apt-get install -y cifs-utils
+movies_share=$(sed -n 's/^BRICK_MOVIES_SHARE=//p' ~/.config/brick-retro/env | tail -n 1)
+movies_share=${movies_share:-//brick2000/movies}
+movies_cred=/etc/brick-media-shares/media.cred
+movies_line="$movies_share /mnt/brick/movies cifs ro,credentials=$movies_cred,uid=$(id -u),gid=$(id -g),file_mode=0444,dir_mode=0555,vers=3.1.1,iocharset=utf8,noauto,x-systemd.automount,x-systemd.idle-timeout=10min,x-systemd.mount-timeout=15s,_netdev,nofail 0 0"
+sudo mkdir -p /mnt/brick/movies
+if ! grep -qxF "$movies_line" /etc/fstab; then
+    sudo sed -i '\| /mnt/brick/movies cifs |d; /^# brick-videos:/d' /etc/fstab
+    printf '# brick-videos: the movies share (brick-cicd-config brick9000/install.sh)\n%s\n' "$movies_line" |
+        sudo tee -a /etc/fstab >/dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl restart mnt-brick-movies.automount || true
+fi
+if ! sudo test -f "$movies_cred"; then
+    echo "For the movies share: put the read-only media account in $movies_cred (root, mode 600):"
+    echo "  username=media"
+    echo "  password=<the media account's password>"
+fi
+
 # Jenkins moved to the cluster (jenkins/, README "Jenkins"). Retire the
 # container it used to run in here; its home and secrets stay, as backups.
 if docker container inspect brick-jenkins >/dev/null 2>&1; then
@@ -180,7 +203,7 @@ systemctl --user enable --now mdns-alias@jenkins mdns-alias@brick-status
 systemctl --user enable brick-plasma brick-status
 systemctl --user restart brick-plasma brick-status
 systemctl --user enable --now brick-deploy.timer brick-mirror.timer brick-roms.timer brick-saves.timer \
-    brick-wifi-watchdog.timer
+    brick-wifi-watchdog.timer brick-videos.timer
 systemctl --user enable brick-retro
 systemctl --user restart brick-retro
 echo "brick-status installed. Log out and back in (or reboot) to start the kiosk."

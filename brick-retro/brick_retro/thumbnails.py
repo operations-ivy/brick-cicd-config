@@ -25,7 +25,7 @@ from pathlib import Path
 
 import structlog
 
-from . import games
+from . import games, videos
 
 log = structlog.get_logger(__name__)
 
@@ -239,6 +239,8 @@ def sync(playlist_dir: Path, thumb_dir: Path, state: Path, rate: float = 1_000_0
     counts: dict[str, dict[str, int]] = {}
     for lpl in sorted(playlist_dir.glob("*.lpl")):
         system = lpl.stem
+        if system in videos.PLAYLISTS:  # movies and shows: not on libretro's thumbnail server
+            continue
         games = playlist_games(lpl)
         have = counts.setdefault(system, {"games": len(games)})
         for kind in KINDS:
