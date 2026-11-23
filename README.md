@@ -867,7 +867,10 @@ also wouldn't fit beside the rest on the SD card.
   (4 hours while a video plays; see Movies and TV).
 - **The board:** while RetroArch is open, brick-status keeps the screen on
   whatever the quiet schedule says (brick-retro's flag file). The cabinet's
-  own buttons stay brick-status's.
+  own buttons stay brick-status's. And the kiosk stops drawing the board
+  underneath (`/api/state`'s `covered`): the CRT's streams close, so cmatrix
+  stops, and every animation pauses until RetroArch closes. Hidden, it cost
+  about half a core on a fanless Pi 4 already hot from the game or film.
 - **ROMs:** `brick-roms.timer` copies each system's folder daily from
   brick2000's `/extra/games/roms` (`brick9000/sync-roms`), plus the BIOS
   files from `/extra/games/BIOS/system` to `~/games/system`, so games work

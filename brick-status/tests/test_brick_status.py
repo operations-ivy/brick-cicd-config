@@ -644,7 +644,10 @@ class MirrorTest(unittest.TestCase):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        settings = Settings(http_host="127.0.0.1", http_port=port)
+        flags = tempfile.TemporaryDirectory()
+        self.addCleanup(flags.cleanup)
+        self.retro_flag = os.path.join(flags.name, "brick-retro.playing")
+        settings = Settings(http_host="127.0.0.1", http_port=port, retro_flag=self.retro_flag)
         self.board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
         status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
         threading.Thread(target=web.serve, args=(settings, self.board, status), daemon=True).start()
@@ -663,6 +666,14 @@ class MirrorTest(unittest.TestCase):
         self.assertFalse(crt_full())
         self.board.toggle_crt(pytime.time())
         self.assertTrue(crt_full())
+
+    def test_state_says_whether_retroarch_covers_the_board(self):
+        def covered():
+            with urllib.request.urlopen(self.base + "/api/state", timeout=2) as r:
+                return json.load(r)["covered"]
+        self.assertFalse(covered())
+        Path(self.retro_flag).touch()
+        self.assertTrue(covered())
 
     def get(self, path, proxied):
         headers = {"X-Forwarded-For": "192.168.1.50"} if proxied else {}

@@ -262,6 +262,8 @@
   body.party .crt .glass { animation: party-hue 1.2s linear infinite; }
   @keyframes party-hue { from { filter: hue-rotate(0deg) saturate(3); } to { filter: hue-rotate(360deg) saturate(3); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  /* RetroArch covers the board: nothing on it moves (render() stops the CRT too). */
+  body.covered *, body.covered *::after { animation-play-state: paused !important; }
 </style>
 </head>
 <body>
@@ -661,7 +663,19 @@ function setState(id, state) {
   for (const s of SEVERITY) el.classList.toggle(s, s === state);
 }
 
+// While RetroArch is open over it (s.covered), the kiosk draws nothing: the
+// CRT's streams close (its programs stop) and the markup stays as it was. A
+// game or a film decoded in software already runs a fanless Pi 4 hot; the
+// hidden board cost half a core on top (the user, 2026-11-23).
+function covered(s) {
+  const on = Boolean(s.covered) && !MIRROR;
+  document.body.classList.toggle("covered", on);
+  if (on) { matrix.stop(); matrixLog.stop(); }
+  return on;
+}
+
 function render(s) {
+  if (covered(s)) return;
   if (s.party_name) { partyName = s.party_name; document.getElementById("party-name").textContent = partyName; }
   if (s.party > 0) partyShow(s.party);
   const g = s.groups || {};
