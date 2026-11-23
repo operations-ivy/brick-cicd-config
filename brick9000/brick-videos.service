@@ -1,0 +1,13 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Rewrite the Movies and TV playlists from presto's picks (brick_retro videos)
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/brick-retro/env
+Environment=LOG_FORMAT=json
+WorkingDirectory=%h/brick-cicd-config/brick-retro
+ExecStart=/usr/bin/python3 -m brick_retro videos
+# How the run went, for Prometheus (brick_status/jobs.py); '-': never fails the run.
+ExecStopPost=-/usr/bin/env PYTHONPATH=%h/brick-cicd-config/brick-status python3 -m brick_status.jobs brick-videos

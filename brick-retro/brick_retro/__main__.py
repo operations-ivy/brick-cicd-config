@@ -3,12 +3,14 @@
     python3 -m brick_retro            # the daemon: launches RetroArch for a pad
     python3 -m brick_retro games      # rewrite the playlists, import old saves
     python3 -m brick_retro thumbnails # fetch missing box art, titles and screenshots
+    python3 -m brick_retro videos     # the Movies and TV playlists, from presto's picks
 
 Turning a paired controller on opens RetroArch's game list over the board;
 quitting RetroArch, or holding Home for 3 seconds, shows the board again.
 Home held + D-pad up/down sets the volume. While RetroArch runs, brick-status keeps the screen on (the flag file).
 """
 
+import http.client
 import os
 import select
 import subprocess
@@ -19,7 +21,7 @@ from pathlib import Path
 
 import structlog
 
-from . import games, logs, thumbnails
+from . import games, logs, thumbnails, videos
 from . import retro_metrics as rm
 from .pads import ABS_HAT0Y, Launcher, Volume, is_pad
 
@@ -48,6 +50,9 @@ APPEND_CONFIG = env("CONFIG", str(Path(__file__).resolve().parents[2] / "brick90
 # A CRT look for every console: crt-pi, a Raspberry Pi friendly CRT shader
 # (brick9000/retroarch/shaders, vendored). BRICK_RETRO_SHADER= (empty) turns it off.
 SHADER = env("SHADER", str(Path(__file__).resolve().parents[2] / "brick9000/retroarch/shaders/crt-pi.glslp"))
+# brick9000's movies and shows (videos.py): presto's list, the share they play from.
+VIDEOS_URL = env("VIDEOS_URL", "https://presto.brick.nozdormu.cloud/api/media/sync?device=brick9000")
+MOVIES_MOUNT = Path(env("MOVIES_MOUNT", "/mnt/brick/movies"))
 FLAG = Path(env("FLAG", os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "brick-retro.playing")))
 
 
@@ -197,6 +202,16 @@ def main() -> None:
                                  rate=float(env("THUMB_RATE", "1000000")))
         rm.write_thumbnails(counts)
         log.info("thumbnails synced", thumbnails=counts)
+        return
+    if sys.argv[1:] == ["videos"]:
+        try:
+            counts = videos.sync(VIDEOS_URL, MOVIES_MOUNT, PLAYLIST_DIR)
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            # presto or brick2000 down: the old playlists still play once it's back,
+            # and a failed unit would turn the board red over a cluster outage.
+            log.warning("videos: presto's list unavailable, playlists unchanged", error=str(e))
+            return
+        log.info("video playlists written", videos=counts)
         return
     daemon()
 

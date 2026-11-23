@@ -1,0 +1,10 @@
+# systemd user unit: installed to ~/.config/systemd/user/ by install.sh.
+[Unit]
+Description=Follow presto's picks for brick9000 every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
