@@ -30,6 +30,7 @@ from datetime import date, datetime, time, timedelta
 import structlog
 
 IDLE, ACTIVE, QUIET = "idle", "active", "quiet"
+STATE_KEYS = ("asleep_until", "awake_until")  # what state_path holds
 
 log = structlog.get_logger(__name__)
 
@@ -154,14 +155,15 @@ class Board:
         try:
             with open(self.state_path) as f:
                 data = json.load(f)
-            items = data.items()
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError, AttributeError) as e:
+        except (OSError, ValueError) as e:
             log.warning("board state unreadable, ignored", path=self.state_path, error=str(e))
             return {}
-        return {key: float(value) for key, value in items
-                if key in ("asleep_until", "awake_until") and isinstance(value, (int, float))}
+        if not isinstance(data, dict):
+            log.warning("board state unreadable, ignored", path=self.state_path, error="not an object")
+            return {}
+        return {key: float(data[key]) for key in STATE_KEYS if isinstance(data.get(key), (int, float))}
 
     def _save_state(self) -> None:
         """Best effort: a lost sleep or wake only means the schedule decides again."""
@@ -171,7 +173,7 @@ class Board:
             os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
             tmp = self.state_path + ".tmp"
             with open(tmp, "w") as f:
-                json.dump({"asleep_until": self._asleep_until, "awake_until": self._awake_until}, f)
+                json.dump(dict(zip(STATE_KEYS, (self._asleep_until, self._awake_until))), f)
             os.replace(tmp, self.state_path)
         except OSError as e:
             log.warning("board state not saved", path=self.state_path, error=str(e))

@@ -23,6 +23,11 @@ from .lamp import LONG, SINGLE, Gestures
 log = structlog.get_logger(__name__)
 
 
+def _when(ts: float | None) -> str | None:
+    """A timestamp for the log, as "Sat 15:00"."""
+    return time.strftime("%a %H:%M", time.localtime(ts)) if ts else None
+
+
 class SideButton:
     def __init__(self, board: Board, long_wake_seconds: float, long_seconds: float = 0.8,
                  changed: Callable[[], None] = lambda: None,
@@ -40,17 +45,15 @@ class SideButton:
     def press(self) -> None:
         now = self.wall()
         with self._lock:
-            if self.board.asleep(now):
-                self._waking = True
-                did = self.board.side_button(now)
-            else:
-                self._waking = False
+            self._waking = self.board.asleep(now)
+            if not self._waking:
                 self.gestures.press(self.clock())
                 return
-        if did == "awake":
-            log.info("side button", did="awake", minutes=self.board.wake_seconds // 60)
-        else:
-            log.info("side button", did="on until the schedule turns it off")
+            did = self.board.side_button(now)
+            if did == "awake":
+                log.info("side button", did="awake", minutes=self.board.wake_seconds // 60)
+            else:
+                log.info("side button", did="on until the schedule turns it off")
         self.changed()
 
     def release(self) -> None:
@@ -68,13 +71,10 @@ class SideButton:
             now = self.wall()
             if gesture == LONG:
                 until = self.board.stay_awake(now, self.long_wake_seconds)
-                log.info("side button", did="stay awake",
-                         until=time.strftime("%a %H:%M", time.localtime(until)))
+                log.info("side button", did="stay awake", until=_when(until))
             elif gesture == SINGLE:
                 did = self.board.side_button(now)
-                until = self.board.asleep_until(now)
-                log.info("side button", did=did,
-                         until=time.strftime("%a %H:%M", time.localtime(until)) if until else None)
+                log.info("side button", did=did, until=_when(self.board.asleep_until(now)))
         self.changed()
 
     def run(self, every: float = 0.02) -> None:

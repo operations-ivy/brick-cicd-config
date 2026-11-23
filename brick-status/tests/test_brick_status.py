@@ -2403,7 +2403,8 @@ class SideButtonTest(unittest.TestCase):
     def test_a_hold_in_the_on_hours_keeps_it_on_past_the_schedule(self):
         self.now = ts(20)
         self.hold(1)
-        self.assertEqual(self.board.mode(datetime(2026, 9, 27, 7, 59).timestamp()), IDLE)
+        sunday = datetime.fromtimestamp(ts(0)).replace(day=27, hour=7, minute=59).timestamp()
+        self.assertEqual(self.board.mode(sunday), IDLE)  # 12 hours from 8 PM, past 00:00-06:00
 
 
 class LampGesturesTest(unittest.TestCase):
