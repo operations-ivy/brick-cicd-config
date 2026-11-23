@@ -15,7 +15,9 @@ The side button toggles the board:
 - off, put to sleep during the schedule's on hours: on again, until the
   schedule turns it off.
 - off otherwise (quiet hours): on for `wake_seconds`.
-A sleep is saved to `state_path`, so a restart (a deploy) doesn't end it.
+Held while the board is on, it keeps it on for longer instead (stay_awake;
+side.SideButton tells a hold from a press).
+A sleep or a wake is saved to `state_path`, so a restart (a deploy) doesn't end it.
 """
 
 import json
@@ -28,6 +30,7 @@ from datetime import date, datetime, time, timedelta
 import structlog
 
 IDLE, ACTIVE, QUIET = "idle", "active", "quiet"
+STATE_KEYS = ("asleep_until", "awake_until")  # what state_path holds
 
 log = structlog.get_logger(__name__)
 
@@ -141,32 +144,36 @@ class Board:
         self._view = 0
         self._crt_full = False  # only the CRT button changes it: idle and quiet don't
         self._last_press: float | None = None
-        self._awake_until: float | None = None
-        self._asleep_until: float | None = self._load_sleep()
+        state = self._load_state()
+        self._asleep_until: float | None = state.get("asleep_until")
+        self._awake_until: float | None = state.get("awake_until")
         self._lock = threading.Lock()
 
-    def _load_sleep(self) -> float | None:
+    def _load_state(self) -> dict[str, float]:
         if not self.state_path:
-            return None
+            return {}
         try:
             with open(self.state_path) as f:
-                value = json.load(f).get("asleep_until")
+                data = json.load(f)
         except FileNotFoundError:
-            return None
-        except (OSError, ValueError, AttributeError) as e:
+            return {}
+        except (OSError, ValueError) as e:
             log.warning("board state unreadable, ignored", path=self.state_path, error=str(e))
-            return None
-        return float(value) if isinstance(value, (int, float)) else None
+            return {}
+        if not isinstance(data, dict):
+            log.warning("board state unreadable, ignored", path=self.state_path, error="not an object")
+            return {}
+        return {key: float(data[key]) for key in STATE_KEYS if isinstance(data.get(key), (int, float))}
 
-    def _save_sleep(self) -> None:
-        """Best effort: a lost sleep only means the board comes back on."""
+    def _save_state(self) -> None:
+        """Best effort: a lost sleep or wake only means the schedule decides again."""
         if not self.state_path:
             return
         try:
             os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
             tmp = self.state_path + ".tmp"
             with open(tmp, "w") as f:
-                json.dump({"asleep_until": self._asleep_until}, f)
+                json.dump(dict(zip(STATE_KEYS, (self._asleep_until, self._awake_until))), f)
             os.replace(tmp, self.state_path)
         except OSError as e:
             log.warning("board state not saved", path=self.state_path, error=str(e))
@@ -202,16 +209,31 @@ class Board:
             if self._asleep(now):
                 slept = self._asleep_until is not None and now < self._asleep_until
                 self._asleep_until = None
-                self._save_sleep()
                 if slept and not self._quiet_at(now):
+                    self._save_state()
                     return "on"
                 self._awake_until = now + self.wake_seconds
+                self._save_state()
                 return "awake"
             self._asleep_until = self.next_on(now)
-            self._save_sleep()
             self._awake_until = None
+            self._save_state()
             self._last_press = None  # a recent press would keep it active
             return "asleep"
+
+    def asleep(self, now: float) -> bool:
+        """Off: put to sleep, or quiet and not woken."""
+        with self._lock:
+            return self._asleep(now)
+
+    def stay_awake(self, now: float, seconds: float) -> float:
+        """The side button held: on for `seconds` from now, whatever the schedule
+        (never shortening a longer wake). Returns when it ends."""
+        with self._lock:
+            self._asleep_until = None
+            self._awake_until = max(self._awake_until or 0.0, now + seconds)
+            self._save_state()
+            return self._awake_until
 
     def asleep_until(self, now: float) -> float | None:
         """When a side-button sleep ends, while one is keeping the board off."""

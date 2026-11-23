@@ -19,7 +19,7 @@ import structlog
 
 from . import board_metrics as bm
 from . import (check, checks, host, lamp, lights, logs, night_shift, notify, party, party_sound, shipped,
-               since, units, web)
+               side, since, units, web)
 from .board import ACTIVE, QUIET, Board
 from .config import (BUTTON_ACTIONS, BUTTON_KEYS, CRT_BUTTON, KEY_CHECK, KEY_CHECK_SIDE, KEY_LAMP, KEY_LEFT,
                      KEY_PARTY,
@@ -199,9 +199,14 @@ def main() -> None:
         lamp.Lamp(lamp_config, home_assistant),
         lamp.Gestures(lamp_config.double_seconds, lamp_config.long_seconds), lamp_answered)
 
+    side_button = side.SideButton(board, settings.long_wake_seconds, settings.side_long_seconds,
+                                  changed=wake.set)
+
     def on_release(code: int) -> None:
         if code == KEY_LAMP:
             lamp_button.release()
+        elif code == KEY_WAKE:
+            side_button.release()
 
     def on_key(code: int) -> None:
         now = time.time()
@@ -223,14 +228,7 @@ def main() -> None:
             if os.path.exists(settings.retro_flag):
                 log.info("side button", did="ignored", reason="a game is open")
             else:
-                did = board.side_button(now)
-                if did == "asleep":
-                    log.info("side button", did="asleep",
-                             until=time.strftime("%a %H:%M", time.localtime(board.asleep_until(now))))
-                elif did == "awake":
-                    log.info("side button", did="awake", minutes=settings.wake_seconds // 60)
-                else:
-                    log.info("side button", did="on until the schedule turns it off")
+                side_button.press()
         elif code in (KEY_CHECK, KEY_CHECK_SIDE):  # either, twice: one DoublePress for both
             if board.mode(now) != QUIET and not os.path.exists(settings.retro_flag):
                 board.wake(now)
@@ -261,6 +259,7 @@ def main() -> None:
                      args=(settings.input_device_name, on_key, on_release, {KEY_LAMP}),
                      daemon=True).start()
     threading.Thread(target=lamp_button.run, daemon=True).start()
+    threading.Thread(target=side_button.run, daemon=True).start()
     threading.Thread(target=lamp_watch.run, daemon=True).start()
     threading.Thread(target=web.serve, args=(settings, board, status, lamp_watch, show),
                      daemon=True).start()
