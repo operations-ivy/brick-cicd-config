@@ -59,9 +59,6 @@ class Maintenance(unittest.TestCase):
         self.assertIn("no maintenance windows", err.getvalue())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class EitherPanel(unittest.TestCase):
     """brick1982 is up with either panel on it, all of that panel's units."""
@@ -85,3 +82,7 @@ class EitherPanel(unittest.TestCase):
     def test_half_a_panel_shows_what_is_down(self):
         got = self.units({"lcars-kiosk"})
         self.assertEqual([(u, s) for _, u, s in got], [("lcars-kiosk", "active"), ("lcars-deploy.timer", "inactive")])
+
+
+if __name__ == "__main__":
+    unittest.main()

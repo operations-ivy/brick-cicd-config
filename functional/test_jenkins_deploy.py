@@ -25,9 +25,9 @@ class StartDeploy(unittest.TestCase):
             "jenkins-gate": f'exec python3 {ROOT}/jenkins/gate/jenkins_gate.py "$@"\n',
             "systemctl": f'echo "systemctl $*" >> {self.log}\n',
             "git": ('if [ "$1" = ls-remote ]; then\n'
-                    '  case "$4 $5" in */brick-cicd-config\ main|*/brick-cicd-config\ feature/radar) exit 0 ;;\n'
-                    '    */rpi_lcars\ master|*/rpi_lcars\ ha-panel) exit 0 ;;\n'
-                    '    */brick-panel\ main|*/brick-panel\ calendar) exit 0 ;; *) exit 2 ;; esac\n'
+                    '  case "$4 $5" in */brick-cicd-config\\ main|*/brick-cicd-config\\ feature/radar) exit 0 ;;\n'
+                    '    */rpi_lcars\\ master|*/rpi_lcars\\ ha-panel) exit 0 ;;\n'
+                    '    */brick-panel\\ main|*/brick-panel\\ calendar) exit 0 ;; *) exit 2 ;; esac\n'
                     'fi\nexec /usr/bin/git "$@"\n'),
         })
 
@@ -89,10 +89,6 @@ class StartDeploy(unittest.TestCase):
         # A brick-cicd-config branch isn't an rpi_lcars one.
         self.assertNotEqual(self.start_lcars("feature/radar").returncode, 0)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_the_neon_panels_deploy(self):
         """deploy-brick-panel: brick-panel's variable and unit, main by default."""
         env = self.home / ".config/brick-panel/env"
@@ -105,3 +101,7 @@ if __name__ == "__main__":
         self.assertEqual(self.start_panel("").returncode, 0)
         self.assertEqual(env.read_text(), "BRICK_PANEL_DEPLOY_BRANCH=main\n")
         self.assertNotEqual(self.start_panel("feature/radar").returncode, 0)  # not a brick-panel branch
+
+
+if __name__ == "__main__":
+    unittest.main()
