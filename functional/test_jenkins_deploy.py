@@ -25,8 +25,9 @@ class StartDeploy(unittest.TestCase):
             "jenkins-gate": f'exec python3 {ROOT}/jenkins/gate/jenkins_gate.py "$@"\n',
             "systemctl": f'echo "systemctl $*" >> {self.log}\n',
             "git": ('if [ "$1" = ls-remote ]; then\n'
-                    '  case "$4 $5" in */brick-cicd-config\ main|*/brick-cicd-config\ feature/radar) exit 0 ;;\n'
-                    '    */rpi_lcars\ master|*/rpi_lcars\ ha-panel) exit 0 ;; *) exit 2 ;; esac\n'
+                    '  case "$4 $5" in */brick-cicd-config\\ main|*/brick-cicd-config\\ feature/radar) exit 0 ;;\n'
+                    '    */rpi_lcars\\ master|*/rpi_lcars\\ ha-panel) exit 0 ;;\n'
+                    '    */brick-panel\\ main|*/brick-panel\\ calendar) exit 0 ;; *) exit 2 ;; esac\n'
                     'fi\nexec /usr/bin/git "$@"\n'),
         })
 
@@ -40,6 +41,11 @@ class StartDeploy(unittest.TestCase):
 
     def start_lcars(self, branch: str) -> subprocess.CompletedProcess:
         script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick1982 "$1" rpi_lcars master'
+        return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
+                              env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
+
+    def start_panel(self, branch: str) -> subprocess.CompletedProcess:
+        script = f'. {ROOT}/jenkins/bin/lib.sh; start_deploy brick1982 "$1" brick-panel main'
         return subprocess.run(["sh", "-c", script, "sh", branch], capture_output=True, text=True,
                               env={**os.environ, "PATH": self.path, "JENKINS_HOME": ""})
 
@@ -82,6 +88,19 @@ class StartDeploy(unittest.TestCase):
         self.assertIn("LCARS_DEPLOY_BRANCH=master", lcars.read_text())
         # A brick-cicd-config branch isn't an rpi_lcars one.
         self.assertNotEqual(self.start_lcars("feature/radar").returncode, 0)
+
+    def test_the_neon_panels_deploy(self):
+        """deploy-brick-panel: brick-panel's variable and unit, main by default."""
+        env = self.home / ".config/brick-panel/env"
+        env.parent.mkdir(parents=True)
+        result = self.start_panel("calendar")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(env.read_text(), "BRICK_PANEL_DEPLOY_BRANCH=calendar\n")
+        self.assertIn("systemctl --user start --no-block brick-panel-deploy.service", self.log.read_text())
+        self.assertIn("brick-panel-deploy.service -f", result.stdout)
+        self.assertEqual(self.start_panel("").returncode, 0)
+        self.assertEqual(env.read_text(), "BRICK_PANEL_DEPLOY_BRANCH=main\n")
+        self.assertNotEqual(self.start_panel("feature/radar").returncode, 0)  # not a brick-panel branch
 
 
 if __name__ == "__main__":

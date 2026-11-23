@@ -131,6 +131,14 @@ class Run(unittest.TestCase):
         self.assertEqual((self.tmp / ".config/lcars/env").read_text(), "LCARS_DEPLOY_BRANCH=master\n")
         self.assertIn("lcars-deploy.service", self.log.read_text())
 
+    def test_deploy_the_neon_panel(self):
+        env = self.tmp / ".config/brick-panel/env"
+        env.parent.mkdir(parents=True)
+        env.write_text("BRICK_PANEL_NAMES=A,B,C\n")  # the server's own lines stay
+        self.assertEqual(self.gate("deploy", "brick-panel", "calendar-shopping-night").returncode, 0)
+        self.assertEqual(env.read_text(), "BRICK_PANEL_NAMES=A,B,C\nBRICK_PANEL_DEPLOY_BRANCH=calendar-shopping-night\n")
+        self.assertEqual(self.log.read_text(), "systemctl --user start --no-block brick-panel-deploy.service\n")
+
     def test_deploy_keeps_the_env_files_mode(self):
         env = self.tmp / ".config/lcars/env"
         env.parent.mkdir(parents=True)

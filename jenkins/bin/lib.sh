@@ -8,7 +8,8 @@ BRICK_SERVER=${BRICK_SERVER:-brick420}
 # front door's now (brick-k8s-config front-door/).
 # brick9000, the status board.
 BRICK9000=${BRICK9000:-brick9000}
-# brick1982, the touchscreen (the LCARS panel, operations-ivy/rpi_lcars).
+# brick1982, the touchscreen (the neon panel, operations-ivy/brick-panel, or
+# LCARS, operations-ivy/rpi_lcars).
 BRICK1982=${BRICK1982:-brick1982}
 # The local clones mirror-repos keeps: in Jenkins' home, or wherever the
 # caller says (brick9000's brick-mirror.timer keeps its own).
@@ -57,7 +58,8 @@ wait_for_job() {  # <namespace> <job>
 
 # Point a host's deploy at a branch and start it: by default brick-cicd-config
 # (brick9000/deploy); rpi_lcars is the LCARS panel's, master by default. An
-# empty branch means the default branch. On the host it's jenkins-gate's
+# empty branch means the default branch; brick-panel is brick1982's neon
+# panel, main by default. On the host it's jenkins-gate's
 # `deploy` (jenkins/gate: the only thing Jenkins' key may run there), which
 # knows each repo's env file, variable and unit.
 start_deploy() {  # <host> <branch> [repo] [default branch]
@@ -73,6 +75,7 @@ start_deploy() {  # <host> <branch> [repo] [default branch]
     ssh "$1" jenkins-gate deploy "$repo" "$branch"
     case $repo in
         rpi_lcars) unit=lcars-deploy.service ;;
+        brick-panel) unit=brick-panel-deploy.service ;;
         *) unit=brick-deploy.service ;;
     esac
     echo "Deploying $repo $branch; follow it on the host with: journalctl _SYSTEMD_USER_UNIT=$unit -f"

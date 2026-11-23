@@ -43,12 +43,12 @@ class Maintenance(unittest.TestCase):
     def test_a_down_host_fails(self):
         rc, said = self.run_smoke([])
         self.assertEqual(rc, 1)
-        self.assertIn("DOWN brick1982 lcars-kiosk (unreachable)", said)
+        self.assertIn("DOWN brick1982 brick-panel-kiosk (unreachable)", said)
 
     def test_a_host_in_maintenance_is_reported_not_failed(self):
         rc, said = self.run_smoke([({"node": "brick1982"}, 1.0)])
         self.assertEqual(rc, 0)
-        self.assertIn("mnt  brick1982 lcars-kiosk (unreachable)", said)
+        self.assertIn("mnt  brick1982 brick-panel-kiosk (unreachable)", said)
         self.assertIn("all up", said)
 
     def test_no_prometheus_excuses_nothing(self):
@@ -57,6 +57,31 @@ class Maintenance(unittest.TestCase):
                 contextlib.redirect_stderr(err):
             self.assertEqual(smoke.in_maintenance(), set())
         self.assertIn("no maintenance windows", err.getvalue())
+
+
+
+class EitherPanel(unittest.TestCase):
+    """brick1982 is up with either panel on it, all of that panel's units."""
+
+    def units(self, active):
+        def ssh(host, command):
+            jenkins_gate.plan(command.split())
+            return "active" if command.split()[-1] in active else "inactive"
+        with mock.patch.object(smoke, "ssh", ssh):
+            return smoke.host_units("brick1982", smoke.SERVICES["brick1982"][1])
+
+    def test_the_neon_panel(self):
+        got = self.units({"brick-panel-kiosk", "brick-panel", "brick-panel-deploy.timer"})
+        self.assertEqual([(u, s) for _, u, s in got],
+                         [("brick-panel-kiosk", "active"), ("brick-panel", "active"), ("brick-panel-deploy.timer", "active")])
+
+    def test_lcars(self):
+        got = self.units({"lcars-kiosk", "lcars-deploy.timer"})
+        self.assertEqual([(u, s) for _, u, s in got], [("lcars-kiosk", "active"), ("lcars-deploy.timer", "active")])
+
+    def test_half_a_panel_shows_what_is_down(self):
+        got = self.units({"lcars-kiosk"})
+        self.assertEqual([(u, s) for _, u, s in got], [("lcars-kiosk", "active"), ("lcars-deploy.timer", "inactive")])
 
 
 if __name__ == "__main__":

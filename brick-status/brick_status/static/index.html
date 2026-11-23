@@ -309,7 +309,8 @@ const PAD = [["overview", "HOME"], ["cluster", "CLUSTER"], ["nightshift", "NIGHT
 // The Jenkins jobs that are work, not housekeeping: build-branches and
 // maintenance-refresh alone are 2,900 of the week's 3,000 builds (2026-11-07).
 // prune-images (nightly) and chuck-importer (monthly at most) count as housekeeping too.
-const WORK = ["build-image", "check-all", "verify-images", "deploy-brick9000", "deploy-brick1982", "wigle-sync-now"];
+const WORK = ["build-image", "check-all", "verify-images", "deploy-brick9000", "deploy-brick1982", "deploy-brick-panel",
+  "wigle-sync-now"];
 const segs = (n, lit) => Array.from({ length: n }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("");
 const item = (state, name, what, extra = "") =>
   `<div class="item ${state}"><span class="led"></span><span class="name">${esc(name)}${extra}</span>

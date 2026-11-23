@@ -11,7 +11,8 @@ Sources, all cheap and already reachable from brick9000 (no Argo CD login):
   (checks.ARGO_LAST_SYNCS): a merge to brick-k8s-config that changed no image.
   A sync next to a rollout is that rollout, so it's left out.
 - brick9000 itself: its checkout's commit, and when brick9000/deploy moved to
-  it (the reflog). brick1982: the deploy-brick1982 job's successful builds.
+  it (the reflog). brick1982: the deploy-brick1982 (LCARS) and
+  deploy-brick-panel (neon) jobs' successful builds.
 
 StatefulSets (Postgres, Jenkins) and brick1982's own 2-hourly timer aren't
 covered: neither leaves a timestamp these sources can read.
@@ -37,7 +38,8 @@ POD_IMAGES = ('kube_pod_container_info * on (namespace, pod) group_left (owner_n
 TOGETHER_SECONDS = 15 * 60
 # An Argo CD sync this close to a rollout is the rollout's.
 SYNC_NEAR_SECONDS = 10 * 60
-DEVICE_JOBS = {"deploy-brick1982": "brick1982"}
+# brick1982 runs one of two panels; each has its own deploy job.
+DEVICE_JOBS = {"deploy-brick1982": "brick1982 lcars", "deploy-brick-panel": "brick1982 neon"}
 LIMIT = 5
 REPO = Path(__file__).resolve().parents[2]
 
