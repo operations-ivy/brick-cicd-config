@@ -10,6 +10,7 @@ quitting RetroArch, or holding Home for 3 seconds, shows the board again.
 Home held + D-pad up/down sets the volume. While RetroArch runs, brick-status keeps the screen on (the flag file).
 """
 
+import http.client
 import os
 import select
 import subprocess
@@ -205,7 +206,7 @@ def main() -> None:
     if sys.argv[1:] == ["videos"]:
         try:
             counts = videos.sync(VIDEOS_URL, MOVIES_MOUNT, PLAYLIST_DIR)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             # presto or brick2000 down: the old playlists still play once it's back,
             # and a failed unit would turn the board red over a cluster outage.
             log.warning("videos: presto's list unavailable, playlists unchanged", error=str(e))

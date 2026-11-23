@@ -27,6 +27,7 @@ SORT_OFF = 2  # PLAYLIST_SORT_MODE_OFF: keep each show's episodes in order
 
 
 def fetch(url: str, timeout: float = 20) -> dict:
+    """presto's manifest; raises OSError (unreachable, timeout) or ValueError (not JSON)."""
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.load(r)
 
@@ -35,10 +36,10 @@ def entry(path: str) -> tuple[str, str] | None:
     """Which playlist a manifest path goes in, and its label: 480p/movies/X.mp4 is
     Movies "X"; 480p/tv/Show/Show - 01.mp4 is TV "Show - 01" (the show's name
     put in front when the episode's own name lacks it)."""
-    parts = PurePosixPath(path).parts
+    p = PurePosixPath(path)
+    parts, stem = p.parts, p.stem
     if len(parts) < 3:
         return None
-    stem = PurePosixPath(path).stem
     if parts[1] == "movies":
         return MOVIES, stem
     if parts[1] == "tv" and len(parts) >= 4:
@@ -90,11 +91,12 @@ def write(docs: dict[str, dict], playlist_dir: Path) -> dict[str, int]:
             target.unlink(missing_ok=True)
             continue
         tmp = target.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc, indent=2))
+        tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(target)
     return counts
 
 
-def sync(url: str, mount: Path, playlist_dir: Path) -> dict[str, int]:
-    """Fetch brick9000's list from presto and rewrite the playlists."""
-    return write(playlists(fetch(url), mount), playlist_dir)
+def sync(url: str, mount: Path, playlist_dir: Path, fetch_fn=fetch) -> dict[str, int]:
+    """Fetch brick9000's list from presto and rewrite the playlists. If the fetch
+    raises, nothing is written: the old playlists stay."""
+    return write(playlists(fetch_fn(url), mount), playlist_dir)

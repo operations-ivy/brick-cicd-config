@@ -670,10 +670,24 @@ class VideosTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             (d / "Movies.lpl").write_text("old")
-            counts = videos.write(videos.playlists({"files": self.MANIFEST["files"][:1]}, Path("/m")), d)
+            one = {"files": [{"share": "movies", "path": "480p/tv/Kite/Kite - 02.mp4", "bytes": 1}]}
+            counts = videos.write(videos.playlists(one, Path("/m")), d)
             self.assertEqual(counts, {"Movies": 0, "TV": 1})
             self.assertFalse((d / "Movies.lpl").exists())
-            self.assertEqual(json.loads((d / "TV.lpl").read_text())["items"][0]["label"], "Kite - 02")
+            self.assertEqual(json.loads((d / "TV.lpl").read_text(encoding="utf-8"))["items"][0]["label"], "Kite - 02")
+
+    def test_presto_unreachable_leaves_the_playlists(self):
+        def down(url):
+            raise OSError("no route to host")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "TV.lpl").write_text("old")
+            with self.assertRaises(OSError):
+                videos.sync("http://presto/x", Path("/m"), d, fetch_fn=down)
+            self.assertEqual((d / "TV.lpl").read_text(), "old")
+            counts = videos.sync("http://presto/x", Path("/m"), d, fetch_fn=lambda url: self.MANIFEST)
+            self.assertEqual(counts, {"Movies": 1, "TV": 4})
 
     def test_thumbnails_skip_the_video_playlists(self):
         with tempfile.TemporaryDirectory() as tmp:
