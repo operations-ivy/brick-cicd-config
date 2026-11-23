@@ -5,7 +5,6 @@ import base64
 import ipaddress
 import json
 import mimetypes
-import os
 import subprocess
 import time
 from contextlib import closing
@@ -83,7 +82,7 @@ def serve(settings, board, status, lamp_watch: "LampWatch | None" = None, show: 
                     "crt_full": board.crt_full,
                     # RetroArch is open over the board (brick-retro's flag): the kiosk
                     # stops drawing it, cmatrix included, until it closes (heat).
-                    "covered": os.path.exists(settings.retro_flag),
+                    "covered": Path(settings.retro_flag).exists(),
                     "activity": activity.running(),
                     "lamp": lamp_watch.get() if lamp_watch is not None else None,
                     # Seconds of the party button's show left (party.py); 0 when none.

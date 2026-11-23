@@ -644,10 +644,8 @@ class MirrorTest(unittest.TestCase):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        flags = tempfile.TemporaryDirectory()
-        self.addCleanup(flags.cleanup)
-        self.retro_flag = os.path.join(flags.name, "brick-retro.playing")
-        settings = Settings(http_host="127.0.0.1", http_port=port, retro_flag=self.retro_flag)
+        self.retro_flag = Path(self.enterContext(tempfile.TemporaryDirectory())) / "brick-retro.playing"
+        settings = Settings(http_host="127.0.0.1", http_port=port, retro_flag=str(self.retro_flag))
         self.board = Board(VIEWS, active_seconds=120, quiet=QuietSchedule.parse("none"))
         status = type("S", (), {"updated": 0.0, "get": lambda self: checks.summarize([])})()
         threading.Thread(target=web.serve, args=(settings, self.board, status), daemon=True).start()
@@ -672,7 +670,7 @@ class MirrorTest(unittest.TestCase):
             with urllib.request.urlopen(self.base + "/api/state", timeout=2) as r:
                 return json.load(r)["covered"]
         self.assertFalse(covered())
-        Path(self.retro_flag).touch()
+        self.retro_flag.touch()
         self.assertTrue(covered())
 
     def get(self, path, proxied):
