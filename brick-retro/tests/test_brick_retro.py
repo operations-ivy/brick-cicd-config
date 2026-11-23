@@ -1,7 +1,6 @@
 import dataclasses
 import json
 import struct
-import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -105,8 +104,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((ra.up, ra.stops), (False, 1))
 
     def test_a_video_outlasts_the_pad_sleeping(self):
-        ra, watching = FakeRetroArch(), [True]
-        launcher = ra.launcher(watching=lambda: watching[0], video_exit_seconds=4 * 3600)
+        ra = FakeRetroArch()
+        launcher = ra.launcher(watching=lambda: True, video_exit_seconds=4 * 3600)
         launcher.tick({"p"}, now=0)
         launcher.tick({"p"}, now=3)
         launcher.tick(set(), now=10)  # the pad sleeps mid-film
@@ -136,8 +135,7 @@ class VideoPlayingTests(unittest.TestCase):
             mount.mkdir()
             fds.mkdir(parents=True)
             (fds / "3").symlink_to(Path(d, "retroarch.log"))
-            pgrep = subprocess.CompletedProcess([], 0, stdout="42\n")
-            with mock.patch.object(brick_main.subprocess, "run", return_value=pgrep):
+            with mock.patch.object(brick_main, "retroarch_pids", return_value=["42"]):
                 self.assertFalse(brick_main.video_playing(mount, proc))
                 (fds / "4").symlink_to(mount / "480p" / "movies" / "Film.mp4")
                 self.assertTrue(brick_main.video_playing(mount, proc))

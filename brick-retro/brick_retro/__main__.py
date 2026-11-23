@@ -76,21 +76,28 @@ def start_retroarch() -> None:
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def retroarch_pids() -> list[str]:
+    return subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True, text=True).stdout.split()
+
+
+def _open_paths(pid_dir: Path):
+    """The paths a process has open (raises OSError if it has gone)."""
+    for fd in (pid_dir / "fd").iterdir():
+        try:
+            yield fd.readlink()
+        except OSError:
+            continue  # closed meanwhile
+
+
 def video_playing(mount: Path = MOVIES_MOUNT, proc: Path = Path("/proc")) -> bool:
     """Whether RetroArch has a file on the movies share open: its video player
     (the builtin ffmpeg core) keeps the film open while it's loaded."""
-    pids = subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True, text=True).stdout.split()
-    for pid in pids:
+    for pid in retroarch_pids():
         try:
-            fds = list((proc / pid / "fd").iterdir())
+            if any(p.is_relative_to(mount) for p in _open_paths(proc / pid)):
+                return True
         except OSError:
-            continue
-        for fd in fds:
-            try:
-                if Path(os.readlink(fd)).is_relative_to(mount):
-                    return True
-            except OSError:
-                continue  # closed meanwhile
+            continue  # it quit meanwhile
     return False
 
 
