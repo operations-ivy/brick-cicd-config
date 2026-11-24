@@ -31,7 +31,10 @@ pprof: false
 playback: false
 
 rtsp: true
-rtspTransports: [tcp, udp]
+# TCP only: VLC tries UDP first and, when that fails, falls back to an RTSP
+# dialect MediaMTX doesn't take ("invalid SETUP path", tried 2026-11-24).
+# Nothing here needs UDP: the snapshots read over TCP.
+rtspTransports: [tcp]
 rtspAddress: :8554
 webrtc: true
 webrtcAddress: :8889
