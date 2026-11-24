@@ -5,7 +5,11 @@
 #   RTSP    rtsp://lidlesseye:8554/cam   (VLC, Home Assistant, the cluster's
 #                                         snapshot CronJob: brick-k8s-config's
 #                                         cameras/)
-#   WebRTC  http://lidlesseye:8889/cam   (a browser, low latency)
+#   WebRTC  http://lidlesseye:8889/cam   (a browser, low latency; Firefox
+#                                         needs OpenH264, which Debian's
+#                                         Firefox ESR turns off)
+#   HLS     http://lidlesseye:8888/cam   (any browser, ~2 s behind: its
+#                                         normal video player decodes it)
 # The Zero W only encodes: anything that decodes (snapshots, recording,
 # detection) runs on the cluster. Software-decoding 1080p on its one core
 # never kept up (tried 2026-11-24).
@@ -38,9 +42,13 @@ rtspTransports: [tcp]
 rtspAddress: :8554
 webrtc: true
 webrtcAddress: :8889
+# HLS repackages the same H.264 (no encoding): the browser view that needs no
+# WebRTC codec plugin.
+hls: true
+hlsAddress: :8888
+hlsVariant: lowLatency
 # Off: not needed, and each is a listener and memory on a 512 MB Pi.
 rtmp: false
-hls: false
 srt: false
 moq: false
 

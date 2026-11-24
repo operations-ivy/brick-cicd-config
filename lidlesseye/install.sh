@@ -4,7 +4,7 @@
 # ~/brick-cicd-config: sh ~/brick-cicd-config/lidlesseye/install.sh
 #
 # - MediaMTX streams the camera (mediamtx.yml): RTSP on :8554, WebRTC on
-#   :8889, its metrics on :9998. It only encodes, in hardware; the cluster
+#   :8889, HLS on :8888, its metrics on :9998. It only encodes, in hardware; the cluster
 #   takes the snapshots (brick-k8s-config's cameras/).
 # - node-exporter on :9100, scraped by Prometheus like brick1982.
 #

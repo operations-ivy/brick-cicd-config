@@ -18,7 +18,7 @@ shows how that's going.
 | `brick9000` (systemd timer) | `brick-mirror`: offline copies of the brick repos | Material for rebuilding the cluster, kept outside it |
 | cluster (`jenkins` namespace, on brick2000) | Jenkins: maintenance jobs, later builds and tests in agent pods | Nothing it does needs to work while the cluster is down; keeps compiling off brick9000 |
 | `brick1982` (host) | 7" touchscreen: the neon panel (operations-ivy/brick-panel) or LCARS (operations-ivy/rpi_lcars); host tooling from here | Needs the screen; left the cluster 2026-10-14 to become a wall display |
-| `lidlesseye` (host) | The OctoCam (a Pi Zero W and its camera): MediaMTX streams it (`lidlesseye/`: RTSP :8554, WebRTC :8889, metrics :9998) and node-exporter; `sh lidlesseye/install.sh` on the Pi sets it up (it asks for sudo). The cluster takes the snapshots (brick-k8s-config's `cameras/`) | The camera; a Zero W only encodes, in hardware |
+| `lidlesseye` (host) | The OctoCam (a Pi Zero W and its camera): MediaMTX streams it (`lidlesseye/`: RTSP :8554, WebRTC :8889, HLS :8888, metrics :9998) and node-exporter; `sh lidlesseye/install.sh` on the Pi sets it up (it asks for sudo). The cluster takes the snapshots (brick-k8s-config's `cameras/`) | The camera; a Zero W only encodes, in hardware |
 
 ### brick9000 is not a cluster node
 
