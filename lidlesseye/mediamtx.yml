@@ -54,6 +54,10 @@ paths:
     rpiCameraHeight: 1080
     rpiCameraFPS: 15
     rpiCameraBitrate: 2000000
+    # Baseline: Firefox's WebRTC decodes H.264 with Cisco's OpenH264, which
+    # takes only the baseline profile ("codecs not supported by client" with
+    # the encoder's auto choice, 2026-11-24). Every other reader takes it too.
+    rpiCameraH264Profile: baseline
     # A keyframe every 2 s: a reader (a snapshot) starts within 2 s.
     rpiCameraIDRPeriod: 30
     # Flip here if the octopus mount ends up upside down.
