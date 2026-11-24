@@ -1,0 +1,61 @@
+# lidlesseye's camera stream (MediaMTX, installed by install.sh).
+#
+# The Pi Zero W's camera (ov5647) through MediaMTX's own libcamera, encoded by
+# the Pi's hardware H.264 encoder: one stream, `cam`, read over the LAN as
+#   RTSP    rtsp://lidlesseye:8554/cam   (VLC, Home Assistant, the cluster's
+#                                         snapshot CronJob: brick-k8s-config's
+#                                         cameras/)
+#   WebRTC  http://lidlesseye:8889/cam   (a browser, low latency)
+# The Zero W only encodes: anything that decodes (snapshots, recording,
+# detection) runs on the cluster. Software-decoding 1080p on its one core
+# never kept up (tried 2026-11-24).
+
+logLevel: info
+logDestinations: [stdout]  # journald
+
+# Read-only, LAN only: the camera is the stream's only source, so nothing
+# publishes, and Prometheus reads the metrics from the cluster.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: ["192.168.1.0/24", "10.42.0.0/16", "127.0.0.1", "::1"]
+    permissions:
+      - action: read
+      - action: metrics
+
+api: false
+metrics: true
+metricsAddress: :9998
+pprof: false
+playback: false
+
+rtsp: true
+rtspTransports: [tcp, udp]
+rtspAddress: :8554
+webrtc: true
+webrtcAddress: :8889
+# Off: not needed, and each is a listener and memory on a 512 MB Pi.
+rtmp: false
+hls: false
+srt: false
+moq: false
+
+paths:
+  cam:
+    source: rpiCamera
+    # 1080p at 15 fps: the hardware encoder's comfortable rate on the Zero W
+    # (MediaMTX and its camera helper ~25% CPU, tried 2026-11-24). A snapshot
+    # is a frame of this, so this is also the snapshots' size.
+    rpiCameraWidth: 1920
+    rpiCameraHeight: 1080
+    rpiCameraFPS: 15
+    rpiCameraBitrate: 2000000
+    # A keyframe every 2 s: a reader (a snapshot) starts within 2 s.
+    rpiCameraIDRPeriod: 30
+    # Flip here if the octopus mount ends up upside down.
+    rpiCameraHFlip: false
+    rpiCameraVFlip: false
+    # The stream runs whether or not anyone reads it: a snapshot never waits
+    # for the camera to start.
+    sourceOnDemand: false

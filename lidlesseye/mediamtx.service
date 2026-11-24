@@ -1,0 +1,31 @@
+# lidlesseye's camera stream (mediamtx.yml), installed by install.sh.
+[Unit]
+Description=MediaMTX: lidlesseye's camera stream
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=mediamtx
+Group=mediamtx
+# The camera, the ISP and the hardware encoder.
+SupplementaryGroups=video
+# MediaMTX unpacks its camera helper (mtxrpicam) and libcamera's tuning files
+# into its working directory.
+StateDirectory=mediamtx
+WorkingDirectory=/var/lib/mediamtx
+ExecStart=/usr/local/lib/mediamtx/mediamtx /etc/mediamtx/mediamtx.yml
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
