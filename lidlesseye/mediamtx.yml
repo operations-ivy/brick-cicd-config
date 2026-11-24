@@ -1,0 +1,76 @@
+# lidlesseye's camera stream (MediaMTX, installed by install.sh).
+#
+# The Pi Zero W's camera (ov5647) through MediaMTX's own libcamera, encoded by
+# the Pi's hardware H.264 encoder: one stream, `cam`, read over the LAN as
+#   RTSP    rtsp://lidlesseye:8554/cam   (VLC, Home Assistant, the cluster's
+#                                         snapshot CronJob: brick-k8s-config's
+#                                         cameras/)
+#   WebRTC  http://lidlesseye:8889/cam   (a browser, low latency; Firefox
+#                                         needs OpenH264, which Debian's
+#                                         Firefox ESR turns off)
+#   HLS     http://lidlesseye:8888/cam   (any browser, ~2 s behind: its
+#                                         normal video player decodes it)
+# The Zero W only encodes: anything that decodes (snapshots, recording,
+# detection) runs on the cluster. Software-decoding 1080p on its one core
+# never kept up (tried 2026-11-24).
+
+logLevel: info
+logDestinations: [stdout]  # journald
+
+# Read-only, LAN only: the camera is the stream's only source, so nothing
+# publishes, and Prometheus reads the metrics from the cluster.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: ["192.168.1.0/24", "10.42.0.0/16", "127.0.0.1", "::1"]
+    permissions:
+      - action: read
+      - action: metrics
+
+api: false
+metrics: true
+metricsAddress: :9998
+pprof: false
+playback: false
+
+rtsp: true
+# TCP only: VLC tries UDP first and, when that fails, falls back to an RTSP
+# dialect MediaMTX doesn't take ("invalid SETUP path", tried 2026-11-24).
+# Nothing here needs UDP: the snapshots read over TCP.
+rtspTransports: [tcp]
+rtspAddress: :8554
+webrtc: true
+webrtcAddress: :8889
+# HLS repackages the same H.264 (no encoding): the browser view that needs no
+# WebRTC codec plugin.
+hls: true
+hlsAddress: :8888
+hlsVariant: lowLatency
+# Off: not needed, and each is a listener and memory on a 512 MB Pi.
+rtmp: false
+srt: false
+moq: false
+
+paths:
+  cam:
+    source: rpiCamera
+    # 1080p at 15 fps: the hardware encoder's comfortable rate on the Zero W
+    # (MediaMTX and its camera helper ~25% CPU, tried 2026-11-24). A snapshot
+    # is a frame of this, so this is also the snapshots' size.
+    rpiCameraWidth: 1920
+    rpiCameraHeight: 1080
+    rpiCameraFPS: 15
+    rpiCameraBitrate: 2000000
+    # Baseline: Firefox's WebRTC decodes H.264 with Cisco's OpenH264, which
+    # takes only the baseline profile ("codecs not supported by client" with
+    # the encoder's auto choice, 2026-11-24). Every other reader takes it too.
+    rpiCameraH264Profile: baseline
+    # A keyframe every 2 s: a reader (a snapshot) starts within 2 s.
+    rpiCameraIDRPeriod: 30
+    # Flip here if the octopus mount ends up upside down.
+    rpiCameraHFlip: false
+    rpiCameraVFlip: false
+    # The stream runs whether or not anyone reads it: a snapshot never waits
+    # for the camera to start.
+    sourceOnDemand: false
